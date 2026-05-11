@@ -1,0 +1,32 @@
+{
+  "name": "update_review_status",
+  "description": "Update a submitted review record status through the gateway review API without direct filesystem mutation.",
+  "version": "0.1.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "review_id": { "type": "string" },
+      "status": { "type": "string", "enum": ["queued", "processing", "processed", "failed"] },
+      "review_note_path": { "type": "string" },
+      "reason": { "type": "string" }
+    },
+    "required": ["review_id", "status"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "request_id": { "type": "string" },
+      "ok": { "type": "boolean" },
+      "review_id": { "type": "string" },
+      "status": { "type": "string" }
+    },
+    "required": ["request_id", "ok", "review_id", "status"],
+    "additionalProperties": false
+  },
+  "entrypoint": "libs.tools.cases.tool:update_review_status",
+  "env_vars": ["GATEWAY_HTTP_URL"],
+  "network_access": true,
+  "timeout_ms": 10000,
+  "max_memory_mb": 128
+}

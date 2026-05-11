@@ -1,0 +1,17 @@
+{
+  "id": "t_d43c4919",
+  "title": "repair child",
+  "body": null,
+  "assignee": "worker",
+  "status": "ready",
+  "priority": 0,
+  "tenant": "spike-case",
+  "workspace_kind": "scratch",
+  "workspace_path": null,
+  "created_by": "user",
+  "created_at": 1777678283,
+  "started_at": null,
+  "completed_at": null,
+  "result": null,
+  "skills": []
+}

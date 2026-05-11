@@ -1,0 +1,38 @@
+usage: hermes kanban create [-h] [--body BODY] [--assignee ASSIGNEE]
+                            [--parent PARENT] [--workspace WORKSPACE]
+                            [--tenant TENANT] [--priority PRIORITY] [--triage]
+                            [--idempotency-key IDEMPOTENCY_KEY]
+                            [--max-runtime MAX_RUNTIME]
+                            [--created-by CREATED_BY] [--skill SKILLS]
+                            [--json]
+                            title
+
+positional arguments:
+  title                 Task title
+
+options:
+  -h, --help            show this help message and exit
+  --body BODY           Optional opening post
+  --assignee ASSIGNEE   Profile name to assign
+  --parent PARENT       Parent task id (repeatable)
+  --workspace WORKSPACE
+                        scratch | worktree | dir:<path> (default: scratch)
+  --tenant TENANT       Tenant namespace
+  --priority PRIORITY   Priority tiebreaker
+  --triage              Park in triage — a specifier will flesh out the spec
+                        and promote to todo
+  --idempotency-key IDEMPOTENCY_KEY
+                        Dedup key. If a non-archived task with this key
+                        exists, its id is returned instead of creating a
+                        duplicate.
+  --max-runtime MAX_RUNTIME
+                        Per-task runtime cap. Accepts seconds (300) or
+                        durations (90s, 30m, 2h, 1d). When exceeded, the
+                        dispatcher SIGTERMs (then SIGKILLs) the worker and re-
+                        queues the task.
+  --created-by CREATED_BY
+                        Author name recorded on the task (default: user)
+  --skill SKILLS        Skill to force-load into the worker (repeatable).
+                        Appended to the built-in kanban-worker skill. Example:
+                        --skill translation --skill github-code-review
+  --json                Emit JSON output

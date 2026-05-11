@@ -1,0 +1,699 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, AsyncIterator
+
+import grpc
+import httpx
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from starlette.responses import FileResponse, JSONResponse, StreamingResponse
+
+from libs.common.config import GatewaySettings
+from libs.common.logging import configure_logging
+from libs.common.proto import agent_pb2, agent_pb2_grpc
+from libs.common.schemas import (
+    HttpInvokeToolIn,
+    HttpMessageIn,
+    HttpMessageOut,
+    HttpSearchKbIn,
+    dict_to_struct,
+    struct_to_dict,
+)
+
+from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
+
+
+class ReviewAssetUploadOut(BaseModel):
+    asset_id: str
+    asset_type: str
+    mime_type: str
+    size_bytes: int
+    created_at: str
+
+
+class ReviewSubmitIn(BaseModel):
+    review_id: str
+    subject_id: str
+    submitted_by: str
+    started_at: str
+    stopped_at: str
+    duration_ms: int
+    asset_ids: list[str] = []
+    events_asset_id: str | None = None
+    audio_asset_id: str | None = None
+    metadata: dict[str, Any] = {}
+
+
+class ReviewSubmitOut(BaseModel):
+    review_id: str
+    status: str
+    created_at: str
+
+
+class ReviewStatusUpdateIn(BaseModel):
+    status: str
+    review_note_path: str | None = None
+    reason: str | None = None
+
+
+class CaseFollowUpIn(BaseModel):
+    note: str
+    operator: str | None = None
+    force_retry: bool = True
+
+
+class SecretUpdateIn(BaseModel):
+    value: str
+
+
+def _read_secret_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.strip().startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def _write_secret_file(path: Path, values: dict[str, str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = "".join(f"{key}={value}\n" for key, value in sorted(values.items()))
+    path.write_text(content, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _secret_preview(value: str) -> str:
+    if len(value) <= 8:
+        return "****"
+    return f"{value[:4]}...{value[-4:]}"
+
+
+
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+
+
+def _safe_session_message(message: Any, index: int) -> dict[str, Any]:
+    if not isinstance(message, dict):
+        return {"index": index, "role": "unknown", "content_present": False, "content_bytes": 0}
+    content = message.get("content")
+    if isinstance(content, str):
+        content_bytes = len(content.encode("utf-8"))
+    elif content is None:
+        content_bytes = 0
+    else:
+        content_bytes = len(json.dumps(content, sort_keys=True).encode("utf-8"))
+    return {
+        "index": index,
+        "role": str(message.get("role") or "unknown")[:32],
+        "content_present": content is not None,
+        "content_bytes": content_bytes,
+    }
+
+
+def _safe_session_summary(session_payload: dict[str, Any], fallback_session_id: str) -> dict[str, Any]:
+    messages = session_payload.get("messages")
+    message_list = messages if isinstance(messages, list) else []
+    return {
+        "session_id": str(session_payload.get("session_id") or fallback_session_id),
+        "message_count": len(message_list),
+        "messages": [_safe_session_message(message, index) for index, message in enumerate(message_list)],
+    }
+
+
+def create_app() -> FastAPI:
+    settings = GatewaySettings()
+    configure_logging(service="gateway_http", level=settings.log_level)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        channel = grpc.aio.insecure_channel(settings.runtime_grpc_target)
+        app.state.grpc_channel = channel
+        app.state.runtime_stub = agent_pb2_grpc.AgentRuntimeStub(channel)
+        try:
+            yield
+        finally:
+            await channel.close()
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.settings = settings
+
+    # Middleware
+    app.add_middleware(BodySizeLimitMiddleware, max_body_bytes=settings.max_body_bytes)
+    app.add_middleware(RequestContextMiddleware)
+
+    allow_origins = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allow_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Routes
+    @app.get("/health")
+    async def health(request: Request) -> JSONResponse:
+        req_id = getattr(request.state, "request_id", "") or ""
+        stub: agent_pb2_grpc.AgentRuntimeStub = request.app.state.runtime_stub
+        settings_: GatewaySettings = request.app.state.settings
+
+        try:
+            resp = await stub.HealthCheck(
+                agent_pb2.HealthCheckRequest(request_id=req_id, metadata=dict_to_struct({})),
+                timeout=settings_.grpc_timeout_s,
+            )
+        except grpc.aio.AioRpcError as e:
+            raise HTTPException(status_code=503, detail=f"runtime_grpc error: {e.code().name}")
+
+        return JSONResponse(
+            {"status": "ok", "request_id": resp.request_id, "runtime_status": resp.status}
+        )
+
+    @app.post("/v1/messages", response_model=HttpMessageOut)
+    async def post_message(payload: HttpMessageIn, request: Request):
+        req_id = getattr(request.state, "request_id", "") or ""
+        stub: agent_pb2_grpc.AgentRuntimeStub = request.app.state.runtime_stub
+        settings_: GatewaySettings = request.app.state.settings
+
+        try:
+            resp = await stub.SubmitUserMessage(
+                agent_pb2.SubmitUserMessageRequest(
+                    request_id=req_id,
+                    user_id=payload.user_id,
+                    session_id=payload.session_id,
+                    message=payload.message,
+                    metadata=dict_to_struct(payload.metadata or {}),
+                ),
+                timeout=settings_.grpc_timeout_s,
+            )
+        except grpc.aio.AioRpcError as e:
+            raise HTTPException(status_code=502, detail=f"runtime_grpc error: {e.code().name}")
+
+        return HttpMessageOut(
+            request_id=resp.request_id,
+            status=resp.status,
+            runtime_response=struct_to_dict(resp.runtime_response) if resp.runtime_response else None,
+        )
+
+    @app.get("/v1/stream")
+    async def stream(request_id: str, request: Request):
+        stub: agent_pb2_grpc.AgentRuntimeStub = request.app.state.runtime_stub
+        settings_: GatewaySettings = request.app.state.settings
+
+        async def gen() -> AsyncIterator[bytes]:
+            try:
+                call = stub.StreamRuntimeEvents(
+                    agent_pb2.StreamRuntimeEventsRequest(
+                        request_id=request_id,
+                        metadata=dict_to_struct({}),
+                    ),
+                    timeout=max(settings_.grpc_timeout_s, 30.0),
+                )
+                async for ev in call:
+                    data = {
+                        "request_id": ev.request_id,
+                        "seq": ev.seq,
+                        "type": ev.type,
+                        "payload": struct_to_dict(ev.payload),
+                        "done": ev.done,
+                    }
+                    yield f"data: {json.dumps(data)}\n\n".encode("utf-8")
+                    if ev.done:
+                        break
+                    if await request.is_disconnected():
+                        break
+            except grpc.aio.AioRpcError as e:
+                data = {"type": "error", "payload": {"code": e.code().name}}
+                yield f"data: {json.dumps(data)}\n\n".encode("utf-8")
+
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={
+                "cache-control": "no-cache",
+                "connection": "keep-alive",
+                "x-accel-buffering": "no",
+            },
+        )
+
+    @app.post("/v1/kb/search")
+    async def search_kb(payload: HttpSearchKbIn, request: Request) -> JSONResponse:
+        req_id = getattr(request.state, "request_id", "") or ""
+        stub: agent_pb2_grpc.AgentRuntimeStub = request.app.state.runtime_stub
+        settings_: GatewaySettings = request.app.state.settings
+
+        try:
+            resp = await stub.SearchKnowledge(
+                agent_pb2.SearchKnowledgeRequest(
+                    request_id=req_id,
+                    query=payload.query,
+                    doc_types=list(payload.doc_types or []),
+                    k=int(payload.k),
+                    metadata=dict_to_struct(payload.metadata or {}),
+                ),
+                timeout=settings_.grpc_timeout_s,
+            )
+        except grpc.aio.AioRpcError as e:
+            raise HTTPException(status_code=502, detail=f"runtime_grpc error: {e.code().name}")
+
+        hits = []
+        for h in resp.hits:
+            hits.append(
+                {
+                    "score": h.score,
+                    "document": {
+                        "doc_id": h.document.doc_id,
+                        "doc_type": h.document.doc_type,
+                        "title": h.document.title,
+                        "content": h.document.content,
+                        "tags": list(h.document.tags),
+                        "source": h.document.source,
+                        "created_at": h.document.created_at.ToDatetime().isoformat(),
+                        "updated_at": h.document.updated_at.ToDatetime().isoformat(),
+                    },
+                }
+            )
+
+        return JSONResponse(
+            {
+                "request_id": resp.request_id,
+                "hits": hits,
+                "metadata": struct_to_dict(resp.metadata),
+            }
+        )
+
+    @app.post("/v1/tools/invoke")
+    async def invoke_tool(payload: HttpInvokeToolIn, request: Request) -> JSONResponse:
+        req_id = getattr(request.state, "request_id", "") or ""
+        stub: agent_pb2_grpc.AgentRuntimeStub = request.app.state.runtime_stub
+        settings_: GatewaySettings = request.app.state.settings
+
+        try:
+            resp = await stub.InvokeTool(
+                agent_pb2.InvokeToolRequest(
+                    request_id=req_id,
+                    tool_name=payload.tool_name,
+                    input=dict_to_struct(payload.input),
+                    metadata=dict_to_struct(payload.metadata or {}),
+                ),
+                timeout=max(settings_.grpc_timeout_s, 30.0),
+            )
+        except grpc.aio.AioRpcError as e:
+            raise HTTPException(status_code=502, detail=f"runtime_grpc error: {e.code().name}")
+
+        return JSONResponse(
+            {
+                "request_id": resp.request_id,
+                "tool_name": resp.tool_name,
+                "success": resp.success,
+                "exit_code": resp.exit_code,
+                "timed_out": resp.timed_out,
+                "duration_ms": resp.duration_ms,
+                "output": struct_to_dict(resp.output),
+                "stdout": resp.stdout,
+                "stderr": resp.stderr,
+                "error_message": resp.error_message,
+                "metadata": struct_to_dict(resp.metadata),
+            }
+        )
+
+    # Review intake storage
+    reviews_dir = Path(settings.reviews_data_dir)
+    assets_dir = reviews_dir / "assets"
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    secret_path = Path(settings.hub_config_secrets_path)
+    allowed_secret_keys = {"ELEVENLABS_API_KEY"}
+
+    def _secret_status(key: str, values: dict[str, str]) -> dict[str, Any]:
+        value = values.get(key) or ""
+        return {
+            "configured": bool(value),
+            "preview": _secret_preview(value) if value else "",
+        }
+
+    @app.get("/v1/admin/config")
+    async def get_admin_config() -> JSONResponse:
+        values = _read_secret_file(secret_path)
+        return JSONResponse({"secrets": {key: _secret_status(key, values) for key in sorted(allowed_secret_keys)}})
+
+    @app.put("/v1/admin/config/secrets/{key}")
+    async def put_admin_secret(key: str, payload: SecretUpdateIn) -> JSONResponse:
+        if key not in allowed_secret_keys:
+            raise HTTPException(status_code=404, detail="config key is not allowlisted")
+        raw_value = payload.value
+        if "\n" in raw_value or "\r" in raw_value:
+            raise HTTPException(status_code=422, detail="secret value must be single-line")
+        value = raw_value.strip()
+        if not value:
+            raise HTTPException(status_code=422, detail="secret value must not be empty")
+        values = _read_secret_file(secret_path)
+        values[key] = value
+        _write_secret_file(secret_path, values)
+        return JSONResponse({"key": key, **_secret_status(key, values)})
+
+    @app.delete("/v1/admin/config/secrets/{key}")
+    async def delete_admin_secret(key: str) -> JSONResponse:
+        if key not in allowed_secret_keys:
+            raise HTTPException(status_code=404, detail="config key is not allowlisted")
+        values = _read_secret_file(secret_path)
+        values.pop(key, None)
+        _write_secret_file(secret_path, values)
+        return JSONResponse({"key": key, "configured": False, "preview": ""})
+
+    @app.post("/v1/admin/config/validate/stt")
+    async def validate_stt_config() -> JSONResponse:
+        values = _read_secret_file(secret_path)
+        configured = bool(values.get("ELEVENLABS_API_KEY"))
+        return JSONResponse({"ok": configured, "missing": [] if configured else ["ELEVENLABS_API_KEY"]})
+
+    def _session_roots() -> list[Path]:
+        raw = settings.hermes_session_roots.strip()
+        if not raw:
+            return []
+        return [Path(part.strip()) for part in raw.split(",") if part.strip()]
+
+    def _find_session_export(session_id: str) -> Path | None:
+        if not _SESSION_ID_RE.fullmatch(session_id):
+            raise HTTPException(status_code=422, detail="invalid session id")
+        for root in _session_roots():
+            if not root.exists():
+                continue
+            exact = root / f"session_{session_id}.json"
+            if exact.exists():
+                return exact
+            for candidate in root.rglob(f"session_{session_id}.json"):
+                if candidate.is_file():
+                    return candidate
+            for candidate in root.rglob("session_*.json"):
+                if session_id in candidate.stem and candidate.is_file():
+                    return candidate
+        return None
+
+    @app.post("/v1/reviews/assets", response_model=ReviewAssetUploadOut)
+    async def upload_review_asset(
+        file: UploadFile = File(...),
+        asset_type: str = Form(...),
+    ) -> ReviewAssetUploadOut:
+        asset_id = str(uuid.uuid4())
+        data = await file.read()
+        (assets_dir / asset_id).write_bytes(data)
+        meta = ReviewAssetUploadOut(
+            asset_id=asset_id,
+            asset_type=asset_type,
+            mime_type=file.content_type or "application/octet-stream",
+            size_bytes=len(data),
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        (assets_dir / f"{asset_id}.meta.json").write_text(meta.model_dump_json())
+        return meta
+
+    @app.post("/v1/reviews", response_model=ReviewSubmitOut)
+    async def submit_review(payload: ReviewSubmitIn) -> ReviewSubmitOut:
+        requested_asset_ids = list(payload.asset_ids)
+        for typed_id in (payload.events_asset_id, payload.audio_asset_id):
+            if typed_id and typed_id not in requested_asset_ids:
+                requested_asset_ids.append(typed_id)
+        asset_metas = []
+        for aid in requested_asset_ids:
+            meta_path = assets_dir / f"{aid}.meta.json"
+            if not meta_path.exists():
+                raise HTTPException(status_code=422, detail=f"asset {aid} not found")
+            asset_metas.append(json.loads(meta_path.read_text()))
+        meta_by_id = {str(meta.get("asset_id") or "").strip(): meta for meta in asset_metas}
+        typed_assets = {str(meta.get("asset_type") or "").strip().lower(): meta for meta in asset_metas}
+        events_asset_id = payload.events_asset_id or typed_assets.get("events", {}).get("asset_id")
+        audio_asset_id = payload.audio_asset_id or typed_assets.get("audio", {}).get("asset_id")
+        if not events_asset_id or not audio_asset_id:
+            raise HTTPException(status_code=422, detail="review submission requires events_asset_id and audio_asset_id")
+        expected_typed_assets = {"events_asset_id": (events_asset_id, "events"), "audio_asset_id": (audio_asset_id, "audio")}
+        for field, (asset_id, expected_type) in expected_typed_assets.items():
+            actual_type = str((meta_by_id.get(str(asset_id)) or {}).get("asset_type") or "").strip().lower()
+            if actual_type != expected_type:
+                raise HTTPException(status_code=422, detail=f"{field} must reference a {expected_type} asset")
+        created_at = datetime.now(timezone.utc).isoformat()
+        record = {
+            **payload.model_dump(),
+            "asset_ids": requested_asset_ids,
+            "events_asset_id": events_asset_id,
+            "audio_asset_id": audio_asset_id,
+            "assets": asset_metas,
+            "status": "queued",
+            "created_at": created_at,
+        }
+        (reviews_dir / f"{payload.review_id}.json").write_text(json.dumps(record))
+
+        # Enqueue directly — Frank now handles all queue work through the normal full loop
+        async with httpx.AsyncClient(timeout=10.0) as q:
+            enqueue_resp = await q.post(
+                f"{settings.queue_http_url}/queues/workspace/enqueue",
+                json={
+                    "event_type": "review_submitted",
+                    "source_type": "review_sdk",
+                    "sender": payload.submitted_by,
+                    "message_body": payload.review_id,
+                    "payload": record,
+                },
+            )
+            enqueue_resp.raise_for_status()
+            msg_id = enqueue_resp.json().get("id")
+
+        # Publish wakeup event to eventbus so Frank picks it up immediately
+        async with httpx.AsyncClient(timeout=5.0) as eb:
+            try:
+                await eb.post(
+                    f"{settings.eventbus_url}/publish",
+                    json={"topic": "queue.job.enqueued", "source": "gateway_http", "payload": {"job_id": msg_id}},
+                )
+            except Exception:
+                pass
+
+        # Fire-and-forget Matrix notification (optional, no impact on queue path)
+        if settings.matrix_homeserver_url and settings.matrix_feedback_room_id:
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as mx:
+                    await mx.post(
+                        f"{settings.matrix_homeserver_url}/_matrix/client/v3/rooms"
+                        f"/{settings.matrix_feedback_room_id}/send/m.room.message",
+                        params={"user_id": settings.matrix_bot_user_id},
+                        headers={"Authorization": f"Bearer {settings.matrix_bot_access_token}"},
+                        json={"msgtype": "m.text", "body": f"review_submitted: {payload.review_id}"},
+                    )
+            except Exception:
+                pass
+
+        return ReviewSubmitOut(
+            review_id=payload.review_id, status="queued", created_at=created_at
+        )
+
+    @app.get("/v1/reviews/assets/{asset_id}")
+    async def get_review_asset(asset_id: str):
+        asset_path = assets_dir / asset_id
+        meta_path = assets_dir / f"{asset_id}.meta.json"
+        if not asset_path.exists() or not meta_path.exists():
+            raise HTTPException(status_code=404, detail="asset not found")
+        meta = json.loads(meta_path.read_text())
+        from starlette.responses import Response
+        ext_map = {
+            "application/json": "json",
+            "audio/webm": "webm",
+            "image/webp": "webp",
+        }
+        mime = meta.get("mime_type", "application/octet-stream")
+        ext = ext_map.get(mime, "bin")
+        filename = f"{meta.get('asset_type', 'asset')}.{ext}"
+        return Response(
+            content=asset_path.read_bytes(),
+            media_type=mime,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.patch("/v1/reviews/{review_id}/status")
+    async def update_review_status(review_id: str, payload: ReviewStatusUpdateIn) -> JSONResponse:
+        allowed = {"queued", "processing", "processed", "failed"}
+        status = payload.status.strip().lower()
+        if status not in allowed:
+            raise HTTPException(status_code=422, detail="invalid review status")
+        path = reviews_dir / f"{review_id}.json"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="review not found")
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record["status"] = status
+        record["status_updated_at"] = datetime.now(timezone.utc).isoformat()
+        if payload.review_note_path is not None:
+            record["review_note_path"] = payload.review_note_path
+        if payload.reason is not None:
+            record["status_reason"] = payload.reason
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        tmp_path.write_text(json.dumps(record), encoding="utf-8")
+        tmp_path.replace(path)
+        return JSONResponse({"review_id": review_id, "status": status})
+
+    @app.get("/v1/reviews/{review_id}")
+    async def get_review(review_id: str) -> JSONResponse:
+        path = reviews_dir / f"{review_id}.json"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="review not found")
+        return JSONResponse(json.loads(path.read_text()))
+
+    @app.get("/v1/hermes/sessions/{session_id}")
+    async def get_hermes_session(session_id: str) -> JSONResponse:
+        path = _find_session_export(session_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        session_payload = json.loads(path.read_text(encoding="utf-8"))
+        return JSONResponse(_safe_session_summary(session_payload, session_id))
+
+    @app.get("/v1/hermes/sessions/{session_id}/messages")
+    async def get_hermes_session_messages(session_id: str) -> JSONResponse:
+        path = _find_session_export(session_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        session_payload = json.loads(path.read_text(encoding="utf-8"))
+        summary = _safe_session_summary(session_payload, session_id)
+        return JSONResponse({"session_id": summary["session_id"], "messages": summary["messages"]})
+
+    static_dir = Path(__file__).parent / "static"
+    static_dir.mkdir(exist_ok=True)
+
+    @app.get("/dashboard")
+    async def dashboard() -> FileResponse:
+        return FileResponse(static_dir / "dashboard.html")
+
+    processes_dir = Path("base/ops/processes")
+
+    @app.get("/v1/processes/{process_name}")
+    async def get_process_spec(process_name: str) -> JSONResponse:
+        path = processes_dir / f"{process_name}.md"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="process spec not found")
+        return JSONResponse({"name": process_name, "content": path.read_text()})
+
+    @app.put("/_matrix/app/v1/transactions/{txn_id}")
+    async def matrix_appservice_noop(txn_id: str) -> JSONResponse:
+        # gateway-bot only sends; this endpoint satisfies Synapse's push requirement
+        return JSONResponse({})
+
+    @app.post("/v1/cases/{case_id}/rerun")
+    async def rerun_case(case_id: str, force: bool = False) -> JSONResponse:
+        """Re-enqueue the original message for a completed, failed, or force-retried case."""
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            return JSONResponse(await _reenqueue_case(client, case_id=case_id, force=force))
+
+    @app.post("/v1/cases/{case_id}/follow-up")
+    async def follow_up_case(case_id: str, payload: CaseFollowUpIn) -> JSONResponse:
+        """Attach operator input to a blocked case and optionally force-retry it."""
+        note = payload.note.strip()
+        if not note:
+            raise HTTPException(status_code=422, detail="follow-up note must not be empty")
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            case_resp = await client.get(f"{settings.cases_http_url}/cases/{case_id}")
+            if case_resp.status_code == 404:
+                raise HTTPException(status_code=404, detail="case not found")
+            case_resp.raise_for_status()
+            case_data = case_resp.json()
+            case = case_data.get("case", case_data)
+            status = str(case.get("status") or "")
+            if status != "BLOCKED":
+                raise HTTPException(status_code=400, detail=f"follow-up is only available for BLOCKED cases, got {status}")
+
+            submitted_at = datetime.now(timezone.utc).isoformat()
+            follow_up = {
+                "case_id": case_id,
+                "note": note,
+                "operator": payload.operator or "ZenithOS",
+                "submitted_at": submitted_at,
+            }
+            log_resp = await client.post(
+                f"{settings.cases_http_url}/cases/{case_id}/logs",
+                json={
+                    "type": "operator_follow_up",
+                    "message": f"Operator follow-up submitted: {note}",
+                    "metadata": follow_up,
+                },
+            )
+            log_resp.raise_for_status()
+
+            result: dict[str, Any] = {"logged": True, "case_id": case_id, "follow_up": follow_up}
+            if payload.force_retry:
+                result.update(await _reenqueue_case(client, case_id=case_id, force=True, follow_up=follow_up, case=case))
+            return JSONResponse(result)
+
+    async def _reenqueue_case(
+        client: httpx.AsyncClient,
+        *,
+        case_id: str,
+        force: bool,
+        follow_up: dict[str, Any] | None = None,
+        case: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if case is None:
+            case_resp = await client.get(f"{settings.cases_http_url}/cases/{case_id}")
+            if case_resp.status_code == 404:
+                raise HTTPException(status_code=404, detail="case not found")
+            case_resp.raise_for_status()
+            case_data = case_resp.json()
+            case = case_data.get("case", case_data)
+
+        status = case.get("status", "")
+        if not force and status not in ("COMPLETE", "COMPLETED", "FAILED"):
+            raise HTTPException(status_code=400, detail=f"cannot rerun case with status {status}")
+
+        orig_msg_id = case.get("queue_message_id")
+        if not orig_msg_id:
+            raise HTTPException(status_code=400, detail="case has no original queue message")
+
+        msg_resp = await client.get(f"{settings.queue_http_url}/messages/{orig_msg_id}")
+        if msg_resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="original queue message not found")
+        msg_resp.raise_for_status()
+        orig = msg_resp.json()
+
+        queue_payload = dict(orig.get("payload", {}) or {})
+        if follow_up is not None:
+            queue_payload.setdefault("operator_follow_ups", []).append(follow_up)
+            queue_payload["latest_operator_follow_up"] = follow_up
+
+        enq_resp = await client.post(
+            f"{settings.queue_http_url}/queues/workspace/enqueue",
+            json={
+                "event_type": orig.get("event_type"),
+                "source_type": orig.get("source_type"),
+                "sender": orig.get("sender"),
+                "message_body": orig.get("message_body"),
+                "payload": queue_payload,
+            },
+        )
+        enq_resp.raise_for_status()
+        new_msg = enq_resp.json()
+
+        try:
+            await client.post(
+                f"{settings.eventbus_url}/publish",
+                json={"topic": "queue.job.enqueued", "source": "gateway_http/follow_up" if follow_up else "gateway_http/rerun",
+                      "payload": {"case_id": case_id, "new_message_id": new_msg.get("id")}},
+                timeout=3.0,
+            )
+        except Exception:
+            pass
+
+        return {"queued": True, "new_message_id": new_msg.get("id")}
+
+    return app
+
+
+app = create_app()

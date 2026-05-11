@@ -1,0 +1,32 @@
+project_name  = "agent-platform"
+environment   = "dev"
+aws_region    = "us-west-2"
+
+# ECR image URI (one image, multiple ECS services with different commands)
+container_image = "123456789012.dkr.ecr.us-west-2.amazonaws.com/agent-platform:latest"
+
+# Vector store (recommended: Qdrant Cloud)
+qdrant_url = "https://xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.us-east4-0.gcp.cloud.qdrant.io"
+
+# Optional: store Qdrant API key in Secrets Manager and provide the secret ARN here
+# qdrant_api_key_secret_arn = "arn:aws:secretsmanager:us-west-2:123456789012:secret:agent-platform/qdrant_api_key-abc123"
+
+# Public edge
+# Simplest edge default: CloudFront terminates TLS; ALB stays HTTP-only.
+enable_https = false
+# If you want ALB HTTPS, set enable_https=true and provide an ACM cert in this region.
+# acm_cert_arn = "arn:aws:acm:us-west-2:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Default: CloudFront + WAF + ALB → gateway-http
+enable_cloudfront = true
+allow_cloudfront_only = true
+# If you want a custom domain on CloudFront, provide an ACM cert in us-east-1:
+# cloudfront_acm_cert_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# Optional: Route53 alias record for your domain
+# domain_name     = "api.example.com"
+# route53_zone_id = "Z1234567890ABC"
+
+# WebSocket/SSE stability: must be >= your heartbeat interval
+alb_idle_timeout_seconds = 3600
+

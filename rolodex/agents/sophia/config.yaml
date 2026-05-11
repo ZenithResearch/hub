@@ -1,0 +1,35 @@
+agent:
+  name: Sophia
+  hermes_home: /hub/.hermes/profiles/sophia
+  type: worker
+  version: "1.0.0"
+  description: >
+    Human-facing hub agent. Handles inbound Matrix communications and executes
+    work dispatched by Frank.
+
+harness:
+  image: nousresearch/hermes:latest
+  command: gateway run
+  environment:
+    HERMES_HOME: /hub/.hermes/profiles/sophia
+    MESSAGING_CWD: /hub
+    # Agent-specific secrets (OPENROUTER_API_KEY, MATRIX_AS_TOKEN, MATRIX_HS_TOKEN)
+    # live in .hermes/profiles/sophia/.env — written by `hermes setup`, gitignored.
+
+access:
+  receive_messages: true
+  send_messages: true
+  read_vault: true
+  write_vault: false
+  admin: false
+
+# Terminal working directory for both gateway and CLI usage.
+# MESSAGING_CWD env var covers gateway mode; terminal.cwd covers CLI (docker exec).
+terminal:
+  backend: local
+  cwd: /hub
+
+resources:
+  memory_limit: 1Gi
+  cpu_limit: 1000m
+  timeout_seconds: 300

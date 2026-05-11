@@ -1,0 +1,33 @@
+# Copy to terraform.tfvars and fill in values
+# Never commit terraform.tfvars — it contains secrets
+
+project_name = "hub"
+environment  = "prod"
+aws_region   = "us-east-1"
+
+# Point at an existing VPC + subnet, or leave null to create minimal new ones
+# vpc_id    = "vpc-xxxxxxxxxxxxxxxxx"
+# subnet_id = "subnet-xxxxxxxxxxxxxxxxx"
+
+instance_type = "t3.small"
+ebs_size_gb   = 30
+
+# Optional: set to your EC2 key pair name for SSH access
+# key_name = "my-keypair"
+
+matrix_server_name = "matrix.yourdomain.com"
+
+# Generate with: openssl rand -hex 32
+matrix_db_password         = "CHANGE_ME"
+matrix_registration_secret = "CHANGE_ME"
+matrix_macaroon_secret     = "CHANGE_ME"
+matrix_form_secret         = "CHANGE_ME"
+
+matrix_federation_enabled  = true
+matrix_enable_registration = false
+
+# Restrict to specific CIDRs in production (or put behind ALB)
+allowed_cidr_blocks = ["0.0.0.0/0"]
+
+# Uncomment to allow SSH from your IP
+# ssh_cidr_blocks = ["YOUR.IP.ADDRESS.HERE/32"]

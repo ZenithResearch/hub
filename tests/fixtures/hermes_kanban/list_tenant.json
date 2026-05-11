@@ -1,0 +1,36 @@
+[
+  {
+    "id": "t_6370d73c",
+    "title": "root",
+    "body": null,
+    "assignee": "worker",
+    "status": "ready",
+    "priority": 5,
+    "tenant": "spike-case",
+    "workspace_kind": "scratch",
+    "workspace_path": null,
+    "created_by": "user",
+    "created_at": 1777678282,
+    "started_at": null,
+    "completed_at": null,
+    "result": null,
+    "skills": []
+  },
+  {
+    "id": "t_7b60d95e",
+    "title": "child",
+    "body": null,
+    "assignee": "worker",
+    "status": "todo",
+    "priority": 0,
+    "tenant": "spike-case",
+    "workspace_kind": "scratch",
+    "workspace_path": null,
+    "created_by": "user",
+    "created_at": 1777678282,
+    "started_at": null,
+    "completed_at": null,
+    "result": null,
+    "skills": []
+  }
+]

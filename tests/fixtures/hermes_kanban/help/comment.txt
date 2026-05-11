@@ -1,0 +1,9 @@
+usage: hermes kanban comment [-h] [--author AUTHOR] task_id text [text ...]
+
+positional arguments:
+  task_id
+  text             Comment body
+
+options:
+  -h, --help       show this help message and exit
+  --author AUTHOR  Author name (default: $HERMES_PROFILE or 'user')

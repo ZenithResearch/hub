@@ -1,0 +1,173 @@
+syntax = "proto3";
+
+package queue.v1;
+
+import "google/protobuf/struct.proto";
+
+// ──────────────────────────────────────────────
+// Core types
+// ──────────────────────────────────────────────
+
+// A service request — the fundamental unit of the message queue.
+// Every inbound communication (email, call, form, webhook) is a service request.
+// Field numbers are stable; do not reuse a retired number.
+message Message {
+  string id = 1;               // msg_{uuid4}
+  string queue_name = 2;       // default: "workspace"
+  string event_type = 3;       // semantic label; default: "service_request"
+  string source_type = 16;     // channel: email | matrix | api | webhook | manual | internal
+  string sender = 17;          // sender identifier; format depends on source_type
+  string message_body = 18;    // text content of the service request
+  google.protobuf.Struct payload = 4;   // attachments array + producer extras
+  string status = 5;           // pending | processing | done | failed | dlq
+  int32 priority = 6;          // higher value = processed first
+  string created_at = 7;       // ISO-8601
+  string claimed_at = 8;       // ISO-8601; empty if not yet claimed
+  string done_at = 9;          // ISO-8601; empty if not yet finished
+  string worker_id = 10;
+  int32 retry_count = 11;
+  int32 max_retries = 12;
+  int32 claim_timeout_s = 13;  // seconds before a claimed message is re-queued by the reaper
+  string error = 14;
+  google.protobuf.Struct metadata = 15; // arbitrary caller context
+}
+
+message QueueInfo {
+  string queue_name = 1;
+  int64 pending = 2;
+  int64 processing = 3;
+  int64 done = 4;
+  int64 failed = 5;
+  int64 dlq = 6;
+}
+
+// ──────────────────────────────────────────────
+// RPC messages
+// ──────────────────────────────────────────────
+
+message EnqueueRequest {
+  string request_id = 1;
+  string queue_name = 2;       // default: "workspace"
+  string event_type = 3;       // default: "service_request"
+  string source_type = 9;
+  string sender = 10;
+  string message_body = 11;
+  google.protobuf.Struct payload = 4;
+  int32 priority = 5;          // default 0
+  int32 max_retries = 6;       // default 3; 0 = use server default
+  int32 claim_timeout_s = 7;   // default 300; 0 = use server default
+  google.protobuf.Struct metadata = 8;
+}
+
+message EnqueueResponse {
+  string request_id = 1;
+  string message_id = 2;
+}
+
+message DequeueRequest {
+  string request_id = 1;
+  string queue_name = 2;
+  string worker_id = 3;
+}
+
+message DequeueResponse {
+  string request_id = 1;
+  bool found = 2;
+  Message message = 3;
+}
+
+message AckRequest {
+  string request_id = 1;
+  string message_id = 2;
+  google.protobuf.Struct result = 3;
+}
+
+message AckResponse {
+  string request_id = 1;
+  bool ok = 2;
+}
+
+message NackRequest {
+  string request_id = 1;
+  string message_id = 2;
+  string reason = 3;
+  bool force_dlq = 4;  // skip remaining retries; send directly to DLQ
+}
+
+message NackResponse {
+  string request_id = 1;
+  bool ok = 2;
+  string new_status = 3;  // "pending" (retry) | "dlq"
+}
+
+message GetMessageRequest {
+  string request_id = 1;
+  string message_id = 2;
+}
+
+message GetMessageResponse {
+  string request_id = 1;
+  Message message = 2;
+}
+
+message ListQueuesRequest {
+  string request_id = 1;
+}
+
+message ListQueuesResponse {
+  string request_id = 1;
+  repeated QueueInfo queues = 2;
+}
+
+message PeekRequest {
+  string request_id = 1;
+  string queue_name = 2;
+  int32 n = 3;        // default 10
+  string status = 4;  // filter by status; empty = pending
+}
+
+message PeekResponse {
+  string request_id = 1;
+  repeated Message messages = 2;
+}
+
+message QueueHealthCheckRequest {
+  string request_id = 1;
+}
+
+message QueueHealthCheckResponse {
+  string request_id = 1;
+  string status = 2;       // "ok"
+  int64 total_queues = 3;
+  int64 total_pending = 4;
+}
+
+// ──────────────────────────────────────────────
+// Service
+// ──────────────────────────────────────────────
+
+service QueueService {
+  // Enqueue a new service request onto a named queue.
+  rpc Enqueue(EnqueueRequest) returns (EnqueueResponse);
+
+  // Claim the next pending service request from a named queue.
+  // Returns found=false if the queue is empty.
+  rpc Dequeue(DequeueRequest) returns (DequeueResponse);
+
+  // Acknowledge a claimed service request as successfully handled.
+  rpc Ack(AckRequest) returns (AckResponse);
+
+  // Negative-acknowledge a claimed service request. Retries or sends to DLQ.
+  rpc Nack(NackRequest) returns (NackResponse);
+
+  // Fetch a specific service request by ID.
+  rpc GetMessage(GetMessageRequest) returns (GetMessageResponse);
+
+  // List all queues with depth counts.
+  rpc ListQueues(ListQueuesRequest) returns (ListQueuesResponse);
+
+  // Peek at the top N service requests in a queue without claiming them.
+  rpc Peek(PeekRequest) returns (PeekResponse);
+
+  rpc HealthCheck(QueueHealthCheckRequest) returns (QueueHealthCheckResponse);
+}

@@ -1,0 +1,15 @@
+usage: hermes kanban complete [-h] [--result RESULT] [--summary SUMMARY]
+                              [--metadata METADATA]
+                              task_ids [task_ids ...]
+
+positional arguments:
+  task_ids             One or more task ids (only --result applies to all of
+                       them)
+
+options:
+  -h, --help           show this help message and exit
+  --result RESULT      Result summary
+  --summary SUMMARY    Structured handoff summary for downstream tasks. Falls
+                       back to --result if omitted.
+  --metadata METADATA  JSON dict of structured facts (e.g. '{"changed_files":
+                       [...], "tests_run": 12}'). Stored on the closing run.

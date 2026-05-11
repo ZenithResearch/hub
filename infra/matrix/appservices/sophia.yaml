@@ -1,0 +1,39 @@
+# Sophia — Hub Agent Application Service Registration
+#
+# This file is read by Synapse at startup.
+# Mount it into the Synapse container at /config/appservices/sophia.yaml
+# and reference it from homeserver.yaml via app_service_config_files.
+#
+# Tokens are sourced from .env at container build time via envsubst.
+# Never commit literal token values here — use variable substitution.
+
+id: sophia-hub-agent
+
+# Where Synapse pushes transaction webhooks.
+# Must be reachable from the Synapse container.
+url: "${SOPHIA_AS_URL}"
+
+# Token the app service sends to Synapse (Authorization: Bearer <as_token>)
+as_token: "${SOPHIA_AS_TOKEN}"
+
+# Token Synapse sends to the app service (Authorization: Bearer <hs_token>)
+hs_token: "${SOPHIA_HS_TOKEN}"
+
+# The Matrix localpart for Sophia's bot account.
+# Synapse will ensure @sophia:<server_name> exists and is owned by this AS.
+sender_localpart: sophia
+
+# Not rate-limited — Sophia is a trusted internal service.
+rate_limited: false
+
+namespaces:
+  users:
+    # Sophia exclusively owns @sophia:<any server>.
+    # exclusive: true means no other client can log in as this user.
+    - exclusive: true
+      regex: "@sophia:.*"
+
+  # No room or alias namespaces — Sophia joins rooms on invitation
+  # rather than owning a namespace of rooms.
+  rooms: []
+  aliases: []

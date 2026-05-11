@@ -1,0 +1,11 @@
+[
+  {
+    "name": "worker",
+    "on_disk": false,
+    "counts": {
+      "blocked": 1,
+      "done": 1,
+      "running": 2
+    }
+  }
+]

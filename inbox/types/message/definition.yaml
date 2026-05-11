@@ -1,0 +1,7 @@
+name: service_request
+description: Base service request type — free-form inbound message; fallback for any untyped or unrecognized event
+version: "1.0.0"
+schema: schema.json
+template: template.md
+skill: null
+created: 2026-03-27

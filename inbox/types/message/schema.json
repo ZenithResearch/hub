@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "message",
+  "description": "Payload schema for the default message event type. Standard message fields (message_body, sender, source_type, attachments) are on the message itself — this schema covers type-specific payload fields.",
+  "type": "object",
+  "properties": {
+    "subject": {
+      "type": "string",
+      "description": "Optional subject line"
+    },
+    "thread_id": {
+      "type": "string",
+      "description": "Optional thread identifier for grouping related messages"
+    }
+  },
+  "additionalProperties": true
+}

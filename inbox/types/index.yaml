@@ -1,0 +1,9 @@
+# inbox/types/index.yaml
+# Registry of event types for this hub.
+# One entry per type. Name must match the folder name.
+# skill: relative path from hub root to the associated skill, or null (Frank handles directly).
+
+service_request:
+  path: types/message/
+  description: Base service request — free-form inbound message; fallback for any untyped or unrecognized event
+  skill: null

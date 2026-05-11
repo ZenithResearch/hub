@@ -1,0 +1,415 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    expose:
+      - "6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - agentnet
+
+  tool-sandbox:
+    build: .
+    command: ["python", "-m", "services.tool_sandbox.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TOOL_SANDBOX_GRPC_BIND: ${TOOL_SANDBOX_GRPC_BIND:-0.0.0.0:50052}
+      TOOL_DIR: ${TOOL_DIR:-/app/libs/tools}
+      TOOL_DEFAULT_TIMEOUT_MS: ${TOOL_DEFAULT_TIMEOUT_MS:-5000}
+      TOOL_DEFAULT_MAX_MEMORY_MB: ${TOOL_DEFAULT_MAX_MEMORY_MB:-128}
+      ALLOW_TOOLS_WITH_NETWORK: ${ALLOW_TOOLS_WITH_NETWORK:-true}
+      HUB_CONFIG_SECRETS_PATH: /hub/.hermes/config-secrets.env
+      GATEWAY_HTTP_URL: ${GATEWAY_HTTP_URL:-http://gateway-http:8080}
+      STT_HTTP_URL: http://stt-http:8765
+    expose:
+      - "50052"
+    volumes:
+      - ./.hermes:/hub/.hermes:ro
+    depends_on:
+      - stt-http
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  stt-http:
+    build:
+      context: .
+      dockerfile: docker/stt_http/Dockerfile
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      STT_ALLOWED_AUDIO_ROOTS: /data/reviews:/hub/.hermes/frank_execution
+      STT_WHISPER_MODEL: ${STT_WHISPER_MODEL:-tiny}
+    expose:
+      - "8765"
+    volumes:
+      - reviews_data:/data/reviews:ro
+      - ./.hermes/frank_execution:/hub/.hermes/frank_execution:ro
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  runtime-grpc:
+    build: .
+    command: ["python", "-m", "services.runtime_grpc.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RUNTIME_GRPC_BIND: ${RUNTIME_GRPC_BIND:-0.0.0.0:50051}
+      TOOL_SANDBOX_GRPC_TARGET: ${TOOL_SANDBOX_GRPC_TARGET:-tool-sandbox:50052}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      TOOL_DIR: ${TOOL_DIR:-/app/libs/tools}
+      TOOL_DEFAULT_TIMEOUT_MS: ${TOOL_DEFAULT_TIMEOUT_MS:-5000}
+      TOOL_DEFAULT_MAX_MEMORY_MB: ${TOOL_DEFAULT_MAX_MEMORY_MB:-128}
+      KB_VECTOR_DIM: ${KB_VECTOR_DIM:-256}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-kb_documents}
+    expose:
+      - "50051"
+    depends_on:
+      - qdrant
+      - tool-sandbox
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  process-indexer:
+    build: .
+    command: ["python", "-m", "services.process_indexer.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      QDRANT_URL: http://qdrant:6333
+      PROCESS_DIR: /hub/base/ops/processes
+    volumes:
+      - .:/hub:ro
+    depends_on:
+      - qdrant
+    networks:
+      - agentnet
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  kb-indexer:
+    build: .
+    command: ["python", "-m", "services.kb_indexer.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      KB_SEED_DIR: /app/kb_seed
+      KB_VECTOR_DIM: ${KB_VECTOR_DIM:-256}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-kb_documents}
+    depends_on:
+      - qdrant
+    networks:
+      - agentnet
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  gateway-http:
+    build: .
+    command:
+      [
+        "uvicorn",
+        "services.gateway_http.app:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "${HTTP_PORT:-8080}",
+        "--timeout-keep-alive",
+        "5"
+      ]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_PORT: ${HTTP_PORT:-8080}
+      RUNTIME_GRPC_TARGET: ${RUNTIME_GRPC_TARGET:-runtime-grpc:50051}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:3000}
+      MAX_BODY_BYTES: ${MAX_BODY_BYTES:-262144}
+      GATEWAY_GRPC_TIMEOUT_S: ${GATEWAY_GRPC_TIMEOUT_S:-5.0}
+      QUEUE_HTTP_URL: http://queue:8081
+      EVENTBUS_URL: http://eventbus:8082
+      REVIEWS_DATA_DIR: /data/reviews
+      HERMES_HOME: /hub/.hermes
+      HERMES_SESSION_ROOTS: /hub/.hermes
+      HUB_CONFIG_SECRETS_PATH: /hub/.hermes/config-secrets.env
+      GATEWAY_ADMIN_TOKEN: ${GATEWAY_ADMIN_TOKEN:-}
+      MATRIX_HOMESERVER_URL: http://matrix-synapse:8008
+      MATRIX_GATEWAY_BOT_USER_ID: ${MATRIX_GATEWAY_BOT_USER_ID:-@gateway-bot:localhost}
+      GATEWAY_BOT_AS_TOKEN: ${GATEWAY_BOT_AS_TOKEN:-}
+      MATRIX_FEEDBACK_ROOM_ID: ${MATRIX_FEEDBACK_ROOM_ID:-}
+    ports:
+      - "${HTTP_BIND_HOST:-127.0.0.1}:${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
+    volumes:
+      - reviews_data:/data
+      - ./.hermes:/hub/.hermes
+    depends_on:
+      - runtime-grpc
+      - queue
+      - eventbus
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  queue:
+    build: .
+    command: ["python", "-m", "inbox.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      QUEUE_GRPC_BIND: ${QUEUE_GRPC_BIND:-0.0.0.0:50053}
+      QUEUE_HTTP_PORT: ${QUEUE_HTTP_PORT:-8081}
+      QUEUE_DB_PATH: ${QUEUE_DB_PATH:-/data/queue.db}
+      QUEUE_REAPER_INTERVAL_S: ${QUEUE_REAPER_INTERVAL_S:-30}
+      QUEUE_DEFAULT_MAX_RETRIES: ${QUEUE_DEFAULT_MAX_RETRIES:-3}
+      QUEUE_DEFAULT_CLAIM_TIMEOUT_S: ${QUEUE_DEFAULT_CLAIM_TIMEOUT_S:-300}
+      HUB_OWNER_MATRIX_ID: ${HUB_OWNER_MATRIX_ID:-}
+      MATRIX_SERVER_NAME: ${MATRIX_SERVER_NAME:-localhost}
+    expose:
+      - "50053"
+    ports:
+      - "127.0.0.1:${QUEUE_HTTP_PORT:-8081}:${QUEUE_HTTP_PORT:-8081}"
+    volumes:
+      - queue_data:/data
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  eventbus:
+    build: .
+    command: ["python", "-m", "services.eventbus.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${EVENTBUS_PORT:-8082}:8082"
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  matrix-bridge:
+    build: .
+    command: ["python", "-m", "services.matrix_bridge.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MATRIX_HOMESERVER_URL: http://matrix-synapse:8008
+      BRIDGE_BOT_HS_TOKEN: ${BRIDGE_BOT_HS_TOKEN:-}
+      MATRIX_FEEDBACK_ROOM_ID: ${MATRIX_FEEDBACK_ROOM_ID:-}
+      MATRIX_BRIDGE_HTTP_PORT: ${MATRIX_BRIDGE_HTTP_PORT:-8084}
+      QUEUE_HTTP_URL: http://queue:8081
+      EVENTBUS_URL: http://eventbus:8082
+    expose:
+      - "8084"
+    depends_on:
+      - queue
+      - eventbus
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  ingest:
+    build: .
+    command: ["python", "-m", "services.ingest.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      MATRIX_HOMESERVER: ${MATRIX_HOMESERVER:-http://matrix-synapse:8008}
+      SOPHIA_MATRIX_USER: ${SOPHIA_MATRIX_USER:-@sophia:localhost}
+      SOPHIA_MATRIX_PASSWORD: ${SOPHIA_MATRIX_PASSWORD:-}
+      QUEUE_HTTP_URL: http://queue:8081
+      EVENTBUS_URL: http://eventbus:8082
+      QUEUE_NAME: ${QUEUE_NAME:-workspace}
+      CONCIERGE_ROOM_IDS: ${CONCIERGE_ROOM_IDS:-}
+    depends_on:
+      - queue
+      - eventbus
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  feeds:
+    build: .
+    command: ["python", "-m", "services.feeds.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      EVENTBUS_URL: http://eventbus:8082
+      QUEUE_HTTP_URL: http://queue:8081
+      QUEUE_NAME: ${QUEUE_NAME:-workspace}
+      FEEDS_CONFIG: ${FEEDS_CONFIG:-[]}
+    volumes:
+      - feeds_data:/data
+    depends_on:
+      - eventbus
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  cases:
+    build: .
+    command:
+      - "uvicorn"
+      - "services.cases.main:app_instance"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "${CASES_HTTP_PORT:-8083}"
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CASES_HTTP_PORT: ${CASES_HTTP_PORT:-8083}
+      CASES_DB_PATH: ${CASES_DB_PATH:-/data/cases.db}
+      TOOL_DIR: ${TOOL_DIR:-/app/libs/tools}
+    ports:
+      - "${CASES_HTTP_PORT:-8083}:${CASES_HTTP_PORT:-8083}"
+    volumes:
+      - cases_data:/data
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  frank:
+    build:
+      context: .
+      dockerfile: docker/frank/Dockerfile
+    image: frank
+    working_dir: /hub
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PYTHONPATH: /hub:/app
+      MODEL: ${FRANK_MODEL:-gpt-5.3-codex}
+      MAX_ITERATIONS: ${FRANK_MAX_ITERATIONS:-25}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      QUEUE_HTTP_URL: http://queue:8081
+      EVENTBUS_URL: http://eventbus:8082
+      CASES_HTTP_URL: http://cases:8083
+      QUEUE_NAME: ${QUEUE_NAME:-workspace}
+      HERMES_HOME: /hub/rolodex/agents/frank
+      TERMINAL_CWD: /hub
+      GATEWAY_HTTP_URL: ${GATEWAY_HTTP_URL:-http://gateway-http:8080}
+      STT_HTTP_URL: http://stt-http:8765
+      TOOL_DIR: ${TOOL_DIR:-/app/libs/tools}
+      HERMES_PROFILE_ROOT: /hub/.hermes/profiles
+      FRANK_EXECUTION_ROOT: /hub/.hermes/frank_execution
+      FRANK_SUBJECT_CODEBASE_MAP: ${FRANK_SUBJECT_CODEBASE_MAP:-http://localhost:3000=/Users/bananawalnut/repos/zenith-hub;http://host.docker.internal:3000=/Users/bananawalnut/repos/zenith-hub}
+      HUB_CONFIG_SECRETS_PATH: /hub/.hermes/config-secrets.env
+      RECONNECT_DELAY_S: ${FRANK_RECONNECT_DELAY_S:-5}
+      REVIEWS_DATA_DIR: /data/reviews
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+    volumes:
+      - .:/hub:ro
+      - ./.hermes:/hub/.hermes
+      - ./rolodex/agents/frank:/hub/rolodex/agents/frank
+      - reviews_data:/data/reviews:ro
+      - ${FRANK_ZENITH_HUB_PATH:-/Users/bananawalnut/repos/zenith-hub}:/Users/bananawalnut/repos/zenith-hub:ro
+    depends_on:
+      - queue
+      - eventbus
+      - cases
+      - stt-http
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  hermes-worker-queue:
+    build:
+      context: .
+      dockerfile: docker/hermes_worker_queue/Dockerfile
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      QUEUE_HTTP_URL: http://queue:8081
+      WORKER_QUEUE_NAME: ${WORKER_QUEUE_NAME:-workers}
+      WORKER_ID: ${HERMES_WORKER_ID:-hermes-worker}
+      EVENTBUS_URL: http://eventbus:8082
+      CASES_HTTP_URL: http://cases:8083
+      HERMES_FORWARD_CASES_HTTP_URL: ${HERMES_FORWARD_CASES_HTTP_URL:-http://host.docker.internal:8083}
+      GATEWAY_HTTP_URL: ${GATEWAY_HTTP_URL:-http://gateway-http:8080}
+      STT_HTTP_URL: http://stt-http:8765
+      RECONNECT_DELAY_S: ${HERMES_WORKER_RECONNECT_DELAY_S:-5}
+      HERMES_HOME: /hub/.hermes
+      TERMINAL_CWD: /hub
+      HUB_PATH: ${HUB_PATH:-/Users/bananawalnut/repos/hub}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      HERMES_DISPATCH_PROVIDER: ${HERMES_DISPATCH_PROVIDER:-openai-codex}
+      HERMES_DISPATCH_MODEL: ${HERMES_DISPATCH_MODEL:-gpt-5.3-codex}
+      HERMES_DISPATCH_AUX_PROVIDER: ${HERMES_DISPATCH_AUX_PROVIDER:-main}
+      HUB_CONFIG_SECRETS_PATH: /hub/.hermes/config-secrets.env
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      MATRIX_AS_TOKEN: ${MATRIX_AS_TOKEN:-}
+      MATRIX_HS_TOKEN: ${MATRIX_HS_TOKEN:-}
+      MATRIX_HOMESERVER: ${MATRIX_HOMESERVER:-http://host.docker.internal:8008}
+    volumes:
+      - .:/hub:ro
+      - ./.hermes:/hub/.hermes
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - queue
+      - eventbus
+      - cases
+      - stt-http
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  hermes-worker:
+    # Terminal sandbox image for the Hermes worker agent running on the host.
+    # Hermes boots this with `docker run -d hub-worker sleep 2h` and executes
+    # tool commands inside it via `docker exec`. Not started as a service.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hub-worker
+    profiles: ["build-only"]
+
+  grpcurl:
+    image: fullstorydev/grpcurl:latest
+    profiles: ["debug"]
+    networks:
+      - agentnet
+
+networks:
+  agentnet:
+    external: true
+
+volumes:
+  qdrant_data:
+  queue_data:
+  feeds_data:
+  cases_data:
+  reviews_data:

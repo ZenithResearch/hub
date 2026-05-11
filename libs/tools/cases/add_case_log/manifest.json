@@ -1,0 +1,31 @@
+{
+  "name": "add_case_log",
+  "description": "Append a case log entry, optionally associated with a persisted step row.",
+  "version": "0.1.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "case_id": { "type": "string" },
+      "step_db_row_id": { "type": "string" },
+      "type": { "type": "string" },
+      "message": { "type": "string" },
+      "metadata": { "type": "object" }
+    },
+    "required": ["case_id", "type", "message"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "request_id": { "type": "string" },
+      "log_id": { "type": "string" }
+    },
+    "required": ["request_id", "log_id"],
+    "additionalProperties": false
+  },
+  "entrypoint": "libs.tools.cases.tool:add_case_log",
+  "env_vars": ["CASES_HTTP_URL"],
+  "network_access": true,
+  "timeout_ms": 10000,
+  "max_memory_mb": 128
+}

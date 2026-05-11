@@ -1,0 +1,24 @@
+project_name = "agent-platform"
+environment  = "dev"
+aws_region   = "us-west-2"
+
+vpc_cidr = "10.20.0.0/16"
+
+# Baseline cost profile: 1 task each, 0.25 vCPU / 0.5 GB
+gateway_desired_count = 1
+runtime_desired_count = 1
+sandbox_desired_count = 1
+task_cpu              = 256
+task_memory           = 512
+
+image_tag = "v0.1.0"
+
+# External vector store (Qdrant Cloud)
+qdrant_url = "https://your-qdrant-cloud-url"
+
+# Recommended: do NOT set this in tfvars for production (it will be stored in TF state).
+# Instead, create the secret value out-of-band (see DEPLOYMENT.md).
+# qdrant_api_key = "REPLACE_ME"
+
+cors_allow_origins = "https://yourdomain.com"
+

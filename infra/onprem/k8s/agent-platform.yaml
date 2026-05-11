@@ -1,0 +1,420 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent-platform
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-platform-env
+  namespace: agent-platform
+data:
+  LOG_LEVEL: "info"
+  CORS_ALLOW_ORIGINS: "https://example.com"
+  MAX_BODY_BYTES: "262144"
+  TOOL_DIR: "/app/libs/tools"
+  TOOL_DEFAULT_TIMEOUT_MS: "5000"
+  TOOL_DEFAULT_MAX_MEMORY_MB: "128"
+  KB_VECTOR_DIM: "256"
+  QDRANT_COLLECTION: "kb_documents"
+  # Set to your Qdrant endpoint (Qdrant Cloud or self-hosted)
+  QDRANT_URL: "http://qdrant:6333"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-platform-secrets
+  namespace: agent-platform
+type: Opaque
+stringData:
+  # Optional: set if your Qdrant requires an API key
+  QDRANT_API_KEY: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-http
+  namespace: agent-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gateway-http
+  template:
+    metadata:
+      labels:
+        app: gateway-http
+    spec:
+      containers:
+        - name: app
+          image: <YOUR_IMAGE>
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn"]
+          args:
+            - "services.gateway_http.app:app"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8080"
+            - "--timeout-keep-alive"
+            - "5"
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: agent-platform-env
+          env:
+            - name: HTTP_PORT
+              value: "8080"
+            - name: RUNTIME_GRPC_TARGET
+              value: "runtime-grpc:50051"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-http
+  namespace: agent-platform
+spec:
+  type: ClusterIP
+  selector:
+    app: gateway-http
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runtime-grpc
+  namespace: agent-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: runtime-grpc
+  template:
+    metadata:
+      labels:
+        app: runtime-grpc
+    spec:
+      containers:
+        - name: app
+          image: <YOUR_IMAGE>
+          imagePullPolicy: IfNotPresent
+          command: ["python"]
+          args: ["-m", "services.runtime_grpc.main"]
+          ports:
+            - containerPort: 50051
+          envFrom:
+            - configMapRef:
+                name: agent-platform-env
+            - secretRef:
+                name: agent-platform-secrets
+          env:
+            - name: RUNTIME_GRPC_BIND
+              value: "0.0.0.0:50051"
+            - name: TOOL_SANDBOX_GRPC_TARGET
+              value: "tool-sandbox:50052"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: runtime-grpc
+  namespace: agent-platform
+spec:
+  type: ClusterIP
+  selector:
+    app: runtime-grpc
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool-sandbox
+  namespace: agent-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tool-sandbox
+  template:
+    metadata:
+      labels:
+        app: tool-sandbox
+    spec:
+      containers:
+        - name: app
+          image: <YOUR_IMAGE>
+          imagePullPolicy: IfNotPresent
+          command: ["python"]
+          args: ["-m", "services.tool_sandbox.main"]
+          ports:
+            - containerPort: 50052
+          envFrom:
+            - configMapRef:
+                name: agent-platform-env
+          env:
+            - name: TOOL_SANDBOX_GRPC_BIND
+              value: "0.0.0.0:50052"
+            - name: ALLOW_TOOLS_WITH_NETWORK
+              value: "false"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tool-sandbox
+  namespace: agent-platform
+spec:
+  type: ClusterIP
+  selector:
+    app: tool-sandbox
+  ports:
+    - name: grpc
+      port: 50052
+      targetPort: 50052
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gateway-http
+  namespace: agent-platform
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+spec:
+  tls:
+    - hosts:
+        - api.example.com
+      secretName: gateway-tls
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway-http
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: agent-platform
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-gateway
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: gateway-http
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-runtime
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: runtime-grpc
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway-http
+      ports:
+        - protocol: TCP
+          port: 50051
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-runtime-to-tool
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: tool-sandbox
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: runtime-grpc
+      ports:
+        - protocol: TCP
+          port: 50052
+---
+# Queue PVC — ReadWriteOnce enforces the single-writer constraint at the storage level.
+# Do NOT change to ReadWriteMany; SQLite WAL is not safe for concurrent writers.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: queue-data
+  namespace: agent-platform
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # storageClassName: default  # uncomment and set if your cluster needs an explicit class
+---
+# Queue Deployment — replicas MUST stay at 1. SQLite is single-writer.
+# Scaling horizontally without switching the store (e.g. to Postgres) will corrupt data.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue
+  namespace: agent-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: queue
+  strategy:
+    type: Recreate  # Recreate (not RollingUpdate) — ensures old pod releases the PVC before new one mounts
+  template:
+    metadata:
+      labels:
+        app: queue
+    spec:
+      containers:
+        - name: app
+          image: <YOUR_IMAGE>
+          imagePullPolicy: IfNotPresent
+          command: ["python"]
+          args: ["-m", "inbox.main"]
+          ports:
+            - name: grpc
+              containerPort: 50053
+            - name: http
+              containerPort: 8081
+          env:
+            - name: LOG_LEVEL
+              value: "info"
+            - name: QUEUE_GRPC_BIND
+              value: "0.0.0.0:50053"
+            - name: QUEUE_HTTP_PORT
+              value: "8081"
+            - name: QUEUE_DB_PATH
+              value: "/data/queue.db"
+            - name: QUEUE_REAPER_INTERVAL_S
+              value: "30"
+            - name: QUEUE_DEFAULT_MAX_RETRIES
+              value: "3"
+            - name: QUEUE_DEFAULT_CLAIM_TIMEOUT_S
+              value: "300"
+          volumeMounts:
+            - name: queue-data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: queue-data
+          persistentVolumeClaim:
+            claimName: queue-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: queue
+  namespace: agent-platform
+spec:
+  type: ClusterIP
+  selector:
+    app: queue
+  ports:
+    - name: grpc
+      port: 50053
+      targetPort: 50053
+    - name: http
+      port: 8081
+      targetPort: 8081
+---
+# Queue network policies: allow any pod in the namespace to reach queue on both ports.
+# Restrict further per-consumer as services are added (e.g. only frank-pod can dequeue).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internal-to-queue
+  namespace: agent-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: queue
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}  # any pod in the namespace
+      ports:
+        - protocol: TCP
+          port: 50053
+        - protocol: TCP
+          port: 8081

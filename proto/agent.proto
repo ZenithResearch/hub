@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package agent.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+message HealthCheckRequest {
+  // Correlation id. If empty, server may generate one.
+  string request_id = 1;
+  google.protobuf.Struct metadata = 2;
+}
+
+message HealthCheckResponse {
+  string request_id = 1;
+  string status = 2; // e.g. "ok"
+  google.protobuf.Struct metadata = 3;
+}
+
+message SubmitUserMessageRequest {
+  string request_id = 1;
+  string user_id = 2;
+  string session_id = 3;
+  string message = 4;
+  google.protobuf.Struct metadata = 5;
+}
+
+message SubmitUserMessageResponse {
+  string request_id = 1;
+  string status = 2; // e.g. "accepted"
+  google.protobuf.Struct runtime_response = 3;
+}
+
+message StreamRuntimeEventsRequest {
+  string request_id = 1;
+  google.protobuf.Struct metadata = 2;
+}
+
+message RuntimeEvent {
+  string request_id = 1;
+  int32 seq = 2;
+  string type = 3;
+  google.protobuf.Struct payload = 4;
+  bool done = 5;
+}
+
+message Document {
+  string doc_id = 1;
+  string doc_type = 2; // skill | process | knowledge
+  string title = 3;
+  string content = 4;
+  repeated string tags = 5;
+  string source = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message SearchHit {
+  double score = 1;
+  Document document = 2;
+}
+
+message SearchKnowledgeRequest {
+  string request_id = 1;
+  string query = 2;
+  repeated string doc_types = 3; // optional filter; empty = all
+  int32 k = 4;
+  google.protobuf.Struct metadata = 5;
+}
+
+message SearchKnowledgeResponse {
+  string request_id = 1;
+  repeated SearchHit hits = 2;
+  google.protobuf.Struct metadata = 3;
+}
+
+message InvokeToolRequest {
+  string request_id = 1;
+  string tool_name = 2;
+  google.protobuf.Struct input = 3;
+  google.protobuf.Struct metadata = 4;
+}
+
+message InvokeToolResponse {
+  string request_id = 1;
+  string tool_name = 2;
+  bool success = 3;
+  int32 exit_code = 4;
+  bool timed_out = 5;
+  int64 duration_ms = 6;
+  google.protobuf.Struct output = 7;
+  string stdout = 8;
+  string stderr = 9;
+  string error_message = 10;
+  google.protobuf.Struct metadata = 11;
+}
+
+message RunToolRequest {
+  string request_id = 1;
+  string tool_name = 2;
+  google.protobuf.Struct input = 3;
+  google.protobuf.Struct metadata = 4;
+}
+
+message RunToolResponse {
+  string request_id = 1;
+  string tool_name = 2;
+  bool success = 3;
+  int32 exit_code = 4;
+  bool timed_out = 5;
+  int64 duration_ms = 6;
+  google.protobuf.Struct output = 7;
+  string stdout = 8;
+  string stderr = 9;
+  string error_message = 10;
+  google.protobuf.Struct metadata = 11;
+}
+
+service AgentRuntime {
+  rpc SubmitUserMessage(SubmitUserMessageRequest) returns (SubmitUserMessageResponse);
+  rpc StreamRuntimeEvents(StreamRuntimeEventsRequest) returns (stream RuntimeEvent);
+
+  rpc SearchKnowledge(SearchKnowledgeRequest) returns (SearchKnowledgeResponse);
+  rpc InvokeTool(InvokeToolRequest) returns (InvokeToolResponse);
+
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+service ToolSandbox {
+  rpc RunTool(RunToolRequest) returns (RunToolResponse);
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+

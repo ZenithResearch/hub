@@ -1,0 +1,39 @@
+.env
+.env.*
+!.env.example
+.env.local
+.terraform/
+.venv*
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+
+# repos/workspace/ — local repos not contributed to the main project
+# Add any personal, client, or experimental repos here; they will not be tracked.
+repos/workspace/*
+!repos/workspace/.gitkeep
+infra/matrix/config/homeserver-local.yaml
+infra/matrix/appservices/*.resolved.yaml
+
+# Local Hermes/runtime artifacts
+.hermes/
+.tmp/
+.tmp-summary/
+agent_platform.egg-info/
+*.db
+*.db-shm
+*.db-wal
+data/*
+!data/.gitkeep
+rolodex/agents/*/.skills_prompt_snapshot.json
+rolodex/agents/*/auth.json
+rolodex/agents/*/auth.lock
+rolodex/agents/*/models_dev_cache.json
+rolodex/agents/*/processes.json
+rolodex/agents/*/logs/
+rolodex/agents/*/sessions/
+rolodex/agents/*/kanban/
+rolodex/agents/*/memories/*.lock

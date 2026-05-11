@@ -1,0 +1,47 @@
+{
+  "name": "elevenlabs_stt",
+  "description": "Transcribe an audio file using ElevenLabs Speech-to-Text (Scribe v1). Returns full transcript and word-level timestamps with start/end seconds.",
+  "version": "0.1.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "audio_path": {
+        "type": "string",
+        "description": "Absolute path to the audio file (webm, mp3, wav, m4a, etc.)"
+      },
+      "language_code": {
+        "type": "string",
+        "description": "BCP-47 language code e.g. 'en'. Omit for auto-detect."
+      }
+    },
+    "required": ["audio_path"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "transcript": { "type": "string" },
+      "words": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "text":  { "type": "string" },
+            "start": { "type": "number" },
+            "end":   { "type": "number" },
+            "type":  { "type": "string" }
+          },
+          "required": ["text", "start", "end"]
+        }
+      },
+      "language_code": { "type": "string" }
+    },
+    "required": ["transcript", "words"],
+    "additionalProperties": true
+  },
+  "entrypoint": "libs.tools.elevenlabs_stt.tool:run",
+  "env_vars": ["ELEVENLABS_API_KEY"],
+  "network_access": true,
+  "timeout_ms": 60000,
+  "max_memory_mb": 128
+}

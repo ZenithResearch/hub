@@ -1,0 +1,27 @@
+{
+  "name": "get_case",
+  "description": "Fetch the current case snapshot, including case status, steps, slots, logs, and contract.",
+  "version": "0.1.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "case_id": { "type": "string" }
+    },
+    "required": ["case_id"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "request_id": { "type": "string" },
+      "case": { "type": "object" }
+    },
+    "required": ["request_id", "case"],
+    "additionalProperties": true
+  },
+  "entrypoint": "libs.tools.cases.tool:get_case",
+  "env_vars": ["CASES_HTTP_URL"],
+  "network_access": true,
+  "timeout_ms": 10000,
+  "max_memory_mb": 128
+}

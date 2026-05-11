@@ -1,0 +1,57 @@
+# Agent Configuration for Test Agent
+# This file is wiki-linked from profile.md under the "## Config" heading
+
+agent:
+  name: "Test Agent"
+  type: "worker"
+  version: "1.0.0"
+  description: "A demonstration agent showing the new agent definition format"
+
+runtime:
+  # Configuration for the hub-runtime container
+  image: "hub-runtime:latest"
+  environment:
+    LOOP_TYPE: "hermes_worker"
+    LITELLM_BASE_URL: "http://localhost:4000"
+    HERMES_MODEL: "NousResearch/Hermes-3-Llama-3.1-8B"
+    MAX_ITERATIONS: "8"
+    REQUEST_TIMEOUT_SECONDS: "120"
+    TEMPERATURE: "0.2"
+    MAX_TOKENS: "2048"
+
+# Skills available to this agent
+skills:
+  - name: "hub-repo-workflow"
+    version: "1.0.0"
+    enabled: true
+  - name: "plan"
+    version: "1.0.0"
+    enabled: true
+  - name: "writing-plans"
+    version: "1.0.0"
+    enabled: true
+
+# MCP (Model Context Protocol) servers this agent can connect to
+mcp_servers:
+  - name: "filesystem"
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/bananawalnut/repos/hub"]
+    enabled: true
+  - name: "github"
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    enabled: true
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
+
+# Resource limits and constraints
+resources:
+  memory_limit: "512Mi"
+  cpu_limit: "500m"
+  timeout_seconds: 300
+
+# Persistence settings
+persistence:
+  context_dir: "/hub_context"
+  tools_dir: "/hub_tools"
+  workspace_dir: "/workspace"

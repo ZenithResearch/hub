@@ -1,0 +1,52 @@
+{
+  "name": "local_whisper",
+  "description": "Transcribe an audio file through the compose-internal local STT HTTP service. Returns full transcript and word/timing records when available. Requires no API key.",
+  "version": "0.2.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "audio_path": {
+        "type": "string",
+        "description": "Absolute path to the audio file as mounted in the STT service (webm, mp3, wav, m4a, etc.)"
+      },
+      "language": {
+        "type": "string",
+        "description": "Optional ISO language code e.g. 'en'. Omit for auto-detect."
+      },
+      "model": {
+        "type": "string",
+        "description": "Local Whisper model name. Defaults to tiny unless LOCAL_WHISPER_MODEL is set."
+      }
+    },
+    "required": ["audio_path"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "transcript": { "type": "string" },
+      "words": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "text":  { "type": "string" },
+            "start": { "type": "number" },
+            "end":   { "type": "number" },
+            "type":  { "type": "string" }
+          },
+          "required": ["text", "start", "end"]
+        }
+      },
+      "language_code": { "type": "string" },
+      "model": { "type": "string" }
+    },
+    "required": ["transcript", "words"],
+    "additionalProperties": true
+  },
+  "entrypoint": "libs.tools.local_whisper.tool:run",
+  "env_vars": ["STT_HTTP_URL"],
+  "network_access": true,
+  "timeout_ms": 300000,
+  "max_memory_mb": 256
+}

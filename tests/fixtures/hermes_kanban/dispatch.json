@@ -1,0 +1,20 @@
+{
+  "reclaimed": 0,
+  "crashed": [],
+  "timed_out": [],
+  "auto_blocked": [],
+  "promoted": 0,
+  "spawned": [
+    {
+      "task_id": "t_7b60d95e",
+      "assignee": "worker",
+      "workspace": "/Users/bananawalnut/repos/hub/.tmp/hermes-kanban-spike/kanban/workspaces/t_7b60d95e"
+    },
+    {
+      "task_id": "t_d43c4919",
+      "assignee": "worker",
+      "workspace": "/Users/bananawalnut/repos/hub/.tmp/hermes-kanban-spike/kanban/workspaces/t_d43c4919"
+    }
+  ],
+  "skipped_unassigned": []
+}

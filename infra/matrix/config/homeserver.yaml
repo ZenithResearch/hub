@@ -1,0 +1,83 @@
+# Synapse homeserver configuration
+# Variables substituted by envsubst before use — see infra/matrix/README.md
+# For local Docker: docker-compose.matrix.yml mounts this file directly.
+# For AWS: user-data script runs envsubst and writes to /data/homeserver.yaml
+
+server_name: "${MATRIX_SERVER_NAME}"
+pid_file: /data/homeserver.pid
+
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    x_forwarded: true
+    resources:
+      - names: [client, federation]
+        compress: false
+  - port: 8448
+    tls: false
+    type: http
+    x_forwarded: true
+    resources:
+      - names: [federation]
+        compress: false
+
+database:
+  name: psycopg2
+  args:
+    user: "${MATRIX_DB_USER}"
+    password: "${MATRIX_DB_PASSWORD}"
+    database: "${MATRIX_DB_NAME}"
+    host: "${MATRIX_DB_HOST}"
+    port: "${MATRIX_DB_PORT}"
+    cp_min: 5
+    cp_max: 10
+
+log_config: "/config/log.config"
+
+media_store_path: "/data/media_store"
+
+registration_shared_secret: "${MATRIX_REGISTRATION_SECRET}"
+
+report_stats: false
+
+macaroon_secret_key: "${MATRIX_MACAROON_SECRET}"
+
+form_secret: "${MATRIX_FORM_SECRET}"
+
+signing_key_path: "/data/${MATRIX_SERVER_NAME}.signing.key"
+
+trusted_key_servers:
+  - server_name: "matrix.org"
+
+# Federation — enable for hub-to-hub messaging across Zenith network
+# Set to false for a closed, single-hub deployment
+federation_enabled: ${MATRIX_FEDERATION_ENABLED}
+
+# Registration — hub owners manage accounts; set true to allow self-registration
+enable_registration: ${MATRIX_ENABLE_REGISTRATION}
+enable_registration_without_verification: ${MATRIX_ENABLE_REGISTRATION}
+
+# Rate limiting — sensible defaults for hub-scale traffic
+rc_message:
+  per_second: 0.2
+  burst_count: 10
+
+rc_registration:
+  per_second: 0.17
+  burst_count: 3
+
+# Retention — keep events indefinitely by default
+retention:
+  enabled: false
+
+# URL preview — off by default (requires outbound HTTP)
+url_preview_enabled: false
+
+# Metrics — disabled by default
+enable_metrics: false
+
+# Application services are rendered into /data/appservices by the Matrix container.
+# Keep this source template stable; local generated registrations must not be
+# appended here by setup scripts.
+app_service_config_files: []

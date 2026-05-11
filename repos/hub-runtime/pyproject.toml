@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hub-runtime"
+version = "0.1.0"
+description = "Isolated worker runtime for Hub agents."
+requires-python = ">=3.11"
+dependencies = [
+  "httpx",
+]
+
+[project.scripts]
+hub-runtime = "hub_runtime.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

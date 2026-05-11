@@ -1,0 +1,42 @@
+# rolodex/index.yaml
+# Top-level registry for this hub's Rolodex.
+#
+# vault_moc: the note title in the connected vault that contains the
+#            human-readable MOC for people tracked in this hub.
+#            Vault-to-hub sync resolves against this.
+
+vault_moc: "rolodex"
+
+people:
+  directory: people/
+  # Each entry: slug → folder under people/
+  # Slug must match the folder name.
+  entries:
+    gabriel-atkinson:
+      name: Gabriel Atkinson
+      path: people/gabriel-atkinson/
+
+agents:
+  directory: agents/
+  # Agent entries are definitions, not observations.
+  # The definition.yaml in each folder is the authoritative spec for that agent.
+  entries:
+    frank:
+      name: Frank
+      path: agents/frank/
+      hermes_home: .hermes/workers/frank
+      runtime_modes:
+        - host
+    sophia:
+      name: Sophia
+      path: agents/sophia/
+      hermes_home: .hermes/profiles/sophia
+      runtime_modes:
+        - docker_backend
+        - gateway
+    test-agent:
+      name: Test Agent
+      path: agents/test-agent/
+      hermes_home: .hermes/workers/test-agent
+      runtime_modes:
+        - host

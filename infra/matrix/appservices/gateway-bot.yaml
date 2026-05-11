@@ -1,0 +1,26 @@
+# Gateway Bot — Application Service Registration
+#
+# The gateway_http service posts review submissions to the feedback room
+# using this appservice identity. Synapse pushes incoming room events to
+# GATEWAY_BOT_AS_URL — the gateway ignores them (returns 200).
+#
+# Mount at /config/appservices/gateway-bot.yaml in the Synapse container.
+# Tokens sourced from .env via envsubst — never commit literal values.
+
+id: gateway-bot
+
+url: "${GATEWAY_BOT_AS_URL}"
+
+as_token: "${GATEWAY_BOT_AS_TOKEN}"
+hs_token: "${GATEWAY_BOT_HS_TOKEN}"
+
+sender_localpart: gateway-bot
+
+rate_limited: false
+
+namespaces:
+  users:
+    - exclusive: true
+      regex: "@gateway-bot:.*"
+  rooms: []
+  aliases: []

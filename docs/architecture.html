@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hub Architecture</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3350;
+      --accent: #6c7fff;
+      --accent2: #a78bfa;
+      --green: #4ade80;
+      --yellow: #fbbf24;
+      --red: #f87171;
+      --cyan: #67e8f9;
+      --text: #e2e8f0;
+      --muted: #8892b0;
+      --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    /* ── Layout ── */
+    .page { max-width: 1100px; margin: 0 auto; padding: 48px 32px 96px; }
+    h1 { font-size: 2rem; font-weight: 700; margin-bottom: 6px; }
+    .subtitle { color: var(--muted); margin-bottom: 48px; font-size: 0.95rem; }
+    h2 { font-size: 1.25rem; font-weight: 600; margin: 48px 0 16px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    h3 { font-size: 1rem; font-weight: 600; margin: 24px 0 10px; color: var(--accent2); }
+    p { margin-bottom: 12px; color: var(--muted); }
+    p strong { color: var(--text); }
+    ul { padding-left: 20px; color: var(--muted); margin-bottom: 12px; }
+    li { margin-bottom: 4px; }
+    li strong { color: var(--text); }
+    code {
+      font-family: var(--mono);
+      font-size: 0.82em;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      color: var(--cyan);
+    }
+    pre {
+      font-family: var(--mono);
+      font-size: 0.82em;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      overflow-x: auto;
+      color: var(--cyan);
+      line-height: 1.55;
+      margin-bottom: 16px;
+    }
+    pre .comment { color: var(--muted); }
+    pre .key { color: var(--accent2); }
+    pre .val { color: var(--green); }
+
+    /* ── Architecture Diagram ── */
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      margin: 24px 0;
+      overflow-x: auto;
+    }
+    .diagram-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      min-width: 700px;
+    }
+    .layer {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .layer-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .layer-row {
+      display: flex;
+      gap: 12px;
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+    .box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      flex: 1;
+      min-width: 140px;
+    }
+    .box.accent { border-color: var(--accent); }
+    .box.green  { border-color: var(--green); }
+    .box.yellow { border-color: var(--yellow); }
+    .box.red    { border-color: var(--red); }
+    .box.cyan   { border-color: var(--cyan); }
+    .box.purple { border-color: var(--accent2); }
+    .box-title {
+      font-size: 0.88rem;
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+    .box-title.accent { color: var(--accent); }
+    .box-title.green  { color: var(--green); }
+    .box-title.yellow { color: var(--yellow); }
+    .box-title.red    { color: var(--red); }
+    .box-title.cyan   { color: var(--cyan); }
+    .box-title.purple { color: var(--accent2); }
+    .box-sub {
+      font-size: 0.75rem;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    .arrows {
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .arrow {
+      font-size: 0.78rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .arrow-line {
+      width: 40px;
+      height: 2px;
+      background: var(--border);
+      position: relative;
+    }
+    .arrow-line::after {
+      content: '';
+      position: absolute;
+      right: -1px;
+      top: -4px;
+      border: 5px solid transparent;
+      border-left: 8px solid var(--border);
+    }
+    .arrow-line.dashed {
+      background: repeating-linear-gradient(90deg, var(--border) 0, var(--border) 4px, transparent 4px, transparent 8px);
+    }
+    .arrow-line.dashed::after { border-left-color: var(--border); }
+
+    /* ── Data flow diagram ── */
+    .flow {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 32px;
+      margin: 24px 0;
+      overflow-x: auto;
+    }
+    .flow-row {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      min-width: 620px;
+      margin-bottom: 14px;
+    }
+    .flow-node {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 14px;
+      font-size: 0.82rem;
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
+    .flow-node.accent  { border-color: var(--accent);  color: var(--accent);  }
+    .flow-node.green   { border-color: var(--green);   color: var(--green);   }
+    .flow-node.yellow  { border-color: var(--yellow);  color: var(--yellow);  }
+    .flow-node.cyan    { border-color: var(--cyan);    color: var(--cyan);    }
+    .flow-node.purple  { border-color: var(--accent2); color: var(--accent2); }
+    .flow-arrow {
+      color: var(--muted);
+      font-size: 0.78rem;
+      padding: 0 8px;
+      white-space: nowrap;
+    }
+
+    /* ── Comparison table ── */
+    .compare {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+    }
+    .compare th, .compare td {
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      font-size: 0.88rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    .compare th {
+      background: var(--surface2);
+      color: var(--text);
+      font-weight: 600;
+    }
+    .compare td { color: var(--muted); }
+    .compare td strong { color: var(--text); }
+    .compare tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-family: var(--mono);
+    }
+    .tag.green  { background: rgba(74,222,128,.15); color: var(--green); }
+    .tag.yellow { background: rgba(251,191,36,.15); color: var(--yellow); }
+    .tag.red    { background: rgba(248,113,113,.15); color: var(--red); }
+    .tag.cyan   { background: rgba(103,232,249,.15); color: var(--cyan); }
+    .tag.accent { background: rgba(108,127,255,.15); color: var(--accent); }
+
+    /* ── Directory tree ── */
+    .tree {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.8;
+      margin: 16px 0;
+    }
+    .tree .dir  { color: var(--accent); font-weight: 600; }
+    .tree .file { color: var(--muted); }
+    .tree .note { color: var(--yellow); font-family: sans-serif; font-size: 0.78rem; font-style: italic; }
+
+    /* ── Step blocks ── */
+    .steps { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; }
+    .step {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .step-num {
+      background: var(--accent);
+      color: #fff;
+      border-radius: 50%;
+      width: 26px;
+      height: 26px;
+      min-width: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+    .step-body { flex: 1; }
+    .step-body strong { color: var(--text); display: block; margin-bottom: 2px; }
+    .step-body p { margin-bottom: 0; }
+
+    /* ── Divider ── */
+    .divider { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+    /* ── Port table ── */
+    .ports { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+    .port-chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 0.82rem;
+    }
+    .port-chip .port-num { color: var(--yellow); font-family: var(--mono); font-weight: 700; }
+    .port-chip .port-name { color: var(--muted); }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <h1>Hub Architecture</h1>
+  <p class="subtitle">
+    A reference for anyone who has cloned or forked Hub and is spinning up their own instance.
+    Covers every service, how data moves between them, and how to get it all running.
+  </p>
+
+  <!-- ── OVERVIEW DIAGRAM ── -->
+  <h2>System Overview</h2>
+  <p>
+    Hub is a personal AI workspace that combines a Matrix homeserver, a durable message queue,
+    an ephemeral event bus, an ingest layer, and an RSS feed poller — all wired together over
+    a shared Docker network named <code>agentnet</code>.
+  </p>
+
+  <div class="diagram">
+    <div class="diagram-grid">
+
+      <!-- Sources -->
+      <div class="layer">
+        <div class="layer-label">External Sources</div>
+        <div class="layer-row">
+          <div class="box yellow">
+            <div class="box-title yellow">Matrix Rooms</div>
+            <div class="box-sub">@user:their-homeserver<br>Federation via port 8448</div>
+          </div>
+          <div class="box yellow">
+            <div class="box-title yellow">RSS / Atom Feeds</div>
+            <div class="box-sub">Hacker News, blogs,<br>any public feed URL</div>
+          </div>
+          <div class="box yellow">
+            <div class="box-title yellow">Future: Slack / Discord</div>
+            <div class="box-sub">Via Matrix bridge<br>(matterbridge / appservice)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ingest -->
+      <div class="layer">
+        <div class="layer-label">Ingest Layer</div>
+        <div class="layer-row">
+          <div class="box accent">
+            <div class="box-title accent">Matrix Synapse</div>
+            <div class="box-sub">matrixdotorg/synapse:latest<br>:8008 (client) · :8448 (federation)<br>Postgres backend</div>
+          </div>
+          <div class="box accent">
+            <div class="box-title accent">Ingest Service</div>
+            <div class="box-sub">services/ingest/<br>matrix-nio bot @hub:localhost<br>Routes → Queue or Event Bus</div>
+          </div>
+          <div class="box green">
+            <div class="box-title green">Feeds Service</div>
+            <div class="box-sub">services/feeds/<br>feedparser · SQLite dedup<br>Publishes → Event Bus</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nervous system -->
+      <div class="layer">
+        <div class="layer-label">Nervous System</div>
+        <div class="layer-row">
+          <div class="box red">
+            <div class="box-title red">Queue (inbox/)</div>
+            <div class="box-sub">Durable · SQLite · :8081<br>Claim / Ack / Nack / DLQ<br>Pull-based work items</div>
+          </div>
+          <div class="box cyan">
+            <div class="box-title cyan">Event Bus</div>
+            <div class="box-sub">Ephemeral · In-memory · :8082<br>SSE fan-out · fnmatch topics<br>Push-based notifications</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Consumers -->
+      <div class="layer">
+        <div class="layer-label">Consumers</div>
+        <div class="layer-row">
+          <div class="box purple">
+            <div class="box-title purple">Frank (AI Agent)</div>
+            <div class="box-sub">Not yet built<br>Will dequeue + ack + publish results<br>Subscribes to event bus</div>
+          </div>
+          <div class="box purple">
+            <div class="box-title purple">Zenith SwiftUI App</div>
+            <div class="box-sub">Hub Settings view<br>Polls /queues for counts<br>Polls Matrix for version</div>
+          </div>
+          <div class="box purple">
+            <div class="box-title purple">Runtime gRPC</div>
+            <div class="box-sub">services/runtime_grpc/<br>Tool execution + KB search<br>Qdrant vector store</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="ports">
+    <div class="port-chip"><span class="port-num">8008</span> <span class="port-name">Matrix Synapse (client API)</span></div>
+    <div class="port-chip"><span class="port-num">8448</span> <span class="port-name">Matrix Synapse (federation)</span></div>
+    <div class="port-chip"><span class="port-num">8080</span> <span class="port-name">Gateway HTTP</span></div>
+    <div class="port-chip"><span class="port-num">8081</span> <span class="port-name">Queue HTTP API</span></div>
+    <div class="port-chip"><span class="port-num">8082</span> <span class="port-name">Event Bus (SSE)</span></div>
+    <div class="port-chip"><span class="port-num">50051</span> <span class="port-name">Runtime gRPC</span></div>
+    <div class="port-chip"><span class="port-num">50052</span> <span class="port-name">Tool Sandbox gRPC</span></div>
+    <div class="port-chip"><span class="port-num">6333</span> <span class="port-name">Qdrant (vector DB)</span></div>
+  </div>
+
+
+  <!-- ── QUEUE VS EVENT BUS ── -->
+  <h2>Queue vs Event Bus — The Core Distinction</h2>
+
+  <p>
+    These two systems serve fundamentally different purposes. Confusing them is the most common
+    architectural mistake to avoid when extending Hub.
+  </p>
+
+  <table class="compare">
+    <thead>
+      <tr>
+        <th>Property</th>
+        <th>Queue <code>inbox/</code> · port 8081</th>
+        <th>Event Bus <code>services/eventbus/</code> · port 8082</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Model</strong></td>
+        <td>Pull-based. Workers claim jobs. <span class="tag yellow">durable</span></td>
+        <td>Push-based. Subscribers receive events. <span class="tag cyan">ephemeral</span></td>
+      </tr>
+      <tr>
+        <td><strong>Persistence</strong></td>
+        <td>SQLite — messages survive restarts and crashes.</td>
+        <td>In-memory only — events lost if no subscriber is connected when published.</td>
+      </tr>
+      <tr>
+        <td><strong>Who consumes</strong></td>
+        <td>One consumer (Frank) claims a message exclusively. Others never see it.</td>
+        <td>Any number of subscribers see every matching event simultaneously (fan-out).</td>
+      </tr>
+      <tr>
+        <td><strong>Lifecycle</strong></td>
+        <td><strong>pending → processing → done / failed / DLQ</strong><br>
+            Messages are retried (max_retries), timed out (claim_timeout_s), dead-lettered.</td>
+        <td>No lifecycle. Fire and forget. If nobody is subscribed, event is dropped.</td>
+      </tr>
+      <tr>
+        <td><strong>What goes here</strong></td>
+        <td><em>Work items</em> — things Frank must do: "respond to this message", "summarize this feed item".</td>
+        <td><em>Facts that happened</em> — "a job was enqueued", "a feed item arrived", "a Matrix message was received".</td>
+      </tr>
+      <tr>
+        <td><strong>Primary use</strong></td>
+        <td>Frank session lifecycle, concierge requests, @-mention responses.</td>
+        <td>Real-time UI updates (SwiftUI polls or subscribes SSE), inter-service notifications, monitoring.</td>
+      </tr>
+      <tr>
+        <td><strong>Topic routing</strong></td>
+        <td>Named queues (e.g. <code>workspace</code>). Filtered by <code>event_type</code> on dequeue.</td>
+        <td>Dot-notation topics with <code>fnmatch</code> wildcards: <code>queue.job.*</code>, <code>feed.*</code>, <code>*</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>How they interact</h3>
+  <p>
+    The Queue and Event Bus are peers — neither owns the other. But they cross-publish:
+    when Ingest enqueues a job, it <em>also</em> publishes <code>queue.job.enqueued</code> to the
+    event bus. Subscribers (SwiftUI, monitoring tools) learn a job arrived without touching the queue.
+    Frank consumes the job from the queue without knowing anything about the event bus.
+  </p>
+
+  <div class="flow">
+    <div class="flow-row">
+      <div class="flow-node yellow">Matrix message</div>
+      <div class="flow-arrow">→ ingest bot →</div>
+      <div class="flow-node red">Queue enqueue</div>
+      <div class="flow-arrow">+ also →</div>
+      <div class="flow-node cyan">Event Bus publish<br><small>queue.job.enqueued</small></div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-node yellow">RSS feed item</div>
+      <div class="flow-arrow">→ feeds service →</div>
+      <div class="flow-node cyan">Event Bus publish<br><small>feed.{id}.item</small></div>
+      <div class="flow-arrow">+ if enqueue_on_match →</div>
+      <div class="flow-node red">Queue enqueue</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-node yellow">Matrix broadcast<br><small>(no mention)</small></div>
+      <div class="flow-arrow">→ ingest bot →</div>
+      <div class="flow-node cyan">Event Bus only<br><small>ingest.matrix.message</small></div>
+    </div>
+  </div>
+
+
+  <!-- ── QUEUE DETAIL ── -->
+  <h2>Queue — <code>inbox/</code></h2>
+
+  <p>
+    A durable, SQLite-backed FIFO queue with retry logic, claim timeouts, and a dead-letter queue.
+    Designed to be the single inbox Frank pulls from.
+  </p>
+
+  <div class="tree">
+    <span class="dir">inbox/</span><br>
+    &nbsp;&nbsp;<span class="file">models.py</span> &nbsp;&nbsp;&nbsp;<span class="note">Message + QueueInfo dataclasses, MessageStatus constants</span><br>
+    &nbsp;&nbsp;<span class="file">store.py</span> &nbsp;&nbsp;&nbsp;&nbsp;<span class="note">QueueStore — all SQLite operations</span><br>
+    &nbsp;&nbsp;<span class="file">http.py</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">FastAPI app — enqueue / dequeue / ack / nack / peek / list</span><br>
+    &nbsp;&nbsp;<span class="file">service.py</span> &nbsp;&nbsp;<span class="note">QueueService — reaper loop (reclaims timed-out messages)</span><br>
+    &nbsp;&nbsp;<span class="file">config.py</span> &nbsp;&nbsp;&nbsp;<span class="note">QueueSettings via pydantic-settings</span><br>
+    &nbsp;&nbsp;<span class="file">main.py</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Entry point — starts FastAPI + reaper</span>
+  </div>
+
+  <h3>Message envelope</h3>
+  <p>Every job in the queue carries this structure:</p>
+  <pre>
+{
+  "<span class="key">id</span>":              <span class="val">"msg_abc123"</span>,
+  "<span class="key">queue_name</span>":     <span class="val">"workspace"</span>,
+  "<span class="key">event_type</span>":     <span class="val">"chat_message"</span>,       <span class="comment">// what kind of trigger this is</span>
+  "<span class="key">source_type</span>":    <span class="val">"matrix"</span>,             <span class="comment">// where it came from: matrix | feed | http</span>
+  "<span class="key">sender</span>":         <span class="val">"@alice:matrix.org"</span>,
+  "<span class="key">message_body</span>":   <span class="val">"Hey @hub can you summarise this thread?"</span>,
+  "<span class="key">payload</span>":        <span class="val">{ "room_id": "!abc:localhost", "thread": [...] }</span>,
+  "<span class="key">status</span>":         <span class="val">"pending"</span>,             <span class="comment">// pending | processing | done | failed | dlq</span>
+  "<span class="key">priority</span>":       <span class="val">0</span>,
+  "<span class="key">retry_count</span>":    <span class="val">0</span>,
+  "<span class="key">max_retries</span>":    <span class="val">3</span>,
+  "<span class="key">claim_timeout_s</span>": <span class="val">300</span>
+}</pre>
+
+  <h3>HTTP API</h3>
+  <pre>
+POST /queues/{queue_name}/enqueue      <span class="comment">// add a job</span>
+POST /queues/{queue_name}/dequeue      <span class="comment">// claim next job (exclusive)</span>
+GET  /queues/{queue_name}/peek         <span class="comment">// inspect without claiming</span>
+GET  /queues                           <span class="comment">// list all queues with counts</span>
+POST /messages/{id}/ack                <span class="comment">// mark done</span>
+POST /messages/{id}/nack               <span class="comment">// return to queue or dead-letter</span>
+GET  /health</pre>
+
+  <h3>Retry and reaper</h3>
+  <p>
+    A background reaper runs every <code>QUEUE_REAPER_INTERVAL_S</code> seconds (default 30).
+    Any message in <code>processing</code> state that has been claimed for longer than
+    <code>claim_timeout_s</code> is automatically nacked and retried. After <code>max_retries</code>
+    failures it moves to <code>dlq</code>.
+  </p>
+
+
+  <!-- ── EVENT BUS DETAIL ── -->
+  <h2>Event Bus — <code>services/eventbus/</code></h2>
+
+  <p>
+    An ephemeral, in-memory pub/sub broker exposed as Server-Sent Events (SSE).
+    Any process can publish a named event; any client holding an open HTTP connection
+    receives it in real time.
+  </p>
+
+  <div class="tree">
+    <span class="dir">services/eventbus/</span><br>
+    &nbsp;&nbsp;<span class="file">broker.py</span> &nbsp;&nbsp;<span class="note">EventBroker — asyncio.Queue fan-out, fnmatch topic matching, module singleton</span><br>
+    &nbsp;&nbsp;<span class="file">http.py</span> &nbsp;&nbsp;&nbsp;&nbsp;<span class="note">FastAPI — POST /publish · GET /subscribe (SSE) · GET /health</span><br>
+    &nbsp;&nbsp;<span class="file">main.py</span> &nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Entry point — uvicorn on port 8082</span>
+  </div>
+
+  <h3>Publishing an event</h3>
+  <pre>
+POST http://eventbus:8082/publish
+{
+  "<span class="key">topic</span>":   <span class="val">"queue.job.enqueued"</span>,
+  "<span class="key">source</span>":  <span class="val">"ingest"</span>,
+  "<span class="key">payload</span>": { "<span class="key">job_id</span>": <span class="val">"msg_abc"</span>, "<span class="key">sender</span>": <span class="val">"@alice:matrix.org"</span> }
+}</pre>
+
+  <h3>Subscribing via SSE</h3>
+  <pre>
+GET http://eventbus:8082/subscribe?topic=queue.job.*
+
+<span class="comment"># Wildcard examples</span>
+topic=*                  <span class="comment">// everything</span>
+topic=queue.job.*        <span class="comment">// all job events</span>
+topic=feed.*             <span class="comment">// all feed events</span>
+topic=ingest.matrix.*    <span class="comment">// all Matrix ingest events</span></pre>
+
+  <p>
+    Each event arrives as a standard SSE frame. The <code>data</code> field is JSON with
+    <code>id</code>, <code>topic</code>, <code>source</code>, <code>payload</code>, and <code>timestamp</code>.
+  </p>
+
+  <h3>Topic conventions</h3>
+  <pre>
+queue.job.enqueued          <span class="comment">// ingest pushed a job to the queue</span>
+feed.{feed_id}.item         <span class="comment">// feeds service found a new RSS item</span>
+ingest.matrix.message       <span class="comment">// Matrix message (no mention, no concierge)</span>
+frank.session.opened        <span class="comment">// (future) Frank started handling a job</span>
+frank.session.closed        <span class="comment">// (future) Frank finished</span></pre>
+
+  <h3>Slow consumer policy</h3>
+  <p>
+    Each subscriber gets a bounded asyncio queue (max 256 events). If a subscriber falls
+    behind, events are silently dropped for that subscriber rather than blocking the broker.
+    This keeps the broker non-blocking at the cost of delivery guarantees — acceptable for
+    UI updates and monitoring, not suitable for critical work items (use the queue for those).
+  </p>
+
+
+  <!-- ── MATRIX / SYNAPSE ── -->
+  <h2>Matrix Homeserver — <code>infra/matrix/</code></h2>
+
+  <p>
+    Each Hub instance runs its own Matrix Synapse homeserver. This is intentional:
+    Hub is forkable. When you fork Hub, your instance gets its own homeserver with its own
+    <code>server_name</code>. Federation (port 8448) is enabled by default so users on
+    <em>any</em> Matrix homeserver — including other Hub instances — can join your rooms.
+  </p>
+
+  <div class="tree">
+    <span class="dir">infra/matrix/</span><br>
+    &nbsp;&nbsp;<span class="file">docker-compose.yml</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">matrix-db (Postgres 16) + matrix-synapse services</span><br>
+    &nbsp;&nbsp;<span class="dir">config/</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">homeserver.yaml</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Config template — uses $VAR syntax, rendered via envsubst</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">homeserver-local.yaml</span> &nbsp;&nbsp;&nbsp;<span class="note">Rendered config for local dev (gitignored, contains secrets)</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">log.config</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Synapse log configuration</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">.env.example</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Copy to .env and fill in secrets</span><br>
+    &nbsp;&nbsp;<span class="dir">aws/</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">main.tf</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Terraform — EC2 instance + security groups + EIP</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">user_data.sh.tpl</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Cloud-init: installs Docker, renders config, starts Synapse</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">variables.tf / outputs.tf</span> &nbsp;<span class="note">Terraform variable declarations and outputs</span>
+  </div>
+
+  <h3>Federation design intent</h3>
+  <p>
+    The Hub codebase is a <strong>forkable template</strong>, not a single deployment.
+    Each fork becomes an independent node. Matrix federation is the inter-node real-time
+    layer — when two Hub instances federate, their rooms sync automatically over the Matrix
+    protocol. No custom bridge or relay is needed.
+  </p>
+  <p>
+    For federation to work your homeserver needs a <strong>public domain name</strong> and
+    port 8448 reachable from the internet. Local development on <code>localhost</code>
+    works for intra-hub testing but federation with external servers requires a public host.
+  </p>
+
+
+  <!-- ── INGEST DETAIL ── -->
+  <h2>Ingest Service — <code>services/ingest/</code></h2>
+
+  <p>
+    A Matrix bot client (<code>@hub:localhost</code>) that connects to your Synapse homeserver,
+    listens for room events, and routes them into the rest of the system.
+  </p>
+
+  <div class="tree">
+    <span class="dir">services/ingest/</span><br>
+    &nbsp;&nbsp;<span class="file">matrix_client.py</span> &nbsp;<span class="note">HubBotClient — matrix-nio AsyncClient, event routing logic</span><br>
+    &nbsp;&nbsp;<span class="file">normalizer.py</span> &nbsp;&nbsp;&nbsp;&nbsp;<span class="note">normalize_mention() + normalize_concierge() → QueuePayload</span><br>
+    &nbsp;&nbsp;<span class="file">config.py</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">IngestSettings — MATRIX_HOMESERVER, MATRIX_USER, CONCIERGE_ROOM_IDS, etc.</span><br>
+    &nbsp;&nbsp;<span class="file">main.py</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Entry point — asyncio.run(HubBotClient.start())</span>
+  </div>
+
+  <h3>Routing logic</h3>
+  <p>For every message the bot sees in any joined room:</p>
+
+  <div class="flow">
+    <div class="flow-row">
+      <div class="flow-node yellow">room is in CONCIERGE_ROOM_IDS</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node red">enqueue (last message only, no thread)</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-node yellow">@hub mentioned in message</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node accent">fetch last 20 messages as thread</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node red">enqueue (with thread context)</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-node yellow">all other messages</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node cyan">event bus only<br><small>ingest.matrix.message</small></div>
+    </div>
+  </div>
+
+  <p>After enqueueing, the bot also publishes <code>queue.job.enqueued</code> to the event bus.</p>
+
+  <h3>Startup sequence</h3>
+  <p>
+    On startup the bot does an initial sync with <code>timeout=0</code> to drain
+    the backlog of messages that arrived while it was offline — without processing them.
+    This prevents replaying old messages on every restart. Then it calls
+    <code>sync_forever(timeout=30_000)</code> to receive live events.
+  </p>
+
+
+  <!-- ── FEEDS DETAIL ── -->
+  <h2>Feeds Service — <code>services/feeds/</code></h2>
+
+  <p>
+    Polls RSS and Atom feeds on configurable intervals. Deduplicates items using a SQLite
+    seen-GUIDs table. Publishes new items to the event bus and optionally enqueues them
+    for Frank if keywords match.
+  </p>
+
+  <div class="tree">
+    <span class="dir">services/feeds/</span><br>
+    &nbsp;&nbsp;<span class="file">main.py</span> &nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Entry point — reads FEEDS_CONFIG JSON, starts one poll loop per feed</span><br>
+    &nbsp;&nbsp;<span class="file">fetcher.py</span> &nbsp;&nbsp;<span class="note">FeedFetcher — feedparser + SQLite dedup at /data/feeds.db</span><br>
+    &nbsp;&nbsp;<span class="file">models.py</span> &nbsp;&nbsp;&nbsp;<span class="note">FeedConfig + FeedItem dataclasses</span>
+  </div>
+
+  <h3>Feed configuration</h3>
+  <p>
+    Set the <code>FEEDS_CONFIG</code> environment variable to a JSON array. If empty or unset,
+    the service starts idle and waits.
+  </p>
+  <pre>
+FEEDS_CONFIG='[
+  {
+    "<span class="key">id</span>": <span class="val">"hn"</span>,
+    "<span class="key">name</span>": <span class="val">"Hacker News"</span>,
+    "<span class="key">url</span>": <span class="val">"https://news.ycombinator.com/rss"</span>,
+    "<span class="key">poll_interval_s</span>": <span class="val">300</span>
+  },
+  {
+    "<span class="key">id</span>": <span class="val">"myblog"</span>,
+    "<span class="key">name</span>": <span class="val">"My Blog"</span>,
+    "<span class="key">url</span>": <span class="val">"https://example.com/feed.xml"</span>,
+    "<span class="key">poll_interval_s</span>": <span class="val">600</span>,
+    "<span class="key">enqueue_on_match</span>": <span class="val">true</span>,
+    "<span class="key">match_keywords</span>": <span class="val">["AI", "agent"]</span>
+  }
+]'</pre>
+
+
+  <!-- ── GETTING STARTED ── -->
+  <h2>Getting Started — Spinning Up a Fresh Instance</h2>
+
+  <p>
+    These steps are written for someone who has just cloned or forked Hub and wants to
+    run the full stack locally.
+  </p>
+
+  <h3>Prerequisites</h3>
+  <ul>
+    <li>Docker Desktop (or Docker Engine + Compose v2)</li>
+    <li>Python 3.11+ (only needed if running services outside Docker)</li>
+    <li>The <code>envsubst</code> CLI (part of <code>gettext</code> — <code>brew install gettext</code> on Mac)</li>
+  </ul>
+
+  <h3>Step 1 — Create the shared network</h3>
+  <p>
+    All services join a Docker network called <code>agentnet</code>. It must exist before
+    any compose stack starts. Create it once:
+  </p>
+  <pre>docker network create agentnet</pre>
+
+  <h3>Step 2 — Configure environment variables</h3>
+  <p>Copy the example env file and fill in the required secrets:</p>
+  <pre>cp .env.example .env    <span class="comment"># or create .env from scratch</span></pre>
+
+  <p>Minimum required values in <code>.env</code>:</p>
+  <pre>
+<span class="comment"># Matrix / Synapse</span>
+MATRIX_SERVER_NAME=localhost           <span class="comment"># change to your domain for federation</span>
+MATRIX_DB_PASSWORD=&lt;random-hex&gt;
+MATRIX_REGISTRATION_SECRET=&lt;random-hex&gt;
+MATRIX_MACAROON_SECRET=&lt;random-hex&gt;
+MATRIX_FORM_SECRET=&lt;random-hex&gt;
+MATRIX_DB_USER=synapse
+MATRIX_DB_NAME=synapse
+MATRIX_DB_HOST=matrix-db
+MATRIX_DB_PORT=5432
+MATRIX_HTTP_PORT=8008
+MATRIX_HTTPS_PORT=8448
+MATRIX_USER=@hub:localhost
+MATRIX_PASSWORD=&lt;set this after first run&gt;</pre>
+
+  <p>Generate random secrets with:</p>
+  <pre>openssl rand -hex 32</pre>
+
+  <h3>Step 3 — Render the Synapse config</h3>
+  <p>
+    The config template uses <code>$VAR</code> substitution. Render it to
+    <code>homeserver-local.yaml</code> (gitignored) before starting Synapse:
+  </p>
+  <pre>
+cd infra/matrix
+set -a && source ../../.env && set +a
+envsubst &lt; config/homeserver.yaml &gt; config/homeserver-local.yaml</pre>
+
+  <h3>Step 4 — Start Matrix</h3>
+  <pre>
+cd infra/matrix
+docker compose up -d</pre>
+
+  <p>
+    Wait for the healthcheck to pass (~30s). Verify Synapse is up:
+  </p>
+  <pre>curl http://localhost:8008/health    <span class="comment"># should return {}</span></pre>
+
+  <h3>Step 5 — Create the hub bot user</h3>
+  <p>
+    The ingest service logs in as <code>@hub:localhost</code>. Create this user via the
+    admin API (requires the registration secret from your <code>.env</code>):
+  </p>
+  <pre>
+<span class="comment"># Create an admin user first (one-time, use your registration secret)</span>
+curl -X POST http://localhost:8008/_matrix/client/v3/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "&lt;your-admin-password&gt;",
+    "auth": {"type": "m.login.registration_token", "token": "&lt;MATRIX_REGISTRATION_SECRET&gt;"}
+  }'
+
+<span class="comment"># Get an admin access token</span>
+curl -X POST http://localhost:8008/_matrix/client/v3/login \
+  -d '{"type":"m.login.password","user":"admin","password":"&lt;your-admin-password&gt;"}'
+
+<span class="comment"># Create the hub bot user via admin API</span>
+curl -X PUT http://localhost:8008/_synapse/admin/v2/users/@hub:localhost \
+  -H "Authorization: Bearer &lt;admin-access-token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"password": "&lt;MATRIX_PASSWORD&gt;", "admin": false}'</pre>
+
+  <p>
+    Set <code>MATRIX_PASSWORD</code> in your <code>.env</code> to whatever password you used above.
+  </p>
+
+  <h3>Step 6 — Start the hub services</h3>
+  <pre>
+cd /path/to/hub
+docker compose up -d</pre>
+
+  <p>This starts: queue, eventbus, ingest, feeds, gateway-http, runtime-grpc, tool-sandbox, kb-indexer, qdrant.</p>
+
+  <p>Verify everything is up:</p>
+  <pre>
+curl http://localhost:8081/health    <span class="comment"># queue</span>
+curl http://localhost:8082/health    <span class="comment"># event bus</span>
+curl http://localhost:8080/health    <span class="comment"># gateway</span></pre>
+
+  <h3>Step 7 — Configure feeds (optional)</h3>
+  <p>
+    Add feeds by setting <code>FEEDS_CONFIG</code> in your <code>.env</code> before starting,
+    or by updating the environment in <code>docker-compose.yml</code> and restarting the feeds service:
+  </p>
+  <pre>docker compose restart feeds</pre>
+
+  <h3>Step 8 — Connect a Matrix client</h3>
+  <p>
+    Point any Matrix client (Element, FluffyChat, etc.) at
+    <code>http://localhost:8008</code> to create rooms and send messages.
+    The ingest bot will automatically pick up @-mentions and concierge room messages.
+  </p>
+
+  <hr class="divider" />
+
+  <h2>Directory Map</h2>
+
+  <div class="tree">
+    <span class="dir">hub/</span><br>
+    &nbsp;&nbsp;<span class="dir">inbox/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Queue service — durable SQLite message queue</span><br>
+    &nbsp;&nbsp;<span class="dir">services/</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">eventbus/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Ephemeral SSE event bus — broker.py + http.py</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">ingest/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Matrix bot client — routes messages → queue or event bus</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">feeds/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">RSS/Atom feed poller — feedparser + SQLite dedup</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">gateway_http/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">HTTP gateway → runtime gRPC</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">runtime_grpc/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Agent runtime — tool execution + KB search</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">tool_sandbox/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Sandboxed tool runner (cap_drop: ALL)</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">kb_indexer/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Qdrant knowledge base indexer</span><br>
+    &nbsp;&nbsp;<span class="dir">infra/</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">matrix/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Synapse homeserver — docker-compose + config template + Terraform</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">config/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">homeserver.yaml (template), homeserver-local.yaml (rendered, gitignored)</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">aws/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Terraform for EC2 deployment</span><br>
+    &nbsp;&nbsp;<span class="dir">libs/</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">common/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Shared utilities — logging, ID generation</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="dir">tools/</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Tool definitions for the agent runtime</span><br>
+    &nbsp;&nbsp;<span class="file">docker-compose.yml</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">All hub services (not Matrix — that's in infra/matrix/)</span><br>
+    &nbsp;&nbsp;<span class="file">.env</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Secrets and config — gitignored</span><br>
+    &nbsp;&nbsp;<span class="file">Dockerfile</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="note">Single image for all Python services</span>
+  </div>
+
+  <hr class="divider" />
+
+  <p style="color: var(--muted); font-size: 0.82rem;">
+    Generated 2026-03-29 · Hub Architecture v0.1
+  </p>
+
+</div>
+</body>
+</html>

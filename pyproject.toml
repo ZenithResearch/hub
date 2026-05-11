@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-platform"
+version = "0.1.0"
+description = "Generalized backend scaffold for an AI agent platform (infra plumbing only)."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.110",
+  "python-multipart>=0.0.9",
+  "httpx>=0.27.0",
+  "uvicorn[standard]>=0.27",
+  "grpcio>=1.78.0",
+  "grpcio-reflection>=1.78.0",
+  "protobuf>=5.0.0",
+  "pydantic>=2.6.0",
+  "pydantic-settings>=2.2.0",
+  "structlog>=24.1.0",
+  "qdrant-client[fastembed]>=1.7.0",
+  "jsonschema>=4.21.0",
+  "PyYAML>=6.0.1",
+  "sse-starlette>=1.6.0",
+  "matrix-nio>=0.21.0",
+  "aiohttp>=3.9.0",
+  "feedparser>=6.0.0",
+  "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6.0",
+  "grpcio-tools>=1.78.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["libs*", "services*", "inbox*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]
+

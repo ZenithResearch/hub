@@ -1,0 +1,4 @@
+{"type":"identity","name":"Gabriel Atkinson","display_name":"Gabe","created":"2026-03-27"}
+{"type":"contact","email":null,"matrix":null,"phone":null}
+{"type":"auth","public_key":null,"key_algorithm":"EdDSA","trust_level":"trusted","trusted_since":"2026-03-27"}
+{"type":"access","receive_messages":true,"send_messages":true,"trigger_processes":true,"read_vault":true,"write_vault":true,"admin":true}

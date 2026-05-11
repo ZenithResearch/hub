@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Frank — Process Monitor</title>
+<style>
+/* ── Zenith design tokens (dark theme) ────────────────────── */
+:root {
+  --color-base:               #131a18;
+  --color-base-subtle:        #202b27;
+  --color-base-raised:        #193830;
+  --color-base-content:       #D1FAF0;
+  --color-base-muted:         #55a882;
+  --color-base-border:        rgba(155, 251, 227, 0.12);
+  --color-base-border-strong: rgba(155, 251, 227, 0.24);
+
+  --color-brand:              #58efc9;
+  --color-brand-subtle:       rgba(88, 239, 201, 0.08);
+  --color-brand-border:       rgba(88, 239, 201, 0.20);
+
+  --color-success:            #86efac;
+  --color-success-subtle:     rgba(134, 239, 172, 0.10);
+  --color-success-border:     rgba(134, 239, 172, 0.22);
+
+  --color-error:              #fda4af;
+  --color-error-subtle:       rgba(253, 164, 175, 0.10);
+  --color-error-border:       rgba(253, 164, 175, 0.22);
+
+  --color-warning:            #fde047;
+  --color-warning-subtle:     rgba(253, 224, 71, 0.10);
+  --color-warning-border:     rgba(253, 224, 71, 0.22);
+
+  --color-glass-bg:           rgba(32, 43, 39, 0.72);
+  --color-glass-border:       rgba(155, 251, 227, 0.14);
+
+  --font-technical: 'Space Mono', 'Courier New', monospace;
+  --font-corporate: system-ui, -apple-system, sans-serif;
+
+  --radius-sm: 4px;
+  --radius:    6px;
+  --radius-md: 8px;
+
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-6:  24px;
+  --space-8:  32px;
+
+  --text-body:    16px;
+  --text-body-sm: 14px;
+  --text-label:   12px;
+}
+
+/* ── Reset + base ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--color-base);
+  color: var(--color-base-content);
+  font-family: var(--font-corporate);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* ── Layout ───────────────────────────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--color-base-border);
+  position: sticky;
+  top: 0;
+  background: var(--color-base);
+  z-index: 10;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+h1 {
+  font-family: var(--font-technical);
+  font-size: var(--text-body);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  color: var(--color-brand);
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-brand);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.last-updated {
+  font-family: var(--font-technical);
+  font-size: var(--text-label);
+  color: var(--color-base-muted);
+  letter-spacing: 0.03em;
+}
+
+.header-actions { display: flex; align-items: center; gap: var(--space-3); }
+.config-button, .modal-button {
+  font-family: var(--font-technical);
+  font-size: var(--text-label);
+  color: var(--color-brand);
+  background: var(--color-brand-subtle);
+  border: 1px solid var(--color-brand-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+.config-button:focus, .modal-button:focus, .secret-input:focus { outline: 2px solid var(--color-brand); outline-offset: 2px; }
+.config-modal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 20;
+}
+.config-modal.open { display: flex; }
+.config-panel {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--color-base-raised);
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-6);
+  box-shadow: 0 20px 80px rgba(0,0,0,0.35);
+}
+.config-row { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-4) 0; }
+.secret-input {
+  background: var(--color-base);
+  color: var(--color-base-content);
+  border: 1px solid var(--color-base-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  font-family: var(--font-technical);
+}
+.config-status { font-family: var(--font-technical); font-size: var(--text-label); color: var(--color-base-muted); }
+.config-actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-4); }
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* ── Section ──────────────────────────────────────────────── */
+.section-label {
+  font-family: var(--font-technical);
+  font-size: var(--text-label);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-base-muted);
+  margin-bottom: var(--space-3);
+}
+
+.case-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.empty-state {
+  font-family: var(--font-technical);
+  font-size: var(--text-body-sm);
+  color: var(--color-base-muted);
+  padding: var(--space-6);
+  text-align: center;
+  border: 1px dashed var(--color-base-border);
+  border-radius: var(--radius-md);
+}
+
+/* ── Case card ────────────────────────────────────────────── */
+.case-card {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-base-border);
+  background: var(--color-base-raised);
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.case-card:hover { border-color: var(--color-base-border-strong); }
+
+.case-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  user-select: none;
+}
+
+.case-header:hover { background: rgba(155, 251, 227, 0.03); }
+
+.status-badge {
+  flex-shrink: 0;
+  font-family: var(--font-technical);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.badge-OPEN      { background: var(--color-warning-subtle);  color: var(--color-warning);  border: 1px solid var(--color-warning-border); }
+.badge-READY     { background: var(--color-brand-subtle);    color: var(--color-brand);    border: 1px solid var(--color-brand-border); }
+.badge-RUNNING   { background: var(--color-brand-subtle);    color: var(--color-brand);    border: 1px solid var(--color-brand-border); }
+.badge-IN_PROGRESS { background: var(--color-brand-subtle);  color: var(--color-brand);    border: 1px solid var(--color-brand-border); }
+.badge-BLOCKED   { background: var(--color-warning-subtle);  color: var(--color-warning);  border: 1px solid var(--color-warning-border); }
+.badge-COMPLETE,
+.badge-COMPLETED { background: var(--color-success-subtle);  color: var(--color-success);  border: 1px solid var(--color-success-border); }
+.badge-FAILED    { background: var(--color-error-subtle);    color: var(--color-error);    border: 1px solid var(--color-error-border); }
+
+.case-title {
+  flex: 1;
+  font-size: var(--text-body-sm);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.case-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-shrink: 0;
+}
+
+.meta-field {
+  font-family: var(--font-technical);
+  font-size: var(--text-label);
+  color: var(--color-base-muted);
+  white-space: nowrap;
+}
+
+.expand-icon {
+  font-family: var(--font-technical);
+  font-size: 10px;
+  color: var(--color-base-muted);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.case-card.expanded .expand-icon { transform: rotate(180deg); }
+
+/* ── Case detail ──────────────────────────────────────────── */
+.case-detail {
+  display: none;
+  border-top: 1px solid var(--color-base-border);
+  padding: var(--space-4);
+  gap: var(--space-4);
+  flex-direction: column;
+}
+
+.case-card.expanded .case-detail { display: flex; }
+
+.detail-section-label {
+  font-family: var(--font-technical);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-base-muted);
+  margin-bottom: var(--space-2);
+}
+
+/* Steps */
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-body-sm);
+}
+
+.step-badge {
+  font-family: var(--font-technical);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.badge-PENDING   { background: var(--color-base-subtle);      color: var(--color-base-muted);  border: 1px solid var(--color-base-border); }
+.badge-READY     { background: var(--color-brand-subtle);     color: var(--color-brand);       border: 1px solid var(--color-brand-border); }
+.badge-RUNNING   { background: var(--color-brand-subtle);     color: var(--color-brand);       border: 1px solid var(--color-brand-border); }
+.badge-IN_PROGRESS { background: var(--color-brand-subtle);   color: var(--color-brand);       border: 1px solid var(--color-brand-border); }
+.badge-COMPLETED,
+.badge-SUCCESS   { background: var(--color-success-subtle);   color: var(--color-success);     border: 1px solid var(--color-success-border); }
+.badge-FAILED,
+.badge-ERROR     { background: var(--color-error-subtle);     color: var(--color-error);       border: 1px solid var(--color-error-border); }
+.badge-SKIPPED   { background: var(--color-base-subtle);      color: var(--color-base-muted);  border: 1px solid var(--color-base-border); }
+
+.step-name {
+  color: var(--color-base-content);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Logs */
+.log-area {
+  background: var(--color-base);
+  border: 1px solid var(--color-base-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: var(--font-technical);
+  font-size: var(--text-label);
+  line-height: 1.6;
+  color: var(--color-base-muted);
+}
+
+.log-entry { display: flex; gap: var(--space-2); }
+.log-ts    { flex-shrink: 0; opacity: 0.55; }
+.log-msg-info  { color: var(--color-base-muted); }
+.log-msg-error { color: var(--color-error); }
+.log-msg-warn  { color: var(--color-warning); }
+
+/* ── Objective ────────────────────────────────────────────── */
+.objective-text {
+  font-size: var(--text-body-sm);
+  color: var(--color-base-muted);
+  font-style: italic;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--color-brand-border);
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="pulse-dot" id="pulse"></div>
+    <h1>FRANK / PROCESS MONITOR</h1>
+  </div>
+  <div class="header-actions">
+    <button class="config-button" onclick="openConfig()">CONFIGURATION</button>
+    <span class="last-updated" id="last-updated">—</span>
+  </div>
+</header>
+
+<div class="config-modal" id="config-modal" role="dialog" aria-modal="true" aria-labelledby="config-title">
+  <div class="config-panel">
+    <div class="section-label" id="config-title">Configuration</div>
+    <div class="config-row">
+      <label class="detail-section-label" for="elevenlabs-key">Speech-to-text / ELEVENLABS_API_KEY</label>
+      <input class="secret-input" id="elevenlabs-key" type="password" autocomplete="off" placeholder="paste key; never echoed back" />
+      <div class="config-status" id="elevenlabs-status">loading…</div>
+    </div>
+    <div class="config-actions">
+      <button class="modal-button" onclick="validateSttConfig()">TEST</button>
+      <button class="modal-button" onclick="saveSttSecret()">SAVE</button>
+      <button class="modal-button" onclick="deleteSttSecret()">DELETE</button>
+      <button class="modal-button" onclick="closeConfig()">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div>
+    <div class="section-label">Active</div>
+    <div class="case-list" id="open-list">
+      <div class="empty-state">No active cases</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="section-label">Recently completed</div>
+    <div class="case-list" id="done-list">
+      <div class="empty-state">No recent completions</div>
+    </div>
+  </div>
+</main>
+
+<script>
+const CASES_URL = 'http://localhost:8083';
+const POLL_MS   = 3000;
+
+// ── Configuration ─────────────────────────────────────────────────────────────
+
+async function loadConfigStatus() {
+  const statusEl = document.getElementById('elevenlabs-status');
+  try {
+    const r = await fetch('/v1/admin/config');
+    if (!r.ok) throw new Error(`config API ${r.status}`);
+    const payload = await r.json();
+    const secret = payload.secrets?.ELEVENLABS_API_KEY || {};
+    statusEl.textContent = secret.configured ? `configured (${secret.preview})` : 'not configured';
+  } catch (err) {
+    statusEl.textContent = 'config unavailable';
+  }
+}
+
+window.openConfig = async () => {
+  document.getElementById('config-modal').classList.add('open');
+  document.getElementById('elevenlabs-key').value = '';
+  await loadConfigStatus();
+};
+
+window.closeConfig = () => document.getElementById('config-modal').classList.remove('open');
+
+window.saveSttSecret = async () => {
+  const input = document.getElementById('elevenlabs-key');
+  const value = input.value.trim();
+  if (!value) return;
+  const r = await fetch('/v1/admin/config/secrets/ELEVENLABS_API_KEY', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ value })
+  });
+  input.value = '';
+  document.getElementById('elevenlabs-status').textContent = r.ok ? 'saved' : `save failed (${r.status})`;
+  await loadConfigStatus();
+};
+
+window.deleteSttSecret = async () => {
+  const r = await fetch('/v1/admin/config/secrets/ELEVENLABS_API_KEY', { method: 'DELETE' });
+  document.getElementById('elevenlabs-status').textContent = r.ok ? 'deleted' : `delete failed (${r.status})`;
+  await loadConfigStatus();
+};
+
+window.validateSttConfig = async () => {
+  const r = await fetch('/v1/admin/config/validate/stt', { method: 'POST' });
+  const payload = await r.json();
+  document.getElementById('elevenlabs-status').textContent = payload.ok ? 'STT config present' : `missing ${payload.missing.join(', ')}`;
+};
+
+// ── Data ──────────────────────────────────────────────────────────────────────
+
+const expandedIds = new Set();
+const caseCache   = {};  // id → { case, steps, logs }
+
+async function fetchCases(status, limit = 50) {
+  const r = await fetch(`${CASES_URL}/cases?status=${status}&limit=${limit}`);
+  if (!r.ok) throw new Error(`cases API ${r.status}`);
+  return (await r.json()).cases;
+}
+
+async function fetchDetail(caseId) {
+  const r = await fetch(`${CASES_URL}/cases/${caseId}`);
+  if (!r.ok) return null;
+  return r.json();
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+
+function elapsed(createdAt) {
+  const ms = Date.now() - new Date(createdAt).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60)   return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
+function ts(iso) {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function renderCase(c, detail) {
+  const isExpanded = expandedIds.has(c.id);
+  const steps = detail?.steps ?? [];
+  const logs  = detail?.logs  ?? [];
+  const caseId = String(c.id ?? '');
+  const status = cssToken(c.status);
+
+  const stepsHtml = steps.length
+    ? steps.map(s => `
+        <div class="step-row">
+          <span class="step-badge badge-${cssToken(s.status)}">${esc(s.status)}</span>
+          <span class="step-name">${esc(s.name)}</span>
+        </div>`).join('')
+    : '<span style="color:var(--color-base-muted);font-size:12px;font-family:var(--font-technical)">no steps recorded</span>';
+
+  const logsHtml = logs.length
+    ? [...logs].reverse().map(l => `
+        <div class="log-entry">
+          <span class="log-ts">${ts(l.created_at)}</span>
+          <span class="log-msg-${cssToken(l.type)}">${esc(l.message)}</span>
+        </div>`).join('')
+    : '<span style="opacity:0.5">no logs</span>';
+
+  const objectiveHtml = c.objective
+    ? `<div class="objective-text">${esc(c.objective)}</div>` : '';
+
+  return `
+    <div class="case-card ${isExpanded ? 'expanded' : ''}" data-id="${attr(caseId)}">
+      <div class="case-header" data-case-id="${attr(caseId)}">
+        <span class="status-badge badge-${status}">${esc(c.status)}</span>
+        <span class="case-title">${esc(c.title)}</span>
+        <div class="case-meta">
+          <span class="meta-field">${esc(c.sender)}</span>
+          <span class="meta-field">${elapsed(c.created_at)}</span>
+        </div>
+        <span class="expand-icon">▾</span>
+      </div>
+      <div class="case-detail">
+        ${objectiveHtml}
+        ${steps.length ? `<div>
+          <div class="detail-section-label">Steps</div>
+          <div class="step-list">${stepsHtml}</div>
+        </div>` : ''}
+        <div>
+          <div class="detail-section-label">Logs</div>
+          <div class="log-area">${logsHtml}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function attr(str) {
+  return esc(str).replace(/'/g, '&#39;');
+}
+
+function cssToken(str) {
+  return String(str ?? '').replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+function renderList(el, cases) {
+  if (!cases.length) {
+    el.innerHTML = '<div class="empty-state">—</div>';
+    return;
+  }
+  el.innerHTML = cases.map(c => renderCase(c, caseCache[c.id])).join('');
+  el.querySelectorAll('.case-header[data-case-id]').forEach(header => {
+    header.addEventListener('click', () => toggleCase(header.dataset.caseId || ''));
+  });
+}
+
+// ── Toggle expand ─────────────────────────────────────────────────────────────
+
+window.toggleCase = async (id) => {
+  if (expandedIds.has(id)) {
+    expandedIds.delete(id);
+  } else {
+    expandedIds.add(id);
+    if (!caseCache[id]) {
+      const detail = await fetchDetail(id);
+      if (detail) caseCache[id] = detail;
+    }
+  }
+  poll();  // re-render immediately
+};
+
+// ── Poll ──────────────────────────────────────────────────────────────────────
+
+async function poll() {
+  try {
+    const [open, ready, inProgress, blocked, complete, failed] = await Promise.all([
+      fetchCases('OPEN', 50),
+      fetchCases('READY', 50),
+      fetchCases('IN_PROGRESS', 50),
+      fetchCases('BLOCKED', 50),
+      fetchCases('COMPLETED', 10),
+      fetchCases('FAILED', 10),
+    ]);
+
+    const active = [...open, ...ready, ...inProgress, ...blocked]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    // Refresh detail for expanded open cases
+    await Promise.all(
+      active.filter(c => expandedIds.has(c.id)).map(async c => {
+        const detail = await fetchDetail(c.id);
+        if (detail) caseCache[c.id] = detail;
+      })
+    );
+
+    const openEl = document.getElementById('open-list');
+    const doneEl = document.getElementById('done-list');
+    renderList(openEl, active);
+    renderList(doneEl, [...complete, ...failed].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    ).slice(0, 10));
+
+    document.getElementById('last-updated').textContent =
+      'updated ' + new Date().toLocaleTimeString();
+    document.getElementById('pulse').style.background = 'var(--color-brand)';
+  } catch (err) {
+    console.error('poll error', err);
+    document.getElementById('pulse').style.background = 'var(--color-error)';
+    document.getElementById('last-updated').textContent = 'connection error';
+  }
+}
+
+poll();
+setInterval(poll, POLL_MS);
+</script>
+</body>
+</html>

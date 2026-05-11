@@ -1,0 +1,11 @@
+{
+  "doc_id": "skill.example.echo_tool",
+  "doc_type": "skill",
+  "title": "Using echo_tool",
+  "content": "This skill documents the example `echo_tool` tool. It accepts a JSON input payload and returns a JSON output payload that echoes the input along with the request_id.\n\nUse it to validate the end-to-end tool execution plumbing.",
+  "tags": ["example", "tool", "echo"],
+  "source": "kb_seed",
+  "created_at": "2026-02-20T00:00:00Z",
+  "updated_at": "2026-02-20T00:00:00Z"
+}
+

@@ -1,0 +1,11 @@
+{
+  "doc_id": "knowledge.example.kb_document_schema",
+  "doc_type": "knowledge",
+  "title": "KB document schema",
+  "content": "KB documents are stored as text with metadata and indexed by vector search. Required fields:\n\n- doc_id (stable string)\n- doc_type (skill|process|knowledge)\n- title\n- content\n- tags (string list)\n- source\n- created_at / updated_at\n\nThis repo uses Qdrant locally and a deterministic hash-based embedding stub so it runs without external API keys.",
+  "tags": ["example", "knowledge", "schema", "qdrant"],
+  "source": "kb_seed",
+  "created_at": "2026-02-20T00:00:00Z",
+  "updated_at": "2026-02-20T00:00:00Z"
+}
+

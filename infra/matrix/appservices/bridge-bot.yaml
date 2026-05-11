@@ -1,0 +1,25 @@
+# Bridge Bot — Application Service Registration
+#
+# The matrix_bridge service receives room events pushed by Synapse and
+# relays them to the internal queue + eventbus.
+#
+# Mount at /config/appservices/bridge-bot.yaml in the Synapse container.
+# Tokens sourced from .env via envsubst — never commit literal values.
+
+id: bridge-bot
+
+url: "${BRIDGE_BOT_AS_URL}"
+
+as_token: "${BRIDGE_BOT_AS_TOKEN}"
+hs_token: "${BRIDGE_BOT_HS_TOKEN}"
+
+sender_localpart: bridge-bot
+
+rate_limited: false
+
+namespaces:
+  users:
+    - exclusive: true
+      regex: "@bridge-bot:.*"
+  rooms: []
+  aliases: []

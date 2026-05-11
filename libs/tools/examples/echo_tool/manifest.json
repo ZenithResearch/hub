@@ -1,0 +1,28 @@
+{
+  "name": "echo_tool",
+  "description": "Echoes the provided input payload. Example tool for validating sandbox plumbing.",
+  "version": "0.1.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "text": { "type": "string" },
+      "data": { "type": "object" }
+    },
+    "required": ["text"],
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "request_id": { "type": "string" },
+      "echo": { "type": "object" }
+    },
+    "required": ["request_id", "echo"],
+    "additionalProperties": false
+  },
+  "entrypoint": "libs.tools.examples.echo_tool.tool:run",
+  "network_access": false,
+  "timeout_ms": 5000,
+  "max_memory_mb": 128
+}
+

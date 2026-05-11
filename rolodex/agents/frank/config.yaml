@@ -1,0 +1,103 @@
+# rolodex/agents/frank/config.yaml
+# Authoritative runtime config for the Frank agent.
+# Supersedes definition.yaml as the canonical agent spec.
+
+agent:
+  name: Frank
+  hermes_home: /hub/rolodex/agents/frank
+  type: agent
+  version: "1.0.0"
+  description: >
+    Hub dispatcher. Primary consumer of the workspace message queue.
+    Receives inbound service requests, identifies intent and sender context,
+    matches to a process, materialises the process DAG as a case, and
+    dispatches execution steps to the appropriate worker agents.
+
+harness:
+  image: frank
+  dockerfile: docker/frank/Dockerfile
+  environment:
+    MODEL: gpt-5.3-codex
+    MAX_ITERATIONS: "7"
+    REQUEST_TIMEOUT_SECONDS: "120"
+    TEMPERATURE: "0.8"
+    MAX_TOKENS: "4096"
+    QUEUE_HTTP_URL: http://queue:8081
+    EVENTBUS_URL: http://eventbus:8082
+    CASES_HTTP_URL: http://cases:8083
+    QUEUE_NAME: workspace
+    HERMES_HOME: /hub/rolodex/agents/frank
+    TERMINAL_CWD: /hub
+    # OPENROUTER_API_KEY injected from hub .env at deploy time
+
+# Model config. Codex must use Hermes' provider/auth path, not a local
+# OpenAI-compatible endpoint.
+model:
+  provider: openai-codex
+  model: "gpt-5.3-codex"
+
+auxiliary:
+  provider: main
+  model: ""
+
+# Hermes terminal config — read from HERMES_HOME/config.yaml at agent startup.
+# TERMINAL_CWD env var is the primary override; terminal.cwd is the fallback.
+# Do not use cwd: "." — on the local backend this resolves to the container
+# launch directory, not HERMES_HOME.
+terminal:
+  backend: local
+  cwd: /hub
+
+# Filesystem access.
+# Enforcement is via Docker volume mounts — NOT by this config.
+filesystem:
+  mounts:
+    - host: "."
+      container: /hub
+      mode: ro
+    - host: ./rolodex/agents/frank
+      container: /hub/rolodex/agents/frank
+      mode: rw
+  allowed_roots:
+    - /hub/rolodex
+    - /hub/base/ops/processes
+    - /hub/inbox/types
+
+# Skills loaded by Frank's process-request skill from HERMES_HOME/skills/
+skills:
+  - name: process-request
+    path: skills/process-request.md
+  - name: dispatch-work
+    path: skills/dispatch-work.md
+  - name: match-process
+    path: skills/match-process.md
+  - name: create-process
+    path: skills/create-process.md
+  - name: generate-proc-dag
+    path: skills/generate-proc-dag.md
+
+# MCP servers available to Frank during tool execution.
+mcp_servers:
+  - name: filesystem
+    command: npx
+    args:
+      - "-y"
+      - "@modelcontextprotocol/server-filesystem"
+      - "/hub/rolodex"
+      - "/hub/base/ops/processes"
+      - "/hub/inbox/types"
+
+# Access grants (enforced at hub verification layer).
+access:
+  receive_messages: true
+  send_messages: true
+  trigger_processes: true
+  read_vault: true
+  write_vault: false
+  dispatch: true
+  admin: false
+
+resources:
+  memory_limit: 512Mi
+  cpu_limit: 500m
+  timeout_seconds: 300

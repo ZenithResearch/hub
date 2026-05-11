@@ -1,0 +1,11 @@
+{
+  "doc_id": "process.example.request_flow",
+  "doc_type": "process",
+  "title": "Request flow (gateway → runtime → sandbox)",
+  "content": "This process describes the plumbing-only request flow:\n\n1. Client sends `POST /v1/messages` to the HTTP gateway.\n2. Gateway forwards the request to the runtime via gRPC `SubmitUserMessage`.\n3. Client optionally opens `GET /v1/stream?request_id=...` for SSE; gateway proxies the runtime's gRPC stream.\n4. Runtime can call KB search (Qdrant) and tool execution (tool sandbox) without implementing any agent reasoning.\n\nThis document exists to seed and validate KB ingestion + search.",
+  "tags": ["example", "process", "gateway", "grpc", "sse"],
+  "source": "kb_seed",
+  "created_at": "2026-02-20T00:00:00Z",
+  "updated_at": "2026-02-20T00:00:00Z"
+}
+

@@ -1,0 +1,139 @@
+version: "3.8"
+
+# Matrix (Synapse) — local deployment
+# Usage:
+#   cp .env.example .env && edit .env
+#   docker compose -f docker-compose.matrix.yml up -d
+#
+# Joins the existing `agentnet` network so hub services can reach Matrix directly.
+# Create agentnet first if not already running: docker network create agentnet
+
+services:
+  matrix-db:
+    image: postgres:16-alpine
+    container_name: matrix-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${MATRIX_DB_USER:-synapse}
+      POSTGRES_PASSWORD: ${MATRIX_DB_PASSWORD:?MATRIX_DB_PASSWORD required}
+      POSTGRES_DB: ${MATRIX_DB_NAME:-synapse}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - matrix-db-data:/var/lib/postgresql/data
+    networks:
+      - agentnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MATRIX_DB_USER:-synapse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  matrix-synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: matrix-synapse
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - |
+        mkdir -p /data/appservices
+        chown -R 991:991 /data || true
+
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        def subst(text):
+            rendered_text = text
+            for key, value in os.environ.items():
+                marker = "$" + "{" + key + "}"
+                rendered_text = rendered_text.replace(marker, value)
+            return rendered_text
+
+        template = Path("/config/homeserver.yaml").read_text()
+        rendered = subst(template)
+
+        appservices_dir = Path("/data/appservices")
+        appservices_dir.mkdir(parents=True, exist_ok=True)
+
+        def render_appservice(name, required_env):
+            if any(not os.environ.get(key) for key in required_env):
+                return None
+            template_path = Path(f"/config/appservices/{name}.yaml")
+            if not template_path.exists():
+                return None
+            output_path = appservices_dir / f"{name}.resolved.yaml"
+            output_path.write_text(subst(template_path.read_text()))
+            return f"/data/appservices/{name}.resolved.yaml"
+
+        appservice_candidates = [
+            render_appservice("gateway-bot", ("GATEWAY_BOT_AS_TOKEN", "GATEWAY_BOT_HS_TOKEN")),
+            render_appservice("bridge-bot", ("BRIDGE_BOT_AS_TOKEN", "BRIDGE_BOT_HS_TOKEN")),
+        ]
+        if os.environ.get("MATRIX_REGISTER_SOPHIA_APP_SERVICE", "").lower() in {"1", "true", "yes"}:
+            appservice_candidates.append(
+                render_appservice("sophia", ("SOPHIA_AS_URL", "SOPHIA_AS_TOKEN", "SOPHIA_HS_TOKEN"))
+            )
+        appservice_paths = [path for path in appservice_candidates if path]
+        if appservice_paths:
+            rendered = rendered.replace(
+                "app_service_config_files: []",
+                "app_service_config_files:\n" + "\n".join(f"  - {path}" for path in appservice_paths),
+            )
+        Path("/data/homeserver.rendered.yaml").write_text(rendered)
+        PY
+        chown -R 991:991 /data/homeserver.rendered.yaml /data/appservices || true
+        exec /start.py
+    depends_on:
+      matrix-db:
+        condition: service_healthy
+    environment:
+      SYNAPSE_SERVER_NAME: ${MATRIX_SERVER_NAME:?MATRIX_SERVER_NAME required}
+      SYNAPSE_REPORT_STATS: ${MATRIX_REPORT_STATS:-no}
+      SYNAPSE_CONFIG_PATH: /data/homeserver.rendered.yaml
+      MATRIX_SERVER_NAME: ${MATRIX_SERVER_NAME:?MATRIX_SERVER_NAME required}
+      MATRIX_DB_USER: ${MATRIX_DB_USER:-synapse}
+      MATRIX_DB_PASSWORD: ${MATRIX_DB_PASSWORD:?MATRIX_DB_PASSWORD required}
+      MATRIX_DB_NAME: ${MATRIX_DB_NAME:-synapse}
+      MATRIX_DB_HOST: ${MATRIX_DB_HOST:-matrix-db}
+      MATRIX_DB_PORT: ${MATRIX_DB_PORT:-5432}
+      MATRIX_REGISTRATION_SECRET: ${MATRIX_REGISTRATION_SECRET:?MATRIX_REGISTRATION_SECRET required}
+      MATRIX_MACAROON_SECRET: ${MATRIX_MACAROON_SECRET:?MATRIX_MACAROON_SECRET required}
+      MATRIX_FORM_SECRET: ${MATRIX_FORM_SECRET:?MATRIX_FORM_SECRET required}
+      MATRIX_FEDERATION_ENABLED: ${MATRIX_FEDERATION_ENABLED:-false}
+      MATRIX_ENABLE_REGISTRATION: ${MATRIX_ENABLE_REGISTRATION:-true}
+      GATEWAY_BOT_AS_URL: ${GATEWAY_BOT_AS_URL:-http://gateway-http:8080}
+      GATEWAY_BOT_AS_TOKEN: ${GATEWAY_BOT_AS_TOKEN:-}
+      GATEWAY_BOT_HS_TOKEN: ${GATEWAY_BOT_HS_TOKEN:-}
+      BRIDGE_BOT_AS_URL: ${BRIDGE_BOT_AS_URL:-http://matrix-bridge:8084}
+      BRIDGE_BOT_AS_TOKEN: ${BRIDGE_BOT_AS_TOKEN:-}
+      BRIDGE_BOT_HS_TOKEN: ${BRIDGE_BOT_HS_TOKEN:-}
+      MATRIX_REGISTER_SOPHIA_APP_SERVICE: ${MATRIX_REGISTER_SOPHIA_APP_SERVICE:-false}
+      SOPHIA_AS_URL: ${SOPHIA_AS_URL:-http://ingest:8083}
+      SOPHIA_AS_TOKEN: ${SOPHIA_AS_TOKEN:-}
+      SOPHIA_HS_TOKEN: ${SOPHIA_HS_TOKEN:-}
+    volumes:
+      - matrix-data:/data
+      - ./config/homeserver.yaml:/config/homeserver.yaml:ro
+      - ./config/log.config:/config/log.config:ro
+      - ./appservices:/config/appservices:ro
+    ports:
+      - "${MATRIX_HTTP_PORT:-8008}:8008"
+      - "${MATRIX_HTTPS_PORT:-8448}:8448"
+    networks:
+      - agentnet
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:8008/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  matrix-db-data:
+    driver: local
+  matrix-data:
+    driver: local
+
+networks:
+  agentnet:
+    external: true

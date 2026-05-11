@@ -1,0 +1,31 @@
+{
+  "name": "set_step_failed",
+  "description": "Mark a persisted case step row as FAILED and append an error log.",
+  "version": "0.1.0",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "case_id": { "type": "string" },
+      "step_db_row_id": { "type": "string" },
+      "reason": { "type": "string" }
+    },
+    "required": ["case_id", "step_db_row_id", "reason"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "request_id": { "type": "string" },
+      "ok": { "type": "boolean" },
+      "step_db_row_id": { "type": "string" },
+      "log_id": { "type": "string" }
+    },
+    "required": ["request_id", "ok", "step_db_row_id", "log_id"],
+    "additionalProperties": false
+  },
+  "entrypoint": "libs.tools.cases.tool:set_step_failed",
+  "env_vars": ["CASES_HTTP_URL"],
+  "network_access": true,
+  "timeout_ms": 10000,
+  "max_memory_mb": 128
+}

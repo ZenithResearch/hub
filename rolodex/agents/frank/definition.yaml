@@ -1,0 +1,30 @@
+# rolodex/agents/frank/definition.yaml
+# Authoritative definition for the Frank agent on this hub.
+# This is prescriptive — it defines what Frank IS and what it can do.
+
+name: Frank
+type: agent
+version: "1.0.0"
+created: 2026-03-27
+
+description: >
+  Hub dispatcher. Primary consumer of the workspace message queue.
+  Reads inbound messages, determines sender intent, routes to the
+  appropriate process or skill.
+
+capabilities:
+  - message_dispatch
+  - intent_recognition
+  - process_routing
+  - skill_invocation
+
+# Access grants for this agent on this hub.
+# These are set by the hub operator and enforced by the verification layer.
+access:
+  receive_messages: true      # can receive messages routed to it
+  send_messages: true         # can send messages on behalf of the hub
+  trigger_processes: true     # can initiate process execution
+  read_vault: true            # can read vault notes and context
+  write_vault: false          # cannot write vault notes directly (ISS-054 pattern)
+  dispatch: true              # core capability: route messages to processes
+  admin: false                # not an admin; operator retains that
