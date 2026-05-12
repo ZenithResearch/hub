@@ -14,6 +14,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Removed Sophia-local case/step execution-loop skills — keeps Sophia strictly comms-only and prevents future dispatch paths from mistaking Sophia for an internal case executor.
 
 ### Added
+- Added authenticated Review SDK intake for public staging branches — Hub now owns a SQLite-backed review auth registry, short-lived review session tokens, project/deployment/origin-scoped validation, authenticated asset/review submission enforcement, attribution stamping, and regression tests so staging clients can submit reviews without bundling durable frontend secrets.
 - Added Frank native case pipeline execution and cases observability APIs — `FRANK_RUNTIME` now defaults to `native_case_pipeline`, Frank can schedule/recover service-code case runs without Hermes Kanban child dispatch, and cases exposes run/step/span/event/artifact plus board projection endpoints so Swift ZenithOS can monitor execution from cases state.
 - Added normalized Frank step I/O contracts for Kanban-projected case tasks — each task now carries a `StepIOContract` with named inputs, named outputs, and output schemas, while worker-facing task bodies describe the atomic `inputs/context -> metadata.zenith.outputs` contract and allow rich JSON or artifact-pointer values under declared output names.
 - Added Frank review-packet hardening follow-up plan and acceptance harness — turns the Franklin26 inline production probe into a rerunnable local script and keeps post-signoff work bounded.

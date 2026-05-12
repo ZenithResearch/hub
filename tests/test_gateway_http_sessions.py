@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import types
@@ -34,6 +35,8 @@ class GatewayHttpSessionTests(unittest.TestCase):
         )
 
         os.environ["REVIEWS_DATA_DIR"] = str(reviews_dir)
+        os.environ["REVIEW_AUTH_DB_PATH"] = str(root / "review-auth.db")
+        os.environ["REVIEW_SESSION_TTL_SECONDS"] = "3600"
         os.environ["QUEUE_HTTP_URL"] = "http://queue:8081"
         os.environ["EVENTBUS_URL"] = "http://eventbus:8082"
         os.environ["RUNTIME_GRPC_TARGET"] = "runtime-grpc:50051"
@@ -59,6 +62,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
         sys.modules.pop("services.gateway_http.app", None)
         module = importlib.import_module("services.gateway_http.app")
         self.module = importlib.reload(module)
+        self.review_auth_module = importlib.import_module("services.gateway_http.review_auth")
         self.client_context = TestClient(self.module.app)
         self.client = self.client_context.__enter__()
         self.remote_client_context = TestClient(
@@ -84,26 +88,103 @@ class GatewayHttpSessionTests(unittest.TestCase):
             sys.modules.pop("libs.common.proto.agent_pb2_grpc", None)
         self.tmpdir.cleanup()
 
-    def _write_review_asset_meta(self, asset_id: str, asset_type: str, *, mime_type: str = "application/json") -> None:
+    def _seed_review_auth(
+        self,
+        *,
+        client_id: str = "client-1",
+        project_id: str = "project-1",
+        project_slug: str = "project-one",
+        deployment_id: str = "deployment-1",
+        deployment_slug: str = "deployment-one",
+        origin: str = "https://staging.example.com",
+        code: str = "let-me-review",
+        label: str = "Tester",
+        subject_pattern: str | None = "https://staging.example.com/*",
+    ) -> None:
+        db_path = os.environ["REVIEW_AUTH_DB_PATH"]
+        code_hash = self.review_auth_module.hash_access_code(code)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO clients (id, slug, name, created_at) VALUES (?, ?, ?, ?)",
+                (client_id, "client-one", "Client One", "2026-05-01T00:00:00+00:00"),
+            )
+            conn.execute(
+                "INSERT INTO projects (id, client_id, slug, name, created_at) VALUES (?, ?, ?, ?, ?)",
+                (project_id, client_id, project_slug, "Project One", "2026-05-01T00:00:00+00:00"),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_deployments
+                (id, project_id, slug, branch, allowed_origin, subject_pattern, active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (deployment_id, project_id, deployment_slug, "main", origin, subject_pattern, "2026-05-01T00:00:00+00:00"),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_access_codes
+                (id, project_id, deployment_id, label, email, code_hash, active, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL)
+                """,
+                ("code-1", project_id, deployment_id, label, "owner@example.com", code_hash, "2026-05-01T00:00:00+00:00"),
+            )
+
+    def _create_review_session(self, *, project_id: str = "project-one", deployment_id: str = "deployment-one", origin: str = "https://staging.example.com", code: str = "let-me-review", subject_id: str = "https://staging.example.com/page") -> dict:
+        response = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": origin},
+            json={
+                "project_id": project_id,
+                "deployment_id": deployment_id,
+                "email": "owner@example.com",
+                "access_code": code,
+                "subject_id": subject_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def _auth_headers(self, token: str, origin: str = "https://staging.example.com") -> dict[str, str]:
+        return {"Origin": origin, "Authorization": f"Bearer {token}"}
+
+    def _write_review_asset_meta(self, asset_id: str, asset_type: str, *, mime_type: str = "application/json", session: dict | None = None) -> None:
         reviews_dir = Path(os.environ["REVIEWS_DATA_DIR"])
         assets_dir = reviews_dir / "assets"
         assets_dir.mkdir(parents=True, exist_ok=True)
         (assets_dir / asset_id).write_text("{}", encoding="utf-8")
-        (assets_dir / f"{asset_id}.meta.json").write_text(
-            json.dumps(
+        meta = {
+            "asset_id": asset_id,
+            "asset_type": asset_type,
+            "mime_type": mime_type,
+            "size_bytes": 2,
+        }
+        if session is not None:
+            meta.update(
                 {
-                    "asset_id": asset_id,
-                    "asset_type": asset_type,
-                    "mime_type": mime_type,
-                    "size_bytes": 2,
+                    "client_id": "client-1",
+                    "project_id": session["project_id"],
+                    "deployment_id": session["deployment_id"],
+                    "auth_session_id": session["session_id"],
+                    "authenticated": True,
+                    "origin": "https://staging.example.com",
+                    "submitted_by": session["label"],
                 }
-            ),
-            encoding="utf-8",
-        )
+            )
+        (assets_dir / f"{asset_id}.meta.json").write_text(json.dumps(meta), encoding="utf-8")
 
-    def test_submit_review_requires_typed_audio_and_events_assets(self) -> None:
+    def test_unauthenticated_asset_upload_is_rejected(self) -> None:
+        response = self.client.post(
+            "/v1/reviews/assets",
+            files={"file": ("events.json", b"{}", "application/json")},
+            data={"asset_type": "events", "project_id": "project-one", "deployment_id": "deployment-one"},
+            headers={"Origin": "https://staging.example.com"},
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_submit_review_requires_authentication_before_payload_validation(self) -> None:
         response = self.client.post(
             "/v1/reviews",
+            headers={"Origin": "https://staging.example.com"},
             json={
                 "review_id": "review-typed-required",
                 "subject_id": "http://example",
@@ -111,25 +192,32 @@ class GatewayHttpSessionTests(unittest.TestCase):
                 "started_at": "2026-05-01T00:00:00Z",
                 "stopped_at": "2026-05-01T00:00:10Z",
                 "duration_ms": 10000,
+                "project_id": "project-one",
+                "deployment_id": "deployment-one",
                 "asset_ids": [],
             },
         )
-        self.assertEqual(response.status_code, 422)
-        self.assertIn("events_asset_id", response.text)
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("review authentication required", response.text)
 
     def test_submit_review_rejects_swapped_typed_asset_ids(self) -> None:
-        self._write_review_asset_meta("events-1", "events")
-        self._write_review_asset_meta("audio-1", "audio", mime_type="audio/webm")
+        self._seed_review_auth()
+        session = self._create_review_session()
+        self._write_review_asset_meta("events-1", "events", session=session)
+        self._write_review_asset_meta("audio-1", "audio", mime_type="audio/webm", session=session)
 
         response = self.client.post(
             "/v1/reviews",
+            headers=self._auth_headers(session["token"]),
             json={
                 "review_id": "review-swapped-assets",
-                "subject_id": "http://example",
+                "subject_id": "https://staging.example.com/page",
                 "submitted_by": "tester",
                 "started_at": "2026-05-01T00:00:00Z",
                 "stopped_at": "2026-05-01T00:00:10Z",
                 "duration_ms": 10000,
+                "project_id": "project-one",
+                "deployment_id": "deployment-one",
                 "events_asset_id": "audio-1",
                 "audio_asset_id": "events-1",
             },
@@ -139,10 +227,27 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertIn("events_asset_id must reference a events asset", response.text)
         self.assertFalse((Path(os.environ["REVIEWS_DATA_DIR"]) / "review-swapped-assets.json").exists())
 
-    def test_submit_review_enqueues_without_process_path_and_records_typed_assets(self) -> None:
+    def test_valid_session_uploads_assets_submits_review_and_preserves_queue_path(self) -> None:
         reviews_dir = Path(os.environ["REVIEWS_DATA_DIR"])
-        self._write_review_asset_meta("events-1", "events")
-        self._write_review_asset_meta("audio-1", "audio", mime_type="audio/webm")
+        self._seed_review_auth(label="Owner Label")
+        session = self._create_review_session()
+
+        events_upload = self.client.post(
+            "/v1/reviews/assets",
+            headers=self._auth_headers(session["token"]),
+            files={"file": ("events.json", b"{}", "application/json")},
+            data={"asset_type": "events", "project_id": "project-one", "deployment_id": "deployment-one"},
+        )
+        self.assertEqual(events_upload.status_code, 200, events_upload.text)
+        audio_upload = self.client.post(
+            "/v1/reviews/assets",
+            headers=self._auth_headers(session["token"]),
+            files={"file": ("audio.webm", b"audio", "audio/webm")},
+            data={"asset_type": "audio", "project_id": "project-one", "deployment_id": "deployment-one"},
+        )
+        self.assertEqual(audio_upload.status_code, 200, audio_upload.text)
+        events_id = events_upload.json()["asset_id"]
+        audio_id = audio_upload.json()["asset_id"]
 
         posted: list[tuple[str, dict]] = []
 
@@ -173,26 +278,132 @@ class GatewayHttpSessionTests(unittest.TestCase):
         with patch.object(self.module.httpx, "AsyncClient", FakeAsyncClient):
             response = self.client.post(
                 "/v1/reviews",
+                headers=self._auth_headers(session["token"]),
                 json={
                     "review_id": "review-typed-assets",
-                    "subject_id": "http://example",
+                    "subject_id": "https://staging.example.com/page",
                     "submitted_by": "tester",
                     "started_at": "2026-05-01T00:00:00Z",
                     "stopped_at": "2026-05-01T00:00:10Z",
                     "duration_ms": 10000,
+                    "project_id": "project-one",
+                    "deployment_id": "deployment-one",
                     "asset_ids": [],
-                    "events_asset_id": "events-1",
-                    "audio_asset_id": "audio-1",
+                    "events_asset_id": events_id,
+                    "audio_asset_id": audio_id,
                 },
             )
 
         self.assertEqual(response.status_code, 200)
         saved = json.loads((reviews_dir / "review-typed-assets.json").read_text(encoding="utf-8"))
-        self.assertEqual(saved["events_asset_id"], "events-1")
-        self.assertEqual(saved["audio_asset_id"], "audio-1")
+        self.assertEqual(saved["events_asset_id"], events_id)
+        self.assertEqual(saved["audio_asset_id"], audio_id)
+        self.assertEqual(saved["client_id"], "client-1")
+        self.assertEqual(saved["project_id"], "project-1")
+        self.assertEqual(saved["deployment_id"], "deployment-1")
+        self.assertEqual(saved["auth_session_id"], session["session_id"])
+        self.assertTrue(saved["authenticated"])
+        self.assertEqual(saved["submitted_by"], "Owner Label")
+        self.assertEqual(saved["origin"], "https://staging.example.com")
+        asset_meta = json.loads((reviews_dir / "assets" / f"{events_id}.meta.json").read_text(encoding="utf-8"))
+        self.assertEqual(asset_meta["auth_session_id"], session["session_id"])
         enqueue_payload = next(payload for url, payload in posted if url.endswith("/queues/workspace/enqueue"))
         self.assertNotIn("process_path", enqueue_payload)
-        self.assertEqual(enqueue_payload["payload"]["events_asset_id"], "events-1")
+        self.assertEqual(enqueue_payload["payload"]["events_asset_id"], events_id)
+        self.assertEqual(enqueue_payload["sender"], "Owner Label")
+
+    def test_valid_access_code_creates_short_lived_session_and_get_validates_it(self) -> None:
+        self._seed_review_auth()
+        session = self._create_review_session()
+        self.assertEqual(session["project_id"], "project-1")
+        self.assertEqual(session["deployment_id"], "deployment-1")
+        self.assertEqual(session["label"], "Tester")
+        self.assertTrue(session["token"].startswith("rev_"))
+
+        response = self.client.get(
+            "/v1/review-auth/session",
+            headers=self._auth_headers(session["token"]),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertTrue(payload["authenticated"])
+        self.assertEqual(payload["session_id"], session["session_id"])
+        self.assertEqual(payload["expires_at"], session["expires_at"])
+
+    def test_review_auth_rejects_wrong_origin_project_deployment_and_subject(self) -> None:
+        self._seed_review_auth()
+        bad_origin = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://evil.example.com"},
+            json={
+                "project_id": "project-one",
+                "deployment_id": "deployment-one",
+                "email": "owner@example.com",
+                "access_code": "let-me-review",
+                "subject_id": "https://evil.example.com/page",
+            },
+        )
+        self.assertEqual(bad_origin.status_code, 401)
+
+        bad_subject = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://staging.example.com"},
+            json={
+                "project_id": "project-one",
+                "deployment_id": "deployment-one",
+                "email": "owner@example.com",
+                "access_code": "let-me-review",
+                "subject_id": "https://other.example.com/page",
+            },
+        )
+        self.assertEqual(bad_subject.status_code, 401)
+
+        session = self._create_review_session()
+        wrong_origin = self.client.get(
+            "/v1/review-auth/session",
+            headers=self._auth_headers(session["token"], origin="https://evil.example.com"),
+        )
+        self.assertEqual(wrong_origin.status_code, 401)
+        wrong_project = self.client.post(
+            "/v1/reviews/assets",
+            headers=self._auth_headers(session["token"]),
+            files={"file": ("events.json", b"{}", "application/json")},
+            data={"asset_type": "events", "project_id": "other-project", "deployment_id": "deployment-one"},
+        )
+        self.assertEqual(wrong_project.status_code, 401)
+        wrong_deployment = self.client.post(
+            "/v1/reviews/assets",
+            headers=self._auth_headers(session["token"]),
+            files={"file": ("events.json", b"{}", "application/json")},
+            data={"asset_type": "events", "project_id": "project-one", "deployment_id": "other-deployment"},
+        )
+        self.assertEqual(wrong_deployment.status_code, 401)
+
+    def test_review_rejects_assets_from_a_different_session(self) -> None:
+        self._seed_review_auth()
+        session_one = self._create_review_session(subject_id="https://staging.example.com/one")
+        session_two = self._create_review_session(subject_id="https://staging.example.com/two")
+        self._write_review_asset_meta("events-1", "events", session=session_one)
+        self._write_review_asset_meta("audio-1", "audio", mime_type="audio/webm", session=session_one)
+
+        response = self.client.post(
+            "/v1/reviews",
+            headers=self._auth_headers(session_two["token"]),
+            json={
+                "review_id": "review-cross-session",
+                "subject_id": "https://staging.example.com/two",
+                "submitted_by": "tester",
+                "started_at": "2026-05-01T00:00:00Z",
+                "stopped_at": "2026-05-01T00:00:10Z",
+                "duration_ms": 10000,
+                "project_id": "project-one",
+                "deployment_id": "deployment-one",
+                "events_asset_id": "events-1",
+                "audio_asset_id": "audio-1",
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("different review session", response.text)
 
     def test_rerun_case_reenqueues_without_process_path(self) -> None:
         posted: list[tuple[str, dict]] = []

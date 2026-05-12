@@ -29,6 +29,8 @@ class GatewaySettings(BaseServiceSettings):
     max_body_bytes: int = Field(default=262_144, alias="MAX_BODY_BYTES")
 
     reviews_data_dir: str = Field(default="data/reviews", alias="REVIEWS_DATA_DIR")
+    review_auth_db_path: str = Field(default="/data/review-auth.db", alias="REVIEW_AUTH_DB_PATH")
+    review_session_ttl_seconds: int = Field(default=86_400, alias="REVIEW_SESSION_TTL_SECONDS")
     hermes_session_roots: str = Field(default="", alias="HERMES_SESSION_ROOTS")
     hub_config_secrets_path: str = Field(default="/data/hub-config-secrets.env", alias="HUB_CONFIG_SECRETS_PATH")
     queue_http_url: str = Field(default="http://localhost:8081", alias="QUEUE_HTTP_URL")
