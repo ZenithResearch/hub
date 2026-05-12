@@ -40,21 +40,31 @@ The review endpoints work without the gRPC runtime. The message/stream/kb/tools 
 
 These routes forward to `runtime-grpc` over gRPC. Each request gets an `x-request-id` header (generated if absent) and is logged with method, path, status, and duration.
 
-### Review intake routes (file-backed, no gRPC dependency)
+### Review auth + intake routes (file-backed, no gRPC dependency)
 
 | Method | Path | What it does |
 |--------|------|------|
-| `POST` | `/v1/reviews/assets` | Upload a binary asset (events JSON or audio). Returns an `asset_id`. |
-| `POST` | `/v1/reviews` | Submit a review record referencing uploaded asset IDs. Returns `{ review_id, status: "queued" }`. |
+| `POST` | `/v1/review-auth/session` | Exchange a runtime reviewer access code for a short-lived review session token scoped to project, deployment, and origin. |
+| `GET` | `/v1/review-auth/session` | Validate a Bearer review session token and return its project/deployment/session summary. |
+| `POST` | `/v1/reviews/assets` | Upload an authenticated binary asset (events JSON or audio). Returns an `asset_id`. |
+| `POST` | `/v1/reviews` | Submit an authenticated review record referencing uploaded asset IDs. Returns `{ review_id, status: "queued" }`. |
 | `GET` | `/v1/reviews/{review_id}` | Retrieve a stored review record by ID. |
+
+Public staging clients may expose only public configuration: Hub URL plus project/deployment identifiers. They must not bundle durable access codes, owner tokens, or review session tokens in frontend code or public environment variables.
+
+The runtime auth flow is:
+1. Browser sends `POST /v1/review-auth/session` with `project_id`, `deployment_id`, optional `email`, `access_code`, and `subject_id`; the browser-controlled `Origin` header must match the deployment's allowed origin.
+2. Hub verifies the access code against the SQLite review auth registry and returns the raw short-lived `token` once. Hub stores only `token_hash`.
+3. Browser sends `Authorization: Bearer <token>` on `POST /v1/reviews/assets` and `POST /v1/reviews`.
+4. Hub validates token expiry/revocation, project/deployment scope, `Origin`, `subject_id`, and asset session ownership before writing records or enqueueing `review_submitted`.
 
 Storage layout on disk:
 ```
 data/reviews/
-  {review_id}.json          — full review record (subject_id, asset_ids, metadata, etc.)
+  {review_id}.json          — full attributed review record (client/project/deployment/session, subject_id, asset_ids, metadata, etc.)
   assets/
     {asset_id}              — raw binary (events JSON blob or audio/webm)
-    {asset_id}.meta.json    — asset_type, mime_type, size_bytes, created_at
+    {asset_id}.meta.json    — asset_type, mime_type, size_bytes, created_at, project/deployment/session attribution
 ```
 
 Asset uploads are capped at 50 MB. All other routes use the global 256 KB body limit.
@@ -71,6 +81,8 @@ Asset uploads are capped at 50 MB. All other routes use the global 256 KB body l
 | `MAX_BODY_BYTES` | `262144` (256 KB) | Global request body size limit |
 | `GATEWAY_GRPC_TIMEOUT_S` | `5.0` | Timeout for gRPC calls to the runtime |
 | `REVIEWS_DATA_DIR` | `data/reviews` | Root directory for review records and assets |
+| `REVIEW_AUTH_DB_PATH` | `data/review_auth.db` | SQLite registry for review clients, projects, deployments, access-code hashes, and sessions |
+| `REVIEW_SESSION_TTL_SECONDS` | `86400` | Lifetime for short-lived review session tokens |
 | `LOG_LEVEL` | `info` | Structured log level |
 
 ---
@@ -91,6 +103,7 @@ Two middleware layers applied to every request:
 services/gateway_http/
   app.py        — FastAPI app factory (create_app), all route definitions
   middleware.py — BodySizeLimitMiddleware, RequestContextMiddleware
+  review_auth.py — SQLite review auth registry, access-code hashing, session token validation
 libs/common/
   config.py     — GatewaySettings (pydantic-settings, env-var backed)
   schemas.py    — shared request/response Pydantic models for agent routes

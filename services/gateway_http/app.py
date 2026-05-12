@@ -29,6 +29,15 @@ from libs.common.schemas import (
 )
 
 from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
+from .review_auth import ReviewAuthSession, ReviewAuthStore
+
+
+class ReviewAuthSessionIn(BaseModel):
+    project_id: str
+    deployment_id: str
+    email: str | None = None
+    access_code: str
+    subject_id: str
 
 
 class ReviewAssetUploadOut(BaseModel):
@@ -42,10 +51,12 @@ class ReviewAssetUploadOut(BaseModel):
 class ReviewSubmitIn(BaseModel):
     review_id: str
     subject_id: str
-    submitted_by: str
+    submitted_by: str | None = None
     started_at: str
     stopped_at: str
     duration_ms: int
+    project_id: str
+    deployment_id: str
     asset_ids: list[str] = []
     events_asset_id: str | None = None
     audio_asset_id: str | None = None
@@ -336,6 +347,8 @@ def create_app() -> FastAPI:
     assets_dir = reviews_dir / "assets"
     reviews_dir.mkdir(parents=True, exist_ok=True)
     assets_dir.mkdir(parents=True, exist_ok=True)
+    review_auth_store = ReviewAuthStore(settings.review_auth_db_path, settings.review_session_ttl_seconds)
+    app.state.review_auth_store = review_auth_store
     secret_path = Path(settings.hub_config_secrets_path)
     allowed_secret_keys = {"ELEVENLABS_API_KEY"}
 
@@ -404,11 +417,74 @@ def create_app() -> FastAPI:
                     return candidate
         return None
 
+    @app.post("/v1/review-auth/session")
+    async def create_review_auth_session(payload: ReviewAuthSessionIn, request: Request) -> JSONResponse:
+        origin = request.headers.get("origin") or ""
+        if not origin:
+            raise HTTPException(status_code=400, detail="Origin header required")
+        result = review_auth_store.create_session(
+            project_identifier=payload.project_id,
+            deployment_identifier=payload.deployment_id,
+            origin=origin,
+            subject_id=payload.subject_id,
+            access_code=payload.access_code,
+            email=payload.email,
+        )
+        if result is None:
+            raise HTTPException(status_code=401, detail="invalid review credentials")
+        return JSONResponse(result)
+
+    def _bearer_token(request: Request) -> str:
+        authorization = request.headers.get("authorization") or ""
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="review authentication required")
+        return token.strip()
+
+    def _require_review_session(
+        request: Request,
+        *,
+        project_id: str | None = None,
+        deployment_id: str | None = None,
+        subject_id: str | None = None,
+    ) -> ReviewAuthSession:
+        origin = request.headers.get("origin") or ""
+        if not origin:
+            raise HTTPException(status_code=400, detail="Origin header required")
+        session = review_auth_store.validate_token(
+            token=_bearer_token(request),
+            origin=origin,
+            project_identifier=project_id,
+            deployment_identifier=deployment_id,
+            subject_id=subject_id,
+        )
+        if session is None:
+            raise HTTPException(status_code=401, detail="invalid review session")
+        return session
+
+    @app.get("/v1/review-auth/session")
+    async def get_review_auth_session(request: Request) -> JSONResponse:
+        session = _require_review_session(request)
+        return JSONResponse(
+            {
+                "authenticated": True,
+                "session_id": session.session_id,
+                "project_id": session.project_id,
+                "deployment_id": session.deployment_id,
+                "label": session.label,
+                "expires_at": session.expires_at,
+            }
+        )
+
     @app.post("/v1/reviews/assets", response_model=ReviewAssetUploadOut)
     async def upload_review_asset(
+        request: Request,
         file: UploadFile = File(...),
         asset_type: str = Form(...),
+        project_id: str = Form(...),
+        deployment_id: str = Form(...),
     ) -> ReviewAssetUploadOut:
+        session = _require_review_session(request, project_id=project_id, deployment_id=deployment_id)
         asset_id = str(uuid.uuid4())
         data = await file.read()
         (assets_dir / asset_id).write_bytes(data)
@@ -419,11 +495,27 @@ def create_app() -> FastAPI:
             size_bytes=len(data),
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        (assets_dir / f"{asset_id}.meta.json").write_text(meta.model_dump_json())
+        meta_record = {
+            **meta.model_dump(),
+            "client_id": session.client_id,
+            "project_id": session.project_id,
+            "deployment_id": session.deployment_id,
+            "auth_session_id": session.session_id,
+            "authenticated": True,
+            "origin": session.origin,
+            "submitted_by": session.label,
+        }
+        (assets_dir / f"{asset_id}.meta.json").write_text(json.dumps(meta_record))
         return meta
 
     @app.post("/v1/reviews", response_model=ReviewSubmitOut)
-    async def submit_review(payload: ReviewSubmitIn) -> ReviewSubmitOut:
+    async def submit_review(payload: ReviewSubmitIn, request: Request) -> ReviewSubmitOut:
+        session = _require_review_session(
+            request,
+            project_id=payload.project_id,
+            deployment_id=payload.deployment_id,
+            subject_id=payload.subject_id,
+        )
         requested_asset_ids = list(payload.asset_ids)
         for typed_id in (payload.events_asset_id, payload.audio_asset_id):
             if typed_id and typed_id not in requested_asset_ids:
@@ -433,7 +525,14 @@ def create_app() -> FastAPI:
             meta_path = assets_dir / f"{aid}.meta.json"
             if not meta_path.exists():
                 raise HTTPException(status_code=422, detail=f"asset {aid} not found")
-            asset_metas.append(json.loads(meta_path.read_text()))
+            meta = json.loads(meta_path.read_text())
+            if meta.get("project_id") != session.project_id or meta.get("deployment_id") != session.deployment_id:
+                raise HTTPException(status_code=422, detail=f"asset {aid} belongs to a different project/deployment")
+            if meta.get("auth_session_id") != session.session_id:
+                raise HTTPException(status_code=422, detail=f"asset {aid} belongs to a different review session")
+            if meta.get("authenticated") is not True:
+                raise HTTPException(status_code=422, detail=f"asset {aid} is not authenticated")
+            asset_metas.append(meta)
         meta_by_id = {str(meta.get("asset_id") or "").strip(): meta for meta in asset_metas}
         typed_assets = {str(meta.get("asset_type") or "").strip().lower(): meta for meta in asset_metas}
         events_asset_id = payload.events_asset_id or typed_assets.get("events", {}).get("asset_id")
@@ -448,6 +547,13 @@ def create_app() -> FastAPI:
         created_at = datetime.now(timezone.utc).isoformat()
         record = {
             **payload.model_dump(),
+            "client_id": session.client_id,
+            "project_id": session.project_id,
+            "deployment_id": session.deployment_id,
+            "auth_session_id": session.session_id,
+            "authenticated": True,
+            "submitted_by": session.label or payload.submitted_by,
+            "origin": session.origin,
             "asset_ids": requested_asset_ids,
             "events_asset_id": events_asset_id,
             "audio_asset_id": audio_asset_id,
@@ -464,7 +570,7 @@ def create_app() -> FastAPI:
                 json={
                     "event_type": "review_submitted",
                     "source_type": "review_sdk",
-                    "sender": payload.submitted_by,
+                    "sender": record["submitted_by"],
                     "message_body": payload.review_id,
                     "payload": record,
                 },
