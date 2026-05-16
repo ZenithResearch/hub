@@ -46,16 +46,43 @@ These routes forward to `runtime-grpc` over gRPC. Each request gets an `x-reques
 |--------|------|------|
 | `POST` | `/v1/review-auth/session` | Exchange a runtime reviewer access code for a short-lived review session token scoped to project, deployment, and origin. |
 | `GET` | `/v1/review-auth/session` | Validate a Bearer review session token and return its project/deployment/session summary. |
+| `POST` | `/v1/review-auth/deployments/register` | Server-side deploy hook endpoint. Upserts one concrete deployed review origin for a project using a DB-backed deploy hook Bearer token. |
 | `POST` | `/v1/reviews/assets` | Upload an authenticated binary asset (events JSON or audio). Returns an `asset_id`. |
 | `POST` | `/v1/reviews` | Submit an authenticated review record referencing uploaded asset IDs. Returns `{ review_id, status: "queued" }`. |
 | `GET` | `/v1/reviews/{review_id}` | Retrieve a stored review record by ID. |
 
 Public staging clients may expose only public configuration: Hub URL plus project/deployment identifiers. They must not bundle durable access codes, owner tokens, or review session tokens in frontend code or public environment variables.
 
+The deploy registration flow for Vercel/CI previews is:
+1. An operator creates a project-scoped deploy hook row in the Postgres clients registry. Hub stores only a hash of the raw deploy hook token plus the hook's allowed host suffix policy.
+2. CI/Vercel obtains the concrete deployed origin, e.g. `https://swrl-ui-git-main-org.vercel.app`.
+3. CI calls `POST /v1/review-auth/deployments/register` with `Authorization: Bearer <deploy-hook-token>`, project id/slug, deployment slug, branch, exact `allowed_origin`, matching `subject_pattern`, and optional deployment metadata.
+4. Hub validates the DB-backed deploy hook token, requires HTTPS outside localhost, checks the origin host against the hook row's `allowed_host_suffixes`, ensures the subject pattern uses the same origin, and upserts `review_deployments`.
+5. Reviewers then authenticate from that exact deployed origin with their client review access code. Client review access codes are separate from deploy hook tokens.
+
+For Docker Compose, the gateway reads and writes the Review SDK clients registry through the `clients-postgres` service. If deploy registration or reviewer auth returns 401, confirm the running Postgres registry has the deploy hook, deployment, and access-code rows. Do not repair live reviewer auth by editing or copying `data/clients.db`; that SQLite path is retired for the clients registry. See `docs/local-runtime-state.md`.
+
+Operators can seed or rotate the Postgres registry with `scripts/seed_review_auth_postgres.py`. It reads raw reviewer/deploy-hook secrets only from named environment variables, hashes them, and prints only IDs/booleans.
+
+Example CI call:
+```bash
+curl -X POST "$HUB_API_URL/v1/review-auth/deployments/register" \
+  -H "Authorization: Bearer $HUB_REVIEW_DEPLOY_HOOK_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"project_id\": \"swrl-ui\",
+    \"deployment_slug\": \"swrl-ui-preview-${GITHUB_REF_NAME}-${GITHUB_SHA}\",
+    \"branch\": \"${GITHUB_REF_NAME}\",
+    \"allowed_origin\": \"https://${DEPLOY_URL#https://}\",
+    \"subject_pattern\": \"https://${DEPLOY_URL#https://}/*\",
+    \"commit_sha\": \"${GITHUB_SHA}\"
+  }"
+```
+
 The runtime auth flow is:
 1. Browser sends `POST /v1/review-auth/session` with `project_id`, `deployment_id`, optional `email`, `access_code`, and `subject_id`; the browser-controlled `Origin` header must match the deployment's allowed origin.
-2. Hub verifies the access code against the SQLite review auth registry and returns the raw short-lived `token` once. Hub stores only `token_hash`.
-3. Browser sends `Authorization: Bearer <token>` on `POST /v1/reviews/assets` and `POST /v1/reviews`.
+2. Hub verifies the access code against the Postgres clients registry and returns the raw short-lived `token` once. Hub stores only `token_hash`.
+3. Browser sends `Authorization: Bearer <review-session-token>` on `POST /v1/reviews/assets` and `POST /v1/reviews`.
 4. Hub validates token expiry/revocation, project/deployment scope, `Origin`, `subject_id`, and asset session ownership before writing records or enqueueing `review_submitted`.
 
 Storage layout on disk:
@@ -81,7 +108,12 @@ Asset uploads are capped at 50 MB. All other routes use the global 256 KB body l
 | `MAX_BODY_BYTES` | `262144` (256 KB) | Global request body size limit |
 | `GATEWAY_GRPC_TIMEOUT_S` | `5.0` | Timeout for gRPC calls to the runtime |
 | `REVIEWS_DATA_DIR` | `data/reviews` | Root directory for review records and assets |
-| `REVIEW_AUTH_DB_PATH` | `data/review_auth.db` | SQLite registry for review clients, projects, deployments, access-code hashes, and sessions |
+| `CLIENTS_DATABASE_URL` | unset | Optional full Postgres DSN for direct/local runs; avoid using password-bearing URLs in production state/logs |
+| `CLIENTS_PG_HOST` | empty | Postgres host for the Review SDK clients registry |
+| `CLIENTS_PG_PORT` | `5432` | Postgres port for the Review SDK clients registry |
+| `CLIENTS_PG_DATABASE` | `hub_clients` | Postgres database for the Review SDK clients registry |
+| `CLIENTS_PG_USER` | `hub_clients` | Postgres user for the Review SDK clients registry |
+| `CLIENTS_PG_PASSWORD` | empty | Postgres password; production injects this from Secrets Manager |
 | `REVIEW_SESSION_TTL_SECONDS` | `86400` | Lifetime for short-lived review session tokens |
 | `LOG_LEVEL` | `info` | Structured log level |
 
@@ -103,7 +135,7 @@ Two middleware layers applied to every request:
 services/gateway_http/
   app.py        — FastAPI app factory (create_app), all route definitions
   middleware.py — BodySizeLimitMiddleware, RequestContextMiddleware
-  review_auth.py — SQLite review auth registry, access-code hashing, session token validation
+  review_auth.py — Postgres clients registry, access-code hashing, session token validation
 libs/common/
   config.py     — GatewaySettings (pydantic-settings, env-var backed)
   schemas.py    — shared request/response Pydantic models for agent routes

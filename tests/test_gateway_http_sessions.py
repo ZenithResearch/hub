@@ -35,8 +35,14 @@ class GatewayHttpSessionTests(unittest.TestCase):
         )
 
         os.environ["REVIEWS_DATA_DIR"] = str(reviews_dir)
-        os.environ["REVIEW_AUTH_DB_PATH"] = str(root / "review-auth.db")
+        os.environ.pop("REVIEW_AUTH_DB_PATH", None)
+        os.environ.pop("CLIENTS_DB_BACKEND", None)
+        os.environ.pop("CLIENTS_DATABASE_URL", None)
+        os.environ["CLIENTS_DB_PATH"] = str(root / "clients.db")
         os.environ["REVIEW_SESSION_TTL_SECONDS"] = "3600"
+        os.environ["REVIEW_ACCESS_ADMIN_TOKEN"] = "admin-secret"
+        os.environ.pop("REVIEW_DEPLOY_HOOK_TOKEN", None)
+        os.environ.pop("REVIEW_DEPLOY_ALLOWED_HOST_SUFFIXES", None)
         os.environ["QUEUE_HTTP_URL"] = "http://queue:8081"
         os.environ["EVENTBUS_URL"] = "http://eventbus:8082"
         os.environ["RUNTIME_GRPC_TARGET"] = "runtime-grpc:50051"
@@ -100,13 +106,14 @@ class GatewayHttpSessionTests(unittest.TestCase):
         code: str = "let-me-review",
         label: str = "Tester",
         subject_pattern: str | None = "https://staging.example.com/*",
+        project_scoped_access_code: bool = False,
     ) -> None:
-        db_path = os.environ["REVIEW_AUTH_DB_PATH"]
+        db_path = os.environ["CLIENTS_DB_PATH"]
         code_hash = self.review_auth_module.hash_access_code(code)
         with sqlite3.connect(db_path) as conn:
             conn.execute(
-                "INSERT INTO clients (id, slug, name, created_at) VALUES (?, ?, ?, ?)",
-                (client_id, "client-one", "Client One", "2026-05-01T00:00:00+00:00"),
+                "INSERT INTO clients (id, slug, name, rolodex_entry_path, created_at) VALUES (?, ?, ?, ?, ?)",
+                (client_id, "client-one", "Client One", "notes/Client One.md", "2026-05-01T00:00:00+00:00"),
             )
             conn.execute(
                 "INSERT INTO projects (id, client_id, slug, name, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -126,8 +133,31 @@ class GatewayHttpSessionTests(unittest.TestCase):
                 (id, project_id, deployment_id, label, email, code_hash, active, created_at, expires_at)
                 VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL)
                 """,
-                ("code-1", project_id, deployment_id, label, "owner@example.com", code_hash, "2026-05-01T00:00:00+00:00"),
+                ("code-1", project_id, None if project_scoped_access_code else deployment_id, label, "owner@example.com", code_hash, "2026-05-01T00:00:00+00:00"),
             )
+
+    def _seed_deploy_hook(
+        self,
+        *,
+        hook_id: str = "hook-1",
+        project_id: str = "project-1",
+        secret: str = "deploy-hook-secret",
+        allowed_host_suffixes: str = ".vercel.app,localhost",
+        active: int = 1,
+    ) -> str:
+        db_path = os.environ["CLIENTS_DB_PATH"]
+        token = f"rdh_{hook_id}_{secret}"
+        token_hash = self.review_auth_module.hash_deploy_hook_token(secret)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO review_deploy_hooks
+                (id, project_id, label, token_hash, allowed_host_suffixes, active, created_at, expires_at, last_used_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                """,
+                (hook_id, project_id, "Test deploy hook", token_hash, allowed_host_suffixes, active, "2026-05-01T00:00:00+00:00"),
+            )
+        return token
 
     def _create_review_session(self, *, project_id: str = "project-one", deployment_id: str = "deployment-one", origin: str = "https://staging.example.com", code: str = "let-me-review", subject_id: str = "https://staging.example.com/page") -> dict:
         response = self.client.post(
@@ -146,6 +176,9 @@ class GatewayHttpSessionTests(unittest.TestCase):
 
     def _auth_headers(self, token: str, origin: str = "https://staging.example.com") -> dict[str, str]:
         return {"Origin": origin, "Authorization": f"Bearer {token}"}
+
+    def _admin_headers(self, token: str = "admin-secret") -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
 
     def _write_review_asset_meta(self, asset_id: str, asset_type: str, *, mime_type: str = "application/json", session: dict | None = None) -> None:
         reviews_dir = Path(os.environ["REVIEWS_DATA_DIR"])
@@ -180,6 +213,156 @@ class GatewayHttpSessionTests(unittest.TestCase):
             headers={"Origin": "https://staging.example.com"},
         )
         self.assertEqual(response.status_code, 401)
+
+    def test_admin_review_access_rotate_generates_raw_code_once_and_project_scoped_hash(self) -> None:
+        response = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "dan-prota",
+                "client_slug": "dan-prota",
+                "client_name": "Dan Prota",
+                "rolodex_entry_path": "notes/dan.md",
+                "project_id": "swrl-ui",
+                "project_slug": "swrl-ui",
+                "project_name": "SWRL UI",
+                "deployment_id": "swrl-ui-production-alias",
+                "deployment_slug": "swrl-ui-production-alias",
+                "allowed_origin": "https://swrl-ui.vercel.app",
+                "subject_pattern": "https://swrl-ui.vercel.app*",
+                "access_code_id": "dan-prota-swrl-ui-review",
+                "access_label": "Dan Prota",
+                "mode": "generate",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        raw_code = body.get("raw_code")
+        self.assertTrue(raw_code)
+        self.assertFalse(body.get("secrets_printed"))
+        self.assertNotIn("code_hash", body)
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT deployment_id, code_hash, active FROM review_access_codes WHERE id = ?",
+                ("dan-prota-swrl-ui-review",),
+            ).fetchone()
+        self.assertIsNone(row["deployment_id"])
+        self.assertEqual(row["active"], 1)
+        self.assertTrue(self.review_auth_module.verify_access_code(raw_code, row["code_hash"]))
+
+        auth_response = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://swrl-ui.vercel.app"},
+            json={
+                "project_id": "swrl-ui",
+                "deployment_id": "swrl-ui-production-alias",
+                "access_code": raw_code,
+                "subject_id": "https://swrl-ui.vercel.app/",
+            },
+        )
+        self.assertEqual(auth_response.status_code, 200, auth_response.text)
+        self.assertTrue(auth_response.json().get("token"))
+
+    def test_admin_review_access_rotate_provided_code_does_not_echo_raw_code(self) -> None:
+        response = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "client-1",
+                "client_slug": "client-one",
+                "client_name": "Client One",
+                "project_id": "project-1",
+                "project_slug": "project-one",
+                "project_name": "Project One",
+                "deployment_id": "deployment-1",
+                "deployment_slug": "deployment-one",
+                "allowed_origin": "https://staging.example.com",
+                "subject_pattern": "https://staging.example.com/*",
+                "access_code_id": "code-1",
+                "access_label": "Tester",
+                "mode": "provided",
+                "access_code": "manually-chosen-review-code",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertNotIn("raw_code", body)
+        self.assertFalse(body.get("raw_code_present"))
+        self.assertFalse(body.get("secrets_printed"))
+        auth_response = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://staging.example.com"},
+            json={
+                "project_id": "project-one",
+                "deployment_id": "deployment-one",
+                "access_code": "manually-chosen-review-code",
+                "subject_id": "https://staging.example.com/page",
+            },
+        )
+        self.assertEqual(auth_response.status_code, 200, auth_response.text)
+
+    def test_admin_review_access_rotate_requires_admin_bearer_token(self) -> None:
+        payload = {
+            "client_id": "client-1",
+            "client_slug": "client-one",
+            "client_name": "Client One",
+            "project_id": "project-1",
+            "project_slug": "project-one",
+            "project_name": "Project One",
+            "access_code_id": "code-1",
+            "access_label": "Tester",
+            "mode": "generate",
+        }
+        missing = self.client.post("/v1/admin/review-auth/access-codes/rotate", json=payload)
+        self.assertEqual(missing.status_code, 401)
+        wrong = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers("wrong-token"),
+            json=payload,
+        )
+        self.assertEqual(wrong.status_code, 401)
+
+    def test_admin_review_access_rotate_rejects_partial_deployment_metadata(self) -> None:
+        response = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "client-1",
+                "client_slug": "client-one",
+                "client_name": "Client One",
+                "project_id": "project-1",
+                "project_slug": "project-one",
+                "project_name": "Project One",
+                "deployment_id": "deployment-1",
+                "access_code_id": "code-1",
+                "access_label": "Tester",
+                "mode": "generate",
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("incomplete deployment metadata", response.text)
+
+        scoped_without_deployment = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "client-1",
+                "client_slug": "client-one",
+                "client_name": "Client One",
+                "project_id": "project-1",
+                "project_slug": "project-one",
+                "project_name": "Project One",
+                "access_code_id": "code-1",
+                "access_label": "Tester",
+                "mode": "generate",
+                "deployment_scoped_access": True,
+            },
+        )
+        self.assertEqual(scoped_without_deployment.status_code, 422)
+        self.assertIn("deployment_id is required", scoped_without_deployment.text)
 
     def test_submit_review_requires_authentication_before_payload_validation(self) -> None:
         response = self.client.post(
@@ -311,6 +494,226 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertNotIn("process_path", enqueue_payload)
         self.assertEqual(enqueue_payload["payload"]["events_asset_id"], events_id)
         self.assertEqual(enqueue_payload["sender"], "Owner Label")
+
+    def test_deploy_hook_registers_review_deployment_and_client_can_authenticate(self) -> None:
+        self._seed_review_auth(deployment_id="local-deployment", deployment_slug="local-deployment", project_scoped_access_code=True)
+        deploy_token = self._seed_deploy_hook()
+
+        response = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "swrl-ui-preview-main-abc123",
+                "branch": "main",
+                "allowed_origin": "https://swrl-ui-git-main-org.vercel.app",
+                "subject_pattern": "https://swrl-ui-git-main-org.vercel.app/*",
+                "vercel_deployment_id": "dpl_123",
+                "commit_sha": "abc123",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["deployment"]["id"], "swrl-ui-preview-main-abc123")
+        self.assertEqual(payload["deployment"]["allowed_origin"], "https://swrl-ui-git-main-org.vercel.app")
+        self.assertFalse(payload["secrets_printed"])
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            hook_row = conn.execute("SELECT token_hash, last_used_at FROM review_deploy_hooks WHERE id = ?", ("hook-1",)).fetchone()
+        self.assertIsNotNone(hook_row[1])
+        self.assertNotIn("deploy-hook-secret", hook_row[0])
+
+        session = self._create_review_session(
+            deployment_id="swrl-ui-preview-main-abc123",
+            origin="https://swrl-ui-git-main-org.vercel.app",
+            subject_id="https://swrl-ui-git-main-org.vercel.app/review",
+        )
+        self.assertEqual(session["deployment_id"], "swrl-ui-preview-main-abc123")
+
+    def test_deploy_hook_registration_accepts_secret_with_underscores(self) -> None:
+        self._seed_review_auth(
+            deployment_id="local-deployment",
+            deployment_slug="local-deployment",
+            project_scoped_access_code=True,
+        )
+        deploy_token = self._seed_deploy_hook(secret="deploy_hook_secret_with_underscores")
+
+        response = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "swrl-ui-preview-underscore-secret",
+                "branch": "main",
+                "allowed_origin": "https://swrl-ui-git-main-org.vercel.app",
+                "subject_pattern": "https://swrl-ui-git-main-org.vercel.app/*",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def test_deploy_hook_registration_accepts_localhost_origin_with_port(self) -> None:
+        self._seed_review_auth(deployment_id="local-deployment", deployment_slug="local-deployment", project_scoped_access_code=True)
+        deploy_token = self._seed_deploy_hook()
+
+        response = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "swrl-ui-local",
+                "branch": "local",
+                "allowed_origin": "http://localhost:5173",
+                "subject_pattern": "http://localhost:5173/*",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["deployment"]["allowed_origin"], "http://localhost:5173")
+        self.assertFalse(payload["secrets_printed"])
+
+    def test_deploy_hook_rejects_non_local_http_origin(self) -> None:
+        self._seed_review_auth(deployment_id="local-deployment", deployment_slug="local-deployment", project_scoped_access_code=True)
+        deploy_token = self._seed_deploy_hook()
+
+        response = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "bad-http-origin",
+                "branch": "main",
+                "allowed_origin": "http://swrl-ui-git-main-org.vercel.app",
+                "subject_pattern": "http://swrl-ui-git-main-org.vercel.app/*",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("https outside local development", response.text)
+
+    def test_deploy_hook_registration_is_idempotent_and_updates_origin(self) -> None:
+        self._seed_review_auth(deployment_id="local-deployment", deployment_slug="local-deployment", project_scoped_access_code=True)
+        deploy_token = self._seed_deploy_hook()
+        first = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "swrl-ui-preview-feature",
+                "branch": "feature/one",
+                "allowed_origin": "https://swrl-ui-git-feature-one-org.vercel.app",
+                "subject_pattern": "https://swrl-ui-git-feature-one-org.vercel.app/*",
+            },
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+
+        second = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "swrl-ui-preview-feature",
+                "branch": "feature/two",
+                "allowed_origin": "https://swrl-ui-git-feature-two-org.vercel.app",
+                "subject_pattern": "https://swrl-ui-git-feature-two-org.vercel.app/*",
+            },
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            row = conn.execute(
+                "SELECT branch, allowed_origin, subject_pattern FROM review_deployments WHERE slug = ?",
+                ("swrl-ui-preview-feature",),
+            ).fetchone()
+        self.assertEqual(row[0], "feature/two")
+        self.assertEqual(row[1], "https://swrl-ui-git-feature-two-org.vercel.app")
+        self.assertEqual(row[2], "https://swrl-ui-git-feature-two-org.vercel.app/*")
+
+    def test_deploy_hook_rejects_bad_token_and_malformed_origin(self) -> None:
+        self._seed_review_auth(deployment_id="local-deployment", deployment_slug="local-deployment", project_scoped_access_code=True)
+        deploy_token = self._seed_deploy_hook()
+        bad_token = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": "Bearer wrong"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "bad-token",
+                "branch": "main",
+                "allowed_origin": "https://swrl-ui-git-main-org.vercel.app",
+                "subject_pattern": "https://swrl-ui-git-main-org.vercel.app/*",
+            },
+        )
+        self.assertEqual(bad_token.status_code, 401)
+
+        malformed_origin = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "bad-origin",
+                "branch": "main",
+                "allowed_origin": "https://evil.example.com",
+                "subject_pattern": "https://evil.example.com/*",
+            },
+        )
+        self.assertEqual(malformed_origin.status_code, 422)
+
+        concatenated_suffix = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "bad-concatenated-suffix",
+                "branch": "main",
+                "allowed_origin": "https://evilvercel.app",
+                "subject_pattern": "https://evilvercel.app/*",
+            },
+        )
+        self.assertEqual(concatenated_suffix.status_code, 422)
+
+        mismatched_subject = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "bad-subject",
+                "branch": "main",
+                "allowed_origin": "https://swrl-ui-git-main-org.vercel.app",
+                "subject_pattern": "https://other.vercel.app/*",
+            },
+        )
+        self.assertEqual(mismatched_subject.status_code, 422)
+
+    def test_deploy_hook_rejects_inactive_hook_and_wrong_project(self) -> None:
+        self._seed_review_auth(deployment_id="local-deployment", deployment_slug="local-deployment", project_scoped_access_code=True)
+        inactive_token = self._seed_deploy_hook(hook_id="inactive-hook", active=0)
+        inactive = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {inactive_token}"},
+            json={
+                "project_id": "project-one",
+                "deployment_slug": "inactive-preview",
+                "branch": "main",
+                "allowed_origin": "https://swrl-ui-git-main-org.vercel.app",
+                "subject_pattern": "https://swrl-ui-git-main-org.vercel.app/*",
+            },
+        )
+        self.assertEqual(inactive.status_code, 401)
+
+        deploy_token = self._seed_deploy_hook(hook_id="project-hook")
+        wrong_project = self.client.post(
+            "/v1/review-auth/deployments/register",
+            headers={"Authorization": f"Bearer {deploy_token}"},
+            json={
+                "project_id": "other-project",
+                "deployment_slug": "wrong-project-preview",
+                "branch": "main",
+                "allowed_origin": "https://swrl-ui-git-main-org.vercel.app",
+                "subject_pattern": "https://swrl-ui-git-main-org.vercel.app/*",
+            },
+        )
+        self.assertEqual(wrong_project.status_code, 401)
 
     def test_valid_access_code_creates_short_lived_session_and_get_validates_it(self) -> None:
         self._seed_review_auth()
@@ -525,6 +928,15 @@ class GatewayHttpSessionTests(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 422)
         self.assertFalse(Path(os.environ["HUB_CONFIG_SECRETS_PATH"]).exists())
+
+    def test_clients_db_is_canonical_and_clients_have_rolodex_path(self) -> None:
+        self._seed_review_auth()
+        self.assertTrue(Path(os.environ["CLIENTS_DB_PATH"]).exists())
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(clients)").fetchall()}
+            self.assertIn("rolodex_entry_path", columns)
+            row = conn.execute("SELECT rolodex_entry_path FROM clients WHERE id = ?", ("client-1",)).fetchone()
+            self.assertEqual(row[0], "notes/Client One.md")
 
     def test_gateway_compose_binds_http_to_localhost_by_default(self) -> None:
         compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text(encoding="utf-8")

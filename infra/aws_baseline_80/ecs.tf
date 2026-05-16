@@ -12,6 +12,21 @@ resource "aws_ecs_task_definition" "gateway" {
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.gateway_task.arn
 
+  volume {
+    name = "gateway-data"
+
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.gateway.id
+      root_directory     = "/"
+      transit_encryption = "ENABLED"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.gateway.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
   container_definitions = jsonencode([
     {
       name      = "app"
@@ -34,9 +49,37 @@ resource "aws_ecs_task_definition" "gateway" {
         { name = "LOG_LEVEL", value = "info" },
         { name = "HTTP_PORT", value = "8080" },
         { name = "RUNTIME_GRPC_TARGET", value = local.runtime_target },
+        { name = "CLIENTS_DB_BACKEND", value = var.enable_clients_postgres ? "postgres" : "sqlite" },
+        { name = "CLIENTS_DB_PATH", value = var.gateway_clients_db_path },
+        { name = "CLIENTS_PG_HOST", value = var.enable_clients_postgres ? aws_db_instance.clients[0].address : "" },
+        { name = "CLIENTS_PG_PORT", value = var.enable_clients_postgres ? tostring(aws_db_instance.clients[0].port) : "5432" },
+        { name = "CLIENTS_PG_DATABASE", value = var.clients_postgres_database_name },
+        { name = "CLIENTS_PG_USER", value = var.clients_postgres_username },
+        { name = "REVIEWS_DATA_DIR", value = var.gateway_reviews_data_dir },
         { name = "CORS_ALLOW_ORIGINS", value = var.cors_allow_origins },
         { name = "MAX_BODY_BYTES", value = tostring(var.max_body_bytes) },
         { name = "GATEWAY_GRPC_TIMEOUT_S", value = "5.0" }
+      ]
+      secrets = concat(
+        var.enable_clients_postgres ? [
+          {
+            name      = "CLIENTS_PG_PASSWORD"
+            valueFrom = "${aws_db_instance.clients[0].master_user_secret[0].secret_arn}:password::"
+          }
+        ] : [],
+        [
+          {
+            name      = "REVIEW_ACCESS_ADMIN_TOKEN"
+            valueFrom = aws_secretsmanager_secret.review_access_admin_token.arn
+          }
+        ]
+      )
+      mountPoints = [
+        {
+          sourceVolume  = "gateway-data"
+          containerPath = "/data"
+          readOnly      = false
+        }
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -142,7 +185,7 @@ resource "aws_ecs_service" "gateway" {
   name            = "${local.name_prefix}-gateway-http"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.gateway.arn
-  desired_count   = var.gateway_desired_count
+  desired_count   = var.start_ecs_services ? var.gateway_desired_count : 0
   launch_type     = "FARGATE"
 
   enable_execute_command = var.enable_execute_command
@@ -163,15 +206,18 @@ resource "aws_ecs_service" "gateway" {
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 200
 
-  depends_on = [aws_lb_listener.http]
-  tags       = local.tags
+  depends_on = [
+    aws_lb_listener.http,
+    aws_efs_mount_target.gateway,
+  ]
+  tags = local.tags
 }
 
 resource "aws_ecs_service" "runtime" {
   name            = "${local.name_prefix}-runtime-grpc"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.runtime.arn
-  desired_count   = var.runtime_desired_count
+  desired_count   = var.start_ecs_services ? var.runtime_desired_count : 0
   launch_type     = "FARGATE"
 
   enable_execute_command = var.enable_execute_command
@@ -196,7 +242,7 @@ resource "aws_ecs_service" "sandbox" {
   name            = "${local.name_prefix}-tool-sandbox"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.sandbox.arn
-  desired_count   = var.sandbox_desired_count
+  desired_count   = var.start_ecs_services ? var.sandbox_desired_count : 0
   launch_type     = "FARGATE"
 
   enable_execute_command = var.enable_execute_command
@@ -289,7 +335,7 @@ resource "aws_ecs_service" "queue" {
   name            = "${local.name_prefix}-queue"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.queue.arn
-  desired_count   = var.queue_desired_count
+  desired_count   = var.start_ecs_services ? var.queue_desired_count : 0
   launch_type     = "FARGATE"
 
   enable_execute_command = var.enable_execute_command

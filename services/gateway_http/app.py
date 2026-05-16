@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hmac
 import json
-import os
 import re
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
+from urllib.parse import quote_plus, urlparse
 
 import grpc
 import httpx
@@ -29,7 +31,7 @@ from libs.common.schemas import (
 )
 
 from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
-from .review_auth import ReviewAuthSession, ReviewAuthStore
+from .review_auth import ReviewAuthSession, create_review_auth_store
 
 
 class ReviewAuthSessionIn(BaseModel):
@@ -38,6 +40,56 @@ class ReviewAuthSessionIn(BaseModel):
     email: str | None = None
     access_code: str
     subject_id: str
+
+
+class ReviewDeploymentRegisterIn(BaseModel):
+    project_id: str
+    deployment_slug: str
+    branch: str
+    allowed_origin: str
+    subject_pattern: str
+    vercel_deployment_id: str | None = None
+    commit_sha: str | None = None
+
+
+class ReviewDeploymentRegisterOut(BaseModel):
+    deployment: dict[str, Any]
+    secrets_printed: bool = False
+
+
+class ReviewAccessRotateIn(BaseModel):
+    client_id: str
+    client_slug: str
+    client_name: str
+    rolodex_entry_path: str | None = None
+    project_id: str
+    project_slug: str
+    project_name: str
+    deployment_id: str | None = None
+    deployment_slug: str | None = None
+    allowed_origin: str | None = None
+    subject_pattern: str | None = None
+    access_code_id: str
+    access_label: str
+    access_email: str | None = None
+    mode: Literal["generate", "provided"] = "generate"
+    access_code: str | None = None
+    deployment_scoped_access: bool = False
+
+
+class ReviewAccessRotateOut(BaseModel):
+    client_id: str
+    project_id: str
+    deployment_id: str | None = None
+    access_code_id: str
+    access_label: str
+    raw_code: str | None = None
+    raw_code_present: bool = False
+    project_scoped_access: bool
+    email_configured: bool
+    active: bool
+    last_rotated_at: str
+    secrets_printed: bool = False
 
 
 class ReviewAssetUploadOut(BaseModel):
@@ -342,12 +394,30 @@ def create_app() -> FastAPI:
             }
         )
 
+    def _clients_postgres_dsn() -> str:
+        explicit = (settings.clients_database_url or "").strip()
+        if explicit:
+            return explicit
+        if not settings.clients_pg_host or not settings.clients_pg_password:
+            return ""
+        user = quote_plus(settings.clients_pg_user)
+        password = quote_plus(settings.clients_pg_password)
+        host = settings.clients_pg_host
+        port = settings.clients_pg_port
+        database = quote_plus(settings.clients_pg_database)
+        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
     # Review intake storage
     reviews_dir = Path(settings.reviews_data_dir)
     assets_dir = reviews_dir / "assets"
     reviews_dir.mkdir(parents=True, exist_ok=True)
     assets_dir.mkdir(parents=True, exist_ok=True)
-    review_auth_store = ReviewAuthStore(settings.review_auth_db_path, settings.review_session_ttl_seconds)
+    review_auth_store = create_review_auth_store(
+        backend=settings.clients_db_backend,
+        db_path=settings.clients_db_path,
+        postgres_dsn=_clients_postgres_dsn(),
+        session_ttl_seconds=settings.review_session_ttl_seconds,
+    )
     app.state.review_auth_store = review_auth_store
     secret_path = Path(settings.hub_config_secrets_path)
     allowed_secret_keys = {"ELEVENLABS_API_KEY"}
@@ -394,6 +464,92 @@ def create_app() -> FastAPI:
         configured = bool(values.get("ELEVENLABS_API_KEY"))
         return JSONResponse({"ok": configured, "missing": [] if configured else ["ELEVENLABS_API_KEY"]})
 
+    def _require_review_access_admin(request: Request) -> None:
+        expected = settings.review_access_admin_token.strip()
+        if not expected:
+            raise HTTPException(status_code=503, detail="review access admin token is not configured")
+        authorization = request.headers.get("authorization") or ""
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="invalid review access admin token")
+        if not hmac.compare_digest(token.strip(), expected):
+            raise HTTPException(status_code=401, detail="invalid review access admin token")
+
+    def _validate_review_access_rotation(payload: ReviewAccessRotateIn) -> str:
+        has_deployment_metadata = any(
+            bool((value or "").strip())
+            for value in (payload.deployment_id, payload.deployment_slug, payload.allowed_origin, payload.subject_pattern)
+        )
+        if payload.deployment_scoped_access and not (payload.deployment_id or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="deployment_id is required for deployment-scoped access",
+            )
+        if has_deployment_metadata:
+            missing = [
+                name
+                for name, value in {
+                    "deployment_id": payload.deployment_id,
+                    "allowed_origin": payload.allowed_origin,
+                    "subject_pattern": payload.subject_pattern,
+                }.items()
+                if not (value or "").strip()
+            ]
+            if missing:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"incomplete deployment metadata: missing {', '.join(missing)}",
+                )
+            parsed_origin = urlparse(payload.allowed_origin or "")
+            parsed_subject = urlparse((payload.subject_pattern or "").split("*", 1)[0])
+            if not parsed_origin.scheme or not parsed_origin.netloc or parsed_origin.path not in ("", "/"):
+                raise HTTPException(status_code=422, detail="allowed_origin must be an origin")
+            hostname = (parsed_origin.hostname or "").lower()
+            if hostname in {"localhost", "127.0.0.1", "::1"}:
+                if parsed_origin.scheme.lower() not in {"http", "https"}:
+                    raise HTTPException(status_code=422, detail="local review origins must use http or https")
+            elif parsed_origin.scheme.lower() != "https":
+                raise HTTPException(status_code=422, detail="review origins must use https outside local development")
+            if parsed_subject.scheme.lower() != parsed_origin.scheme.lower() or parsed_subject.netloc.lower() != parsed_origin.netloc.lower():
+                raise HTTPException(status_code=422, detail="subject_pattern origin must match allowed_origin")
+        if payload.mode == "provided":
+            code = (payload.access_code or "").strip()
+            if len(code) < 16:
+                raise HTTPException(status_code=422, detail="access_code must be at least 16 characters")
+            return code
+        return "zrv_" + secrets.token_urlsafe(32)
+
+    @app.post("/v1/admin/review-auth/access-codes/rotate", response_model=ReviewAccessRotateOut)
+    async def rotate_review_access_code(payload: ReviewAccessRotateIn, request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
+        raw_code = _validate_review_access_rotation(payload)
+        result = review_auth_store.rotate_access_code(
+            client_id=payload.client_id.strip(),
+            client_slug=payload.client_slug.strip(),
+            client_name=payload.client_name.strip(),
+            rolodex_entry_path=(payload.rolodex_entry_path or "").strip() or None,
+            project_id=payload.project_id.strip(),
+            project_slug=payload.project_slug.strip(),
+            project_name=payload.project_name.strip(),
+            deployment_id=(payload.deployment_id or "").strip() or None,
+            deployment_slug=(payload.deployment_slug or "").strip() or None,
+            allowed_origin=(payload.allowed_origin or "").strip() or None,
+            subject_pattern=(payload.subject_pattern or "").strip() or None,
+            access_code_id=payload.access_code_id.strip(),
+            access_label=payload.access_label.strip(),
+            access_code=raw_code,
+            access_email=(payload.access_email or "").strip() or None,
+            deployment_scoped_access=payload.deployment_scoped_access,
+        )
+        response = {
+            **result,
+            "raw_code_present": payload.mode == "generate",
+            "secrets_printed": False,
+        }
+        if payload.mode == "generate":
+            response["raw_code"] = raw_code
+        return JSONResponse(response)
+
     def _session_roots() -> list[Path]:
         raw = settings.hermes_session_roots.strip()
         if not raw:
@@ -433,6 +589,74 @@ def create_app() -> FastAPI:
         if result is None:
             raise HTTPException(status_code=401, detail="invalid review credentials")
         return JSONResponse(result)
+
+    def _require_deploy_hook(request: Request, project_id: str) -> dict[str, Any]:
+        authorization = request.headers.get("authorization") or ""
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="invalid deploy hook token")
+        hook = review_auth_store.validate_deploy_hook_token(token=token.strip(), project_identifier=project_id)
+        if hook is None:
+            raise HTTPException(status_code=401, detail="invalid deploy hook token")
+        return hook
+
+    def _allowed_deploy_hosts(hook: dict[str, Any]) -> list[str]:
+        hosts: list[str] = []
+        for item in str(hook.get("allowed_host_suffixes") or "").split(","):
+            normalized = item.strip().lower().lstrip(".")
+            if normalized:
+                hosts.append(normalized)
+        return hosts
+
+    def _host_matches_allowed_suffix(hostname: str, suffix: str) -> bool:
+        return hostname == suffix or hostname.endswith(f".{suffix}")
+
+    def _origin_parts(origin: str) -> tuple[str, str]:
+        parsed = urlparse(origin)
+        if not parsed.scheme or not parsed.netloc or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+            raise HTTPException(status_code=422, detail="allowed_origin must be an origin, not a URL with path/query/fragment")
+        return parsed.scheme.lower(), parsed.netloc.lower()
+
+    def _subject_pattern_origin(subject_pattern: str) -> tuple[str, str]:
+        parsed = urlparse(subject_pattern.split("*", 1)[0])
+        if not parsed.scheme or not parsed.netloc:
+            raise HTTPException(status_code=422, detail="subject_pattern must include an absolute URL origin")
+        return parsed.scheme.lower(), parsed.netloc.lower()
+
+    def _validate_deploy_origin_policy(allowed_origin: str, subject_pattern: str, hook: dict[str, Any]) -> None:
+        scheme, host = _origin_parts(allowed_origin)
+        hostname = (urlparse(allowed_origin).hostname or "").lower()
+        if hostname in {"localhost", "127.0.0.1", "::1"}:
+            if scheme not in {"http", "https"}:
+                raise HTTPException(status_code=422, detail="local review origins must use http or https")
+        else:
+            if scheme != "https":
+                raise HTTPException(status_code=422, detail="review deploy origins must use https outside local development")
+            allowed_hosts = _allowed_deploy_hosts(hook)
+            if not allowed_hosts:
+                raise HTTPException(status_code=422, detail="review deploy hook has no allowed host suffixes")
+            if not any(_host_matches_allowed_suffix(hostname, item) for item in allowed_hosts):
+                raise HTTPException(status_code=422, detail="review deploy origin host is not allowed")
+        subject_scheme, subject_host = _subject_pattern_origin(subject_pattern)
+        if subject_scheme != scheme or subject_host != host:
+            raise HTTPException(status_code=422, detail="subject_pattern origin must match allowed_origin")
+
+    @app.post("/v1/review-auth/deployments/register", response_model=ReviewDeploymentRegisterOut)
+    async def register_review_deployment(payload: ReviewDeploymentRegisterIn, request: Request) -> JSONResponse:
+        hook = _require_deploy_hook(request, payload.project_id)
+        _validate_deploy_origin_policy(payload.allowed_origin, payload.subject_pattern, hook)
+        deployment = review_auth_store.register_deployment(
+            project_identifier=payload.project_id,
+            deployment_slug=payload.deployment_slug,
+            branch=payload.branch,
+            allowed_origin=payload.allowed_origin,
+            subject_pattern=payload.subject_pattern,
+            vercel_deployment_id=payload.vercel_deployment_id,
+            commit_sha=payload.commit_sha,
+        )
+        if deployment is None:
+            raise HTTPException(status_code=404, detail="review project not found")
+        return JSONResponse({"deployment": deployment, "secrets_printed": False})
 
     def _bearer_token(request: Request) -> str:
         authorization = request.headers.get("authorization") or ""
@@ -537,9 +761,11 @@ def create_app() -> FastAPI:
         typed_assets = {str(meta.get("asset_type") or "").strip().lower(): meta for meta in asset_metas}
         events_asset_id = payload.events_asset_id or typed_assets.get("events", {}).get("asset_id")
         audio_asset_id = payload.audio_asset_id or typed_assets.get("audio", {}).get("asset_id")
-        if not events_asset_id or not audio_asset_id:
-            raise HTTPException(status_code=422, detail="review submission requires events_asset_id and audio_asset_id")
-        expected_typed_assets = {"events_asset_id": (events_asset_id, "events"), "audio_asset_id": (audio_asset_id, "audio")}
+        if not events_asset_id:
+            raise HTTPException(status_code=422, detail="review submission requires events_asset_id")
+        expected_typed_assets = {"events_asset_id": (events_asset_id, "events")}
+        if audio_asset_id:
+            expected_typed_assets["audio_asset_id"] = (audio_asset_id, "audio")
         for field, (asset_id, expected_type) in expected_typed_assets.items():
             actual_type = str((meta_by_id.get(str(asset_id)) or {}).get("asset_type") or "").strip().lower()
             if actual_type != expected_type:

@@ -1,7 +1,8 @@
 resource "aws_vpc" "this" {
-  cidr_block           = var.vpc_cidr
-  enable_dns_support   = true
-  enable_dns_hostnames = true
+  cidr_block                       = var.vpc_cidr
+  assign_generated_ipv6_cidr_block = var.enable_dual_stack_public_edge
+  enable_dns_support               = true
+  enable_dns_hostnames             = true
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-vpc" })
 }
@@ -12,11 +13,13 @@ resource "aws_internet_gateway" "this" {
 }
 
 resource "aws_subnet" "public" {
-  count                   = 2
-  vpc_id                  = aws_vpc.this.id
-  availability_zone       = local.azs[count.index]
-  cidr_block              = cidrsubnet(var.vpc_cidr, 8, count.index)
-  map_public_ip_on_launch = true
+  count                           = 2
+  vpc_id                          = aws_vpc.this.id
+  availability_zone               = local.azs[count.index]
+  cidr_block                      = cidrsubnet(var.vpc_cidr, 8, count.index)
+  ipv6_cidr_block                 = var.enable_dual_stack_public_edge ? cidrsubnet(aws_vpc.this.ipv6_cidr_block, 8, count.index) : null
+  assign_ipv6_address_on_creation = var.enable_dual_stack_public_edge
+  map_public_ip_on_launch         = true
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-public-${count.index}" })
 }
@@ -37,6 +40,15 @@ resource "aws_route_table" "public" {
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.this.id
+  }
+
+  dynamic "route" {
+    for_each = var.enable_dual_stack_public_edge ? [1] : []
+
+    content {
+      ipv6_cidr_block = "::/0"
+      gateway_id      = aws_internet_gateway.this.id
+    }
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-public-rt" })

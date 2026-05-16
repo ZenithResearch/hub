@@ -22,8 +22,14 @@ resource "aws_iam_role_policy_attachment" "task_execution_managed" {
 # Secret injection uses the *execution* role.
 data "aws_iam_policy_document" "execution_secrets" {
   statement {
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.qdrant_api_key.arn]
+    actions = ["secretsmanager:GetSecretValue"]
+    resources = concat(
+      [
+        aws_secretsmanager_secret.qdrant_api_key.arn,
+        aws_secretsmanager_secret.review_access_admin_token.arn,
+      ],
+      var.enable_clients_postgres ? [aws_db_instance.clients[0].master_user_secret[0].secret_arn] : []
+    )
   }
 }
 
@@ -73,6 +79,24 @@ resource "aws_iam_role_policy" "queue_efs" {
   name   = "${local.name_prefix}-queue-efs"
   role   = aws_iam_role.queue_task.id
   policy = data.aws_iam_policy_document.queue_efs.json
+}
+
+# Gateway task needs EFS access for persistent CLIENTS_DB_PATH=/data/clients.db.
+data "aws_iam_policy_document" "gateway_efs" {
+  statement {
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientWrite",
+      "elasticfilesystem:ClientRootAccess",
+    ]
+    resources = [aws_efs_file_system.gateway.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "gateway_efs" {
+  name   = "${local.name_prefix}-gateway-efs"
+  role   = aws_iam_role.gateway_task.id
+  policy = data.aws_iam_policy_document.gateway_efs.json
 }
 
 # Least privilege baseline: task roles have no permissions by default.

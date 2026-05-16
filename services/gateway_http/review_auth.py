@@ -9,12 +9,16 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from libs.common.logging import get_logger
+
 _CODE_HASH_PREFIX = "pbkdf2_sha256"
 _CODE_HASH_ITERATIONS = 210_000
+_DEPLOY_HOOK_TOKEN_PREFIX = "rdh_"
+
+log = get_logger()
 
 
 def utc_now() -> datetime:
@@ -61,6 +65,24 @@ def verify_access_code(code: str, stored_hash: str) -> bool:
     return hmac.compare_digest(expected, digest_hex)
 
 
+def hash_deploy_hook_token(secret: str, *, salt: bytes | None = None) -> str:
+    return hash_access_code(secret, salt=salt)
+
+
+def verify_deploy_hook_token(secret: str, stored_hash: str) -> bool:
+    return verify_access_code(secret, stored_hash)
+
+
+def parse_deploy_hook_token(token: str) -> tuple[str, str] | None:
+    if not token.startswith(_DEPLOY_HOOK_TOKEN_PREFIX):
+        return None
+    payload = token[len(_DEPLOY_HOOK_TOKEN_PREFIX):]
+    hook_id, sep, secret = payload.rpartition("_")
+    if not sep or not hook_id or not secret:
+        return None
+    return hook_id, secret
+
+
 def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -96,17 +118,80 @@ class ReviewAuthSession:
 
 
 class ReviewAuthStore:
-    def __init__(self, db_path: str, session_ttl_seconds: int) -> None:
-        self.db_path = Path(db_path)
+    class PostgresConnection:
+        def __init__(self, raw_conn: Any) -> None:
+            self.raw_conn = raw_conn
+
+        def __enter__(self) -> "ReviewAuthStore.PostgresConnection":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            if exc_type is None:
+                self.raw_conn.commit()
+            else:
+                self.raw_conn.rollback()
+            self.raw_conn.close()
+
+        def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+            return self.raw_conn.execute(self._translate_placeholders(sql), params)
+
+        def executescript(self, sql: str) -> None:
+            for statement in sql.split(";"):
+                statement = statement.strip()
+                if statement:
+                    self.execute(statement)
+
+        @staticmethod
+        def _translate_placeholders(sql: str) -> str:
+            return sql.replace("?", "%s")
+
+    Connection = PostgresConnection
+
+    class SQLiteConnection:
+        def __init__(self, raw_conn: sqlite3.Connection) -> None:
+            self.raw_conn = raw_conn
+            self.raw_conn.row_factory = sqlite3.Row
+
+        def __enter__(self) -> "ReviewAuthStore.SQLiteConnection":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            if exc_type is None:
+                self.raw_conn.commit()
+            else:
+                self.raw_conn.rollback()
+            self.raw_conn.close()
+
+        def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+            return self.raw_conn.execute(sql, params)
+
+        def executescript(self, sql: str) -> None:
+            self.raw_conn.executescript(sql)
+
+    def __init__(self, *, backend: str, dsn: str, db_path: str, session_ttl_seconds: int) -> None:
+        self.backend = backend.strip().lower() or "sqlite"
+        self.dsn = dsn.strip()
+        self.db_path = db_path.strip() or "data/clients.db"
+        if self.backend == "postgres" and not self.dsn:
+            raise ValueError("Postgres review auth requires CLIENTS_DATABASE_URL or CLIENTS_PG_* settings")
+        if self.backend not in {"sqlite", "postgres"}:
+            raise ValueError(f"unsupported review auth backend: {backend}")
         self.session_ttl_seconds = int(session_ttl_seconds)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init_db()
 
-    def connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+    def connect(self) -> "ReviewAuthStore.PostgresConnection | ReviewAuthStore.SQLiteConnection":
+        if self.backend == "sqlite":
+            path = os.path.abspath(self.db_path)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            raw_conn = sqlite3.connect(path)
+            raw_conn.execute("PRAGMA foreign_keys = ON")
+            return self.SQLiteConnection(raw_conn)
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:  # pragma: no cover - exercised only without optional dep installed
+            raise RuntimeError("Postgres review auth backend requires the psycopg package.") from exc
+        return self.PostgresConnection(psycopg.connect(self.dsn, row_factory=dict_row))
 
     def init_db(self) -> None:
         with self.connect() as conn:
@@ -116,6 +201,7 @@ class ReviewAuthStore:
                     id TEXT PRIMARY KEY,
                     slug TEXT UNIQUE NOT NULL,
                     name TEXT NOT NULL,
+                    rolodex_entry_path TEXT,
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS projects (
@@ -160,12 +246,148 @@ class ReviewAuthStore:
                     expires_at TEXT NOT NULL,
                     revoked_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS review_deploy_hooks (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    label TEXT NOT NULL,
+                    token_hash TEXT NOT NULL,
+                    allowed_host_suffixes TEXT NOT NULL,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    last_used_at TEXT
+                );
                 CREATE INDEX IF NOT EXISTS idx_review_sessions_token_hash ON review_sessions(token_hash);
                 CREATE INDEX IF NOT EXISTS idx_review_access_codes_project_deployment ON review_access_codes(project_id, deployment_id);
                 """
             )
+            if self.backend == "sqlite":
+                client_columns = {row[1] for row in conn.execute("PRAGMA table_info(clients)").fetchall()}
+                deployment_columns = {row[1] for row in conn.execute("PRAGMA table_info(review_deployments)").fetchall()}
+            else:
+                client_columns = {
+                    row["column_name"]
+                    for row in conn.execute(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'clients'
+                        """
+                    ).fetchall()
+                }
+                deployment_columns = {
+                    row["column_name"]
+                    for row in conn.execute(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'review_deployments'
+                        """
+                    ).fetchall()
+                }
+            if "rolodex_entry_path" not in client_columns:
+                conn.execute("ALTER TABLE clients ADD COLUMN rolodex_entry_path TEXT")
+            if "vercel_deployment_id" not in deployment_columns:
+                conn.execute("ALTER TABLE review_deployments ADD COLUMN vercel_deployment_id TEXT")
+            if "commit_sha" not in deployment_columns:
+                conn.execute("ALTER TABLE review_deployments ADD COLUMN commit_sha TEXT")
+            if "updated_at" not in deployment_columns:
+                conn.execute("ALTER TABLE review_deployments ADD COLUMN updated_at TEXT")
 
-    def _get_project(self, conn: sqlite3.Connection, project_identifier: str) -> sqlite3.Row | None:
+    def validate_deploy_hook_token(self, *, token: str, project_identifier: str) -> dict[str, Any] | None:
+        if not token.startswith(_DEPLOY_HOOK_TOKEN_PREFIX):
+            return None
+        now = isoformat(utc_now())
+        with self.connect() as conn:
+            project = self._get_project(conn, project_identifier)
+            if project is None:
+                return None
+            rows = conn.execute(
+                """
+                SELECT * FROM review_deploy_hooks
+                WHERE project_id = ?
+                  AND active = 1
+                  AND (expires_at IS NULL OR expires_at > ?)
+                """,
+                (project["id"], now),
+            ).fetchall()
+            for row in rows:
+                token_prefix = f"{_DEPLOY_HOOK_TOKEN_PREFIX}{row['id']}_"
+                if not token.startswith(token_prefix):
+                    continue
+                secret = token[len(token_prefix):]
+                if not secret or not verify_deploy_hook_token(secret, row["token_hash"]):
+                    continue
+                conn.execute("UPDATE review_deploy_hooks SET last_used_at = ? WHERE id = ?", (now, row["id"]))
+                return {
+                    "id": row["id"],
+                    "project_id": row["project_id"],
+                    "label": row["label"],
+                    "allowed_host_suffixes": row["allowed_host_suffixes"],
+                }
+            return None
+
+    def register_deployment(
+        self,
+        *,
+        project_identifier: str,
+        deployment_slug: str,
+        branch: str,
+        allowed_origin: str,
+        subject_pattern: str,
+        vercel_deployment_id: str | None = None,
+        commit_sha: str | None = None,
+    ) -> dict[str, Any] | None:
+        now = isoformat(utc_now())
+        with self.connect() as conn:
+            project = self._get_project(conn, project_identifier)
+            if project is None:
+                return None
+            deployment_id = deployment_slug
+            conn.execute(
+                """
+                INSERT INTO review_deployments
+                    (id, project_id, slug, branch, allowed_origin, subject_pattern, active, created_at,
+                     vercel_deployment_id, commit_sha, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    project_id = excluded.project_id,
+                    slug = excluded.slug,
+                    branch = excluded.branch,
+                    allowed_origin = excluded.allowed_origin,
+                    subject_pattern = excluded.subject_pattern,
+                    active = 1,
+                    vercel_deployment_id = excluded.vercel_deployment_id,
+                    commit_sha = excluded.commit_sha,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    deployment_id,
+                    project["id"],
+                    deployment_slug,
+                    branch,
+                    allowed_origin,
+                    subject_pattern,
+                    now,
+                    vercel_deployment_id,
+                    commit_sha,
+                    now,
+                ),
+            )
+            return {
+                "id": deployment_id,
+                "slug": deployment_slug,
+                "project_id": project["id"],
+                "branch": branch,
+                "allowed_origin": allowed_origin,
+                "subject_pattern": subject_pattern,
+                "active": True,
+                "vercel_deployment_id": vercel_deployment_id,
+                "commit_sha": commit_sha,
+                "updated_at": now,
+            }
+
+    def _get_project(self, conn: Any, project_identifier: str) -> Any | None:
         return conn.execute(
             """
             SELECT p.*, c.id AS client_id, c.slug AS client_slug
@@ -178,7 +400,7 @@ class ReviewAuthStore:
             (project_identifier, project_identifier, project_identifier),
         ).fetchone()
 
-    def _get_deployment(self, conn: sqlite3.Connection, project_id: str, deployment_identifier: str) -> sqlite3.Row | None:
+    def _get_deployment(self, conn: Any, project_id: str, deployment_identifier: str) -> Any | None:
         return conn.execute(
             """
             SELECT * FROM review_deployments
@@ -188,6 +410,115 @@ class ReviewAuthStore:
             """,
             (project_id, deployment_identifier, deployment_identifier, deployment_identifier),
         ).fetchone()
+
+    def rotate_access_code(
+        self,
+        *,
+        client_id: str,
+        client_slug: str,
+        client_name: str,
+        rolodex_entry_path: str | None,
+        project_id: str,
+        project_slug: str,
+        project_name: str,
+        deployment_id: str | None,
+        deployment_slug: str | None,
+        allowed_origin: str | None,
+        subject_pattern: str | None,
+        access_code_id: str,
+        access_label: str,
+        access_code: str,
+        access_email: str | None = None,
+        deployment_scoped_access: bool = False,
+    ) -> dict[str, Any]:
+        now = isoformat(utc_now())
+        cleaned_deployment_id = (deployment_id or "").strip() or None
+        cleaned_deployment_slug = (deployment_slug or cleaned_deployment_id or "").strip() or None
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO clients (id, slug, name, rolodex_entry_path, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    slug = excluded.slug,
+                    name = excluded.name,
+                    rolodex_entry_path = excluded.rolodex_entry_path
+                """,
+                (client_id, client_slug, client_name, rolodex_entry_path, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO projects (id, client_id, slug, name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    client_id = excluded.client_id,
+                    slug = excluded.slug,
+                    name = excluded.name
+                """,
+                (project_id, client_id, project_slug, project_name, now),
+            )
+            if cleaned_deployment_id and allowed_origin and subject_pattern:
+                conn.execute(
+                    """
+                    INSERT INTO review_deployments
+                        (id, project_id, slug, branch, allowed_origin, subject_pattern, active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        project_id = excluded.project_id,
+                        slug = excluded.slug,
+                        branch = excluded.branch,
+                        allowed_origin = excluded.allowed_origin,
+                        subject_pattern = excluded.subject_pattern,
+                        active = 1,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        cleaned_deployment_id,
+                        project_id,
+                        cleaned_deployment_slug or cleaned_deployment_id,
+                        "operator",
+                        allowed_origin,
+                        subject_pattern,
+                        now,
+                        now,
+                    ),
+                )
+            access_deployment_id = cleaned_deployment_id if deployment_scoped_access else None
+            conn.execute(
+                """
+                INSERT INTO review_access_codes
+                    (id, project_id, deployment_id, label, email, code_hash, active, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, NULL)
+                ON CONFLICT(id) DO UPDATE SET
+                    project_id = excluded.project_id,
+                    deployment_id = excluded.deployment_id,
+                    label = excluded.label,
+                    email = excluded.email,
+                    code_hash = excluded.code_hash,
+                    active = 1,
+                    expires_at = NULL
+                """,
+                (
+                    access_code_id,
+                    project_id,
+                    access_deployment_id,
+                    access_label,
+                    (access_email or "").strip() or None,
+                    hash_access_code(access_code),
+                    now,
+                ),
+            )
+        return {
+            "client_id": client_id,
+            "project_id": project_id,
+            "deployment_id": cleaned_deployment_id,
+            "access_code_id": access_code_id,
+            "access_label": access_label,
+            "project_scoped_access": access_deployment_id is None,
+            "email_configured": bool((access_email or "").strip()),
+            "active": True,
+            "last_rotated_at": now,
+        }
 
     def create_session(
         self,
@@ -200,14 +531,59 @@ class ReviewAuthStore:
         email: str | None,
     ) -> dict[str, Any] | None:
         now = utc_now()
+        email_present = bool((email or "").strip())
         with self.connect() as conn:
             project = self._get_project(conn, project_identifier)
             if project is None:
+                log.warning(
+                    "review_auth_session_rejected",
+                    reason="project_not_found",
+                    project_identifier=project_identifier,
+                    deployment_identifier=deployment_identifier,
+                    origin=origin,
+                    subject_id=subject_id,
+                    email_present=email_present,
+                )
                 return None
             deployment = self._get_deployment(conn, str(project["id"]), deployment_identifier)
-            if deployment is None or str(deployment["allowed_origin"]) != origin:
+            if deployment is None:
+                log.warning(
+                    "review_auth_session_rejected",
+                    reason="deployment_not_found",
+                    project_id=str(project["id"]),
+                    project_identifier=project_identifier,
+                    deployment_identifier=deployment_identifier,
+                    origin=origin,
+                    subject_id=subject_id,
+                    email_present=email_present,
+                )
+                return None
+            allowed_origin = str(deployment["allowed_origin"])
+            if allowed_origin != origin:
+                log.warning(
+                    "review_auth_session_rejected",
+                    reason="origin_mismatch",
+                    project_id=str(project["id"]),
+                    deployment_id=str(deployment["id"]),
+                    deployment_identifier=deployment_identifier,
+                    origin=origin,
+                    allowed_origin=allowed_origin,
+                    subject_id=subject_id,
+                    email_present=email_present,
+                )
                 return None
             if not subject_allowed(subject_id, origin, deployment["subject_pattern"]):
+                log.warning(
+                    "review_auth_session_rejected",
+                    reason="subject_not_allowed",
+                    project_id=str(project["id"]),
+                    deployment_id=str(deployment["id"]),
+                    deployment_identifier=deployment_identifier,
+                    origin=origin,
+                    subject_id=subject_id,
+                    subject_pattern=deployment["subject_pattern"],
+                    email_present=email_present,
+                )
                 return None
             rows = conn.execute(
                 """
@@ -219,16 +595,33 @@ class ReviewAuthStore:
                 """,
                 (project["id"], deployment["id"], isoformat(now)),
             ).fetchall()
-            matched: sqlite3.Row | None = None
+            matched: Any | None = None
             requested_email = (email or "").strip().lower()
+            skipped_email_mismatch = 0
             for row in rows:
                 row_email = str(row["email"] or "").strip().lower()
                 if row_email and row_email != requested_email:
+                    skipped_email_mismatch += 1
                     continue
                 if verify_access_code(access_code, row["code_hash"]):
                     matched = row
                     break
             if matched is None:
+                log.warning(
+                    "review_auth_session_rejected",
+                    reason="access_code_no_match",
+                    project_id=str(project["id"]),
+                    deployment_id=str(deployment["id"]),
+                    deployment_identifier=deployment_identifier,
+                    origin=origin,
+                    subject_id=subject_id,
+                    email_present=bool(requested_email),
+                    eligible_access_code_rows=len(rows),
+                    email_mismatch_rows=skipped_email_mismatch,
+                    candidate_access_code_ids=[str(row["id"]) for row in rows],
+                    candidate_deployment_scopes=[str(row["deployment_id"] or "") for row in rows],
+                    candidate_email_bound=[bool(str(row["email"] or "").strip()) for row in rows],
+                )
                 return None
             token = "rev_" + secrets.token_urlsafe(32)
             session_id = "rev_sess_" + uuid.uuid4().hex
@@ -251,6 +644,15 @@ class ReviewAuthStore:
                     isoformat(now),
                     isoformat(expires_at),
                 ),
+            )
+            log.info(
+                "review_auth_session_created",
+                project_id=str(project["id"]),
+                deployment_id=str(deployment["id"]),
+                access_code_id=str(matched["id"]),
+                origin=origin,
+                subject_id=subject_id,
+                email_present=bool(requested_email),
             )
             return {
                 "session_id": session_id,
@@ -321,3 +723,18 @@ class ReviewAuthStore:
                 project_slug=row["project_slug"],
                 subject_pattern=row["subject_pattern"],
             )
+
+
+def create_review_auth_store(
+    *,
+    postgres_dsn: str,
+    session_ttl_seconds: int,
+    backend: str = "postgres",
+    db_path: str = "data/clients.db",
+) -> ReviewAuthStore:
+    return ReviewAuthStore(
+        backend=backend,
+        dsn=postgres_dsn,
+        db_path=db_path,
+        session_ttl_seconds=session_ttl_seconds,
+    )

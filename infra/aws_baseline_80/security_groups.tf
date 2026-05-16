@@ -4,11 +4,21 @@ resource "aws_security_group" "alb" {
   vpc_id      = aws_vpc.this.id
 
   ingress {
-    description = "public_http"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    description      = "public_http"
+    from_port        = 80
+    to_port          = 80
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = var.enable_dual_stack_public_edge ? ["::/0"] : []
+  }
+
+  ingress {
+    description      = "public_https"
+    from_port        = 443
+    to_port          = 443
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = var.enable_dual_stack_public_edge ? ["::/0"] : []
   }
 
   egress {
@@ -41,6 +51,35 @@ resource "aws_security_group" "gateway" {
     to_port     = 50051
     protocol    = "tcp"
     cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "gateway_to_efs_clients_db"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  dynamic "egress" {
+    for_each = var.enable_clients_postgres ? [1] : []
+
+    content {
+      description = "gateway_to_clients_postgres"
+      from_port   = 5432
+      to_port     = 5432
+      protocol    = "tcp"
+      cidr_blocks = aws_subnet.private[*].cidr_block
+    }
+  }
+
+  # Required for Fargate image pulls/log delivery via NAT unless VPC endpoints are added.
+  egress {
+    description = "aws_control_plane_https"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   # DNS to VPC resolver (best-effort; SGs can't express the resolver IP cleanly).
@@ -128,6 +167,15 @@ resource "aws_security_group" "sandbox" {
 
   # Keep sandbox egress minimal. Note: this does not provide strong network isolation for tool subprocesses,
   # but reduces accidental outbound connectivity in the baseline.
+  # HTTPS egress is required for Fargate image pulls/log delivery via NAT unless VPC endpoints are added.
+  egress {
+    description = "aws_control_plane_https"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     description = "dns_udp"
     from_port   = 53
@@ -178,6 +226,15 @@ resource "aws_security_group" "queue" {
     cidr_blocks = aws_subnet.private[*].cidr_block
   }
 
+  # Required for Fargate image pulls/log delivery via NAT unless VPC endpoints are added.
+  egress {
+    description = "aws_control_plane_https"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     description = "dns_udp"
     from_port   = 53
@@ -195,5 +252,23 @@ resource "aws_security_group" "queue" {
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-queue-sg" })
+}
+
+resource "aws_security_group" "clients_postgres" {
+  count = var.enable_clients_postgres ? 1 : 0
+
+  name        = "${local.name_prefix}-clients-postgres-sg"
+  description = "clients Postgres: private ingress only from gateway tasks"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description     = "gateway_to_clients_postgres"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.gateway.id]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-clients-postgres-sg" })
 }
 

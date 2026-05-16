@@ -3,6 +3,12 @@
 !.env.example
 .env.local
 .terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.tfvars
+*.tfvars.json
+*.tfbackend.local
 .venv*
 __pycache__/
 *.pyc
