@@ -26,12 +26,12 @@
 **Objective:** Confirm the deploy source and target environment before any production write.
 
 **Files:**
-- Inspect: `/Users/bananawalnut/repos/hub`
+- Inspect: `<local hub repo path>`
 
 **Commands:**
 
 ```bash
-cd /Users/bananawalnut/repos/hub
+cd <local hub repo path>
 git rev-parse --short HEAD
 git status --short
 AWS_PROFILE=zenith-hermes AWS_REGION=us-east-1 aws sts get-caller-identity --output json
@@ -50,7 +50,7 @@ terraform -chdir=infra/aws_baseline_80 validate
 **Commands:**
 
 ```bash
-cd /Users/bananawalnut/repos/hub
+cd <local hub repo path>
 AWS_PROFILE=zenith-hermes AWS_REGION=us-east-1 \
   terraform -chdir=infra/aws_baseline_80 plan -no-color
 ```
@@ -83,7 +83,7 @@ AWS_PROFILE=zenith-hermes AWS_REGION=us-east-1 python3 scripts/operator_set_revi
 **Commands:**
 
 ```bash
-cd /Users/bananawalnut/repos/hub
+cd <local hub repo path>
 AWS_PROFILE=zenith-hermes AWS_REGION=us-east-1 \
   terraform -chdir=infra/aws_baseline_80 apply -auto-approve
 ```
@@ -142,7 +142,7 @@ curl -sS -o /tmp/review-admin-no-token.json -w '%{http_code}\n' \
 **Objective:** Add a minimal Swift client for the admin rotation endpoint and connect the existing Review Access UI action to it.
 
 **Files:**
-- Modify/Create under `/Users/bananawalnut/claude-hub/repos/workspace/ZenithOS/Sources/ZenithOSUI/ReviewAccess/`
+- Modify/Create under `<local ZenithOS workspace>/Sources/ZenithOSUI/ReviewAccess/`
 - Candidate new file: `ReviewAccessHubClient.swift`
 - Modify: `ReviewAccessView.swift`
 
@@ -154,7 +154,7 @@ curl -sS -o /tmp/review-admin-no-token.json -w '%{http_code}\n' \
 **Verification:**
 
 ```bash
-cd /Users/bananawalnut/claude-hub/repos/workspace/ZenithOS
+cd <local ZenithOS workspace>
 swift build -c debug --product ZenithOSUI
 ```
 

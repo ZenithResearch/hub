@@ -953,7 +953,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
 
         response = self.client.patch(
             "/v1/reviews/review-123/status",
-            json={"status": "processed", "review_note_path": "~/claude-hub/notes/review review-123.md"},
+            json={"status": "processed", "review_note_path": "local-private://vault/notes/review review-123.md"},
         )
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -961,5 +961,5 @@ class GatewayHttpSessionTests(unittest.TestCase):
 
         saved = json.loads(review_path.read_text())
         self.assertEqual(saved["status"], "processed")
-        self.assertEqual(saved["review_note_path"], "~/claude-hub/notes/review review-123.md")
+        self.assertEqual(saved["review_note_path"], "local-private://vault/notes/review review-123.md")
         self.assertEqual(saved["subject_id"], "http://example")

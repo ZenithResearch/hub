@@ -345,7 +345,7 @@ services:
       TOOL_DIR: ${TOOL_DIR:-/app/libs/tools}
       HERMES_PROFILE_ROOT: /hub/.hermes/profiles
       FRANK_EXECUTION_ROOT: /hub/.hermes/frank_execution
-      FRANK_SUBJECT_CODEBASE_MAP: ${FRANK_SUBJECT_CODEBASE_MAP:-http://localhost:3000=/Users/bananawalnut/repos/zenith-hub;http://host.docker.internal:3000=/Users/bananawalnut/repos/zenith-hub}
+      FRANK_SUBJECT_CODEBASE_MAP: ${FRANK_SUBJECT_CODEBASE_MAP:-http://localhost:3000=/workspace/zenith-hub;http://host.docker.internal:3000=/workspace/zenith-hub}
       HUB_CONFIG_SECRETS_PATH: /hub/.hermes/config-secrets.env
       RECONNECT_DELAY_S: ${FRANK_RECONNECT_DELAY_S:-5}
       REVIEWS_DATA_DIR: /data/reviews
@@ -355,7 +355,7 @@ services:
       - ./.hermes:/hub/.hermes
       - ./rolodex/agents/frank:/hub/rolodex/agents/frank
       - reviews_data:/data/reviews:ro
-      - ${FRANK_ZENITH_HUB_PATH:-/Users/bananawalnut/repos/zenith-hub}:/Users/bananawalnut/repos/zenith-hub:ro
+      - ${FRANK_ZENITH_HUB_PATH:-./repos/workspace/zenith-hub}:/workspace/zenith-hub:ro
     depends_on:
       - queue
       - eventbus
