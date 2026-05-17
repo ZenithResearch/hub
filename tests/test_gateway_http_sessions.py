@@ -180,6 +180,77 @@ class GatewayHttpSessionTests(unittest.TestCase):
     def _admin_headers(self, token: str = "admin-secret") -> dict[str, str]:
         return {"Authorization": f"Bearer {token}"}
 
+    def test_admin_review_access_capabilities_verifies_admin_token(self) -> None:
+        response = self.client.get(
+            "/v1/admin/review-auth/capabilities",
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["ok"], True)
+        self.assertEqual(payload["hub"], "gateway-http")
+        self.assertIn("review_access_admin", payload["capabilities"])
+        self.assertIn("review_access_rotate", payload["capabilities"])
+        self.assertEqual(payload["secrets_printed"], False)
+
+    def test_admin_review_access_capabilities_rejects_invalid_token(self) -> None:
+        response = self.client.get(
+            "/v1/admin/review-auth/capabilities",
+            headers=self._admin_headers("wrong-token"),
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "invalid review access admin token")
+
+    def test_admin_review_access_admin_token_update_requires_current_token_when_configured(self) -> None:
+        response = self.client.put(
+            "/v1/admin/review-auth/admin-token",
+            headers=self._admin_headers("wrong-token"),
+            json={"value": "new-admin-secret-token-at-least-32-chars"},
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(Path(os.environ["HUB_CONFIG_SECRETS_PATH"]).exists())
+
+    def test_admin_review_access_admin_token_update_rotates_effective_token(self) -> None:
+        new_token = "new-admin-secret-token-at-least-32-chars"
+        response = self.client.put(
+            "/v1/admin/review-auth/admin-token",
+            headers=self._admin_headers(),
+            json={"value": new_token},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["configured"])
+        self.assertEqual(body["secrets_printed"], False)
+        self.assertNotIn(new_token, json.dumps(body))
+
+        old_response = self.client.get(
+            "/v1/admin/review-auth/capabilities",
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(old_response.status_code, 401)
+
+        new_response = self.client.get(
+            "/v1/admin/review-auth/capabilities",
+            headers=self._admin_headers(new_token),
+        )
+        self.assertEqual(new_response.status_code, 200, new_response.text)
+
+    def test_admin_review_access_admin_token_bootstraps_when_unconfigured(self) -> None:
+        self.module.app.state.settings.review_access_admin_token = ""
+        new_token = "bootstrap-admin-secret-at-least-32-chars"
+        response = self.client.put(
+            "/v1/admin/review-auth/admin-token",
+            json={"value": new_token},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotIn(new_token, json.dumps(response.json()))
+
+        verify_response = self.client.get(
+            "/v1/admin/review-auth/capabilities",
+            headers=self._admin_headers(new_token),
+        )
+        self.assertEqual(verify_response.status_code, 200, verify_response.text)
+
     def _write_review_asset_meta(self, asset_id: str, asset_type: str, *, mime_type: str = "application/json", session: dict | None = None) -> None:
         reviews_dir = Path(os.environ["REVIEWS_DATA_DIR"])
         assets_dir = reviews_dir / "assets"

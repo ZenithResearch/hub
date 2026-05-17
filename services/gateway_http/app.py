@@ -92,6 +92,13 @@ class ReviewAccessRotateOut(BaseModel):
     secrets_printed: bool = False
 
 
+class ReviewAccessCapabilitiesOut(BaseModel):
+    ok: bool
+    hub: str
+    capabilities: list[str]
+    secrets_printed: bool = False
+
+
 class ReviewAssetUploadOut(BaseModel):
     asset_id: str
     asset_type: str
@@ -135,6 +142,12 @@ class CaseFollowUpIn(BaseModel):
 
 class SecretUpdateIn(BaseModel):
     value: str
+
+
+class ReviewAccessAdminTokenUpdateOut(BaseModel):
+    configured: bool
+    capabilities: list[str]
+    secrets_printed: bool = False
 
 
 def _read_secret_file(path: Path) -> dict[str, str]:
@@ -464,8 +477,18 @@ def create_app() -> FastAPI:
         configured = bool(values.get("ELEVENLABS_API_KEY"))
         return JSONResponse({"ok": configured, "missing": [] if configured else ["ELEVENLABS_API_KEY"]})
 
+    def _effective_review_access_admin_token() -> str:
+        values = _read_secret_file(secret_path)
+        dynamic = (values.get("REVIEW_ACCESS_ADMIN_TOKEN") or "").strip()
+        if dynamic:
+            return dynamic
+        return settings.review_access_admin_token.strip()
+
+    def _review_access_admin_capabilities() -> list[str]:
+        return ["review_access_admin", "review_access_rotate"]
+
     def _require_review_access_admin(request: Request) -> None:
-        expected = settings.review_access_admin_token.strip()
+        expected = _effective_review_access_admin_token()
         if not expected:
             raise HTTPException(status_code=503, detail="review access admin token is not configured")
         authorization = request.headers.get("authorization") or ""
@@ -474,6 +497,40 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="invalid review access admin token")
         if not hmac.compare_digest(token.strip(), expected):
             raise HTTPException(status_code=401, detail="invalid review access admin token")
+
+    @app.put("/v1/admin/review-auth/admin-token", response_model=ReviewAccessAdminTokenUpdateOut)
+    async def put_review_access_admin_token(payload: SecretUpdateIn, request: Request) -> JSONResponse:
+        existing = _effective_review_access_admin_token()
+        if existing:
+            _require_review_access_admin(request)
+        raw_value = payload.value
+        if "\n" in raw_value or "\r" in raw_value:
+            raise HTTPException(status_code=422, detail="admin token must be single-line")
+        value = raw_value.strip()
+        if len(value) < 32:
+            raise HTTPException(status_code=422, detail="admin token must be at least 32 characters")
+        values = _read_secret_file(secret_path)
+        values["REVIEW_ACCESS_ADMIN_TOKEN"] = value
+        _write_secret_file(secret_path, values)
+        return JSONResponse(
+            {
+                "configured": True,
+                "capabilities": _review_access_admin_capabilities(),
+                "secrets_printed": False,
+            }
+        )
+
+    @app.get("/v1/admin/review-auth/capabilities", response_model=ReviewAccessCapabilitiesOut)
+    async def get_review_access_admin_capabilities(request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
+        return JSONResponse(
+            {
+                "ok": True,
+                "hub": "gateway-http",
+                "capabilities": _review_access_admin_capabilities(),
+                "secrets_printed": False,
+            }
+        )
 
     def _validate_review_access_rotation(payload: ReviewAccessRotateIn) -> str:
         has_deployment_metadata = any(
