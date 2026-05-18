@@ -51,6 +51,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - `httpx>=0.27.0` dependency for async HTTP client used by the enqueue call.
 
 ### Fixed
+- Fixed browser-opaque Review SDK submission failures — `POST /v1/reviews` now converts queue enqueue `httpx` failures into CORS-visible `502` responses instead of leaking raw exceptions as Safari-reported CORS failures.
 - Fixed Matrix appservice startup rendering — tracked Synapse templates now stay stable while generated appservice registrations render under `/data/appservices`, and startup only registers appservices whose receivers are launched by the same path.
 - Hardened Hub-local Kanban worker prompt contract before fresh E2E — dispatcher-spawned workers are now explicitly told to call `kanban_show` first, report `KANBAN_TOOLS_MISSING` instead of narrating when tools are absent, avoid Docker/worker spawning, include `metadata.zenith.audit`, and write only declared `metadata.zenith.outputs` names.
 - Fixed Hub-local Hermes Kanban dispatcher worker spawn context — spawned worker profiles now inherit the active `HERMES_KANBAN_BOARD` and an explicit `HERMES_HOME`, preserving case-board isolation without creating Docker-per-task environments.

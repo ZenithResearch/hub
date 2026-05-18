@@ -881,20 +881,41 @@ def create_app() -> FastAPI:
         }
         (reviews_dir / f"{payload.review_id}.json").write_text(json.dumps(record))
 
-        # Enqueue directly — Frank now handles all queue work through the normal full loop
-        async with httpx.AsyncClient(timeout=10.0) as q:
-            enqueue_resp = await q.post(
-                f"{settings.queue_http_url}/queues/workspace/enqueue",
-                json={
-                    "event_type": "review_submitted",
-                    "source_type": "review_sdk",
-                    "sender": record["submitted_by"],
-                    "message_body": payload.review_id,
-                    "payload": record,
-                },
-            )
-            enqueue_resp.raise_for_status()
-            msg_id = enqueue_resp.json().get("id")
+        # Enqueue directly — Frank now handles all queue work through the normal full loop.
+        # Convert upstream queue failures into HTTPException responses instead of letting
+        # raw httpx exceptions escape as 500s. Raw exceptions bypass browser-visible CORS
+        # headers in production, so Safari reports an opaque CORS failure instead of the
+        # actual queue-side problem.
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as q:
+                enqueue_resp = await q.post(
+                    f"{settings.queue_http_url}/queues/workspace/enqueue",
+                    json={
+                        "event_type": "review_submitted",
+                        "source_type": "review_sdk",
+                        "sender": record["submitted_by"],
+                        "message_body": payload.review_id,
+                        "payload": record,
+                    },
+                )
+                enqueue_resp.raise_for_status()
+                try:
+                    msg_id = enqueue_resp.json().get("id")
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail="review saved but queue enqueue returned an invalid response",
+                    ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"review saved but queue enqueue failed: HTTP {exc.response.status_code}",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="review saved but queue enqueue failed",
+            ) from exc
 
         # Publish wakeup event to eventbus so Frank picks it up immediately
         async with httpx.AsyncClient(timeout=5.0) as eb:

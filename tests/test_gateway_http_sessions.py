@@ -46,6 +46,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
         os.environ["QUEUE_HTTP_URL"] = "http://queue:8081"
         os.environ["CASES_HTTP_URL"] = "http://cases:8083"
         os.environ["EVENTBUS_URL"] = "http://eventbus:8082"
+        os.environ["CORS_ALLOW_ORIGINS"] = "https://staging.example.com,https://swrl-ui.vercel.app"
         os.environ["RUNTIME_GRPC_TARGET"] = "runtime-grpc:50051"
         os.environ["HERMES_SESSION_ROOTS"] = str(hermes_dir)
         os.environ["HUB_CONFIG_SECRETS_PATH"] = str(root / "config-secrets.env")
@@ -674,6 +675,50 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertNotIn("process_path", enqueue_payload)
         self.assertEqual(enqueue_payload["payload"]["events_asset_id"], events_id)
         self.assertEqual(enqueue_payload["sender"], "Owner Label")
+
+    def test_submit_review_queue_failure_returns_cors_visible_error(self) -> None:
+        self._seed_review_auth(origin="https://swrl-ui.vercel.app", subject_pattern="https://swrl-ui.vercel.app/*")
+        session = self._create_review_session(
+            origin="https://swrl-ui.vercel.app",
+            subject_id="https://swrl-ui.vercel.app/",
+        )
+        self._write_review_asset_meta("events-cors", "events", session=session)
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def post(self, url: str, json: dict):
+                raise self_module.httpx.ConnectError("queue unavailable")
+
+        self_module = self.module
+        with patch.object(self.module.httpx, "AsyncClient", FakeAsyncClient):
+            response = self.client.post(
+                "/v1/reviews",
+                headers=self._auth_headers(session["token"], origin="https://swrl-ui.vercel.app"),
+                json={
+                    "review_id": "review-queue-cors-visible",
+                    "subject_id": "https://swrl-ui.vercel.app/",
+                    "submitted_by": "tester",
+                    "started_at": "2026-05-01T00:00:00Z",
+                    "stopped_at": "2026-05-01T00:00:10Z",
+                    "duration_ms": 10000,
+                    "project_id": "project-one",
+                    "deployment_id": "deployment-one",
+                    "asset_ids": [],
+                    "events_asset_id": "events-cors",
+                },
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.headers.get("access-control-allow-origin"), "https://swrl-ui.vercel.app")
+        self.assertIn("review saved but queue enqueue failed", response.text)
 
     def test_deploy_hook_registers_review_deployment_and_client_can_authenticate(self) -> None:
         self._seed_review_auth(deployment_id="local-deployment", deployment_slug="local-deployment", project_scoped_access_code=True)
