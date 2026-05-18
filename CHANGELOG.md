@@ -15,6 +15,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Removed Sophia-local case/step execution-loop skills — keeps Sophia strictly comms-only and prevents future dispatch paths from mistaking Sophia for an internal case executor.
 
 ### Added
+- Added protected admin queue/case gateway read endpoints — lets ZenithOS operator surfaces read production queue and case state through Hub with the existing Review Access admin bearer-token boundary instead of direct internal service URLs.
 - Added public-repo private artifact guardrails — staged/pre-push scans now block local runtime state, private ClaudeHub references, database files, local absolute paths, and likely secrets before they can enter or leave the public Hub repository.
 - Added Postgres-backed Review SDK access management for production Hub — supports dynamic deploy registration, private RDS clients registry wiring, guarded operator access-code rotation for ZenithOS, one-time generated reviewer codes, project-scoped reviewer access, and redacted seeding/smoke-test tooling so public staging review auth can be managed without frontend secrets or local SQLite DB ferrying.
 - Added authenticated Review SDK intake for public staging branches — Hub now owns a SQLite-backed review auth registry, short-lived review session tokens, project/deployment/origin-scoped validation, authenticated asset/review submission enforcement, attribution stamping, and regression tests so staging clients can submit reviews without bundling durable frontend secrets.

@@ -44,6 +44,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
         os.environ.pop("REVIEW_DEPLOY_HOOK_TOKEN", None)
         os.environ.pop("REVIEW_DEPLOY_ALLOWED_HOST_SUFFIXES", None)
         os.environ["QUEUE_HTTP_URL"] = "http://queue:8081"
+        os.environ["CASES_HTTP_URL"] = "http://cases:8083"
         os.environ["EVENTBUS_URL"] = "http://eventbus:8082"
         os.environ["RUNTIME_GRPC_TARGET"] = "runtime-grpc:50051"
         os.environ["HERMES_SESSION_ROOTS"] = str(hermes_dir)
@@ -209,6 +210,114 @@ class GatewayHttpSessionTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
         self.assertFalse(Path(os.environ["HUB_CONFIG_SECRETS_PATH"]).exists())
+
+    def test_admin_queue_peek_requires_review_access_admin_token(self) -> None:
+        response = self.client.get("/v1/admin/queues/workspace/peek?n=1")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "invalid review access admin token")
+
+    def test_admin_cases_requires_review_access_admin_token(self) -> None:
+        response = self.client.get("/v1/admin/cases?limit=1")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "invalid review access admin token")
+
+    def test_admin_queue_peek_proxies_to_queue_service(self) -> None:
+        calls: list[tuple[str, dict | None]] = []
+
+        class FakeResponse:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+
+            def json(self) -> dict:
+                return {"messages": [{"id": "msg-1"}]}
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get(self, url: str, params: dict | None = None, timeout: float | None = None):
+                calls.append((url, params))
+                return FakeResponse()
+
+        with patch.object(self.module.httpx, "AsyncClient", FakeAsyncClient):
+            response = self.client.get(
+                "/v1/admin/queues/workspace/peek?n=25&status=pending",
+                headers=self._admin_headers(),
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["messages"][0]["id"], "msg-1")
+        self.assertEqual(calls, [("http://queue:8081/queues/workspace/peek", {"n": "25", "status": "pending"})])
+
+    def test_admin_cases_proxies_to_cases_service(self) -> None:
+        calls: list[tuple[str, dict | None]] = []
+
+        class FakeResponse:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+
+            def json(self) -> dict:
+                return {"cases": []}
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get(self, url: str, params: dict | None = None, timeout: float | None = None):
+                calls.append((url, params))
+                return FakeResponse()
+
+        with patch.object(self.module.httpx, "AsyncClient", FakeAsyncClient):
+            response = self.client.get(
+                "/v1/admin/cases?status=ACTIVE&limit=10",
+                headers=self._admin_headers(),
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"cases": []})
+        self.assertEqual(calls, [("http://cases:8083/cases", {"status": "ACTIVE", "limit": "10"})])
+
+    def test_admin_case_detail_preserves_upstream_404(self) -> None:
+        class FakeResponse:
+            status_code = 404
+            headers = {"content-type": "application/json"}
+
+            def json(self) -> dict:
+                return {"detail": "case not found"}
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get(self, url: str, params: dict | None = None, timeout: float | None = None):
+                return FakeResponse()
+
+        with patch.object(self.module.httpx, "AsyncClient", FakeAsyncClient):
+            response = self.client.get(
+                "/v1/admin/cases/missing-case",
+                headers=self._admin_headers(),
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"detail": "case not found"})
 
     def test_admin_review_access_admin_token_update_rotates_effective_token(self) -> None:
         new_token = "new-admin-secret-token-at-least-32-chars"

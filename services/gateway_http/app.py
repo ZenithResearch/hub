@@ -532,6 +532,41 @@ def create_app() -> FastAPI:
             }
         )
 
+    async def _admin_proxy_get(upstream_url: str, request: Request, params: dict[str, str] | None = None) -> JSONResponse:
+        _require_review_access_admin(request)
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(upstream_url, params=params or None, timeout=10.0)
+        except httpx.RequestError:
+            raise HTTPException(status_code=502, detail="upstream admin service unavailable") from None
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {"detail": "upstream admin service returned non-json response"}
+        return JSONResponse(payload, status_code=response.status_code)
+
+    @app.get("/v1/admin/queues/workspace/peek")
+    async def admin_queue_workspace_peek(request: Request) -> JSONResponse:
+        params = {
+            key: value
+            for key, value in request.query_params.items()
+            if key in {"n", "limit", "status", "visibility_timeout"}
+        }
+        return await _admin_proxy_get(f"{settings.queue_http_url}/queues/workspace/peek", request, params)
+
+    @app.get("/v1/admin/cases")
+    async def admin_cases(request: Request) -> JSONResponse:
+        params = {
+            key: value
+            for key, value in request.query_params.items()
+            if key in {"status", "limit"}
+        }
+        return await _admin_proxy_get(f"{settings.cases_http_url}/cases", request, params)
+
+    @app.get("/v1/admin/cases/{case_id}")
+    async def admin_case_detail(case_id: str, request: Request) -> JSONResponse:
+        return await _admin_proxy_get(f"{settings.cases_http_url}/cases/{case_id}", request)
+
     def _validate_review_access_rotation(payload: ReviewAccessRotateIn) -> str:
         has_deployment_metadata = any(
             bool((value or "").strip())
