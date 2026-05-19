@@ -39,6 +39,11 @@ output "ecr_sandbox_repo_url" {
   value       = aws_ecr_repository.sandbox.repository_url
 }
 
+output "ecr_queue_repo_url" {
+  description = "ECR repo URL for queue."
+  value       = aws_ecr_repository.queue.repository_url
+}
+
 output "qdrant_api_key_secret_arn" {
   description = "Secrets Manager secret ARN for QDRANT_API_KEY."
   value       = aws_secretsmanager_secret.qdrant_api_key.arn
@@ -100,3 +105,28 @@ output "sandbox_service_name" {
   value       = aws_ecs_service.sandbox.name
 }
 
+output "queue_service_name" {
+  description = "ECS service name for queue."
+  value       = aws_ecs_service.queue.name
+}
+
+output "cases_service_name" {
+  description = "ECS service name for cases."
+  value       = aws_ecs_service.cases.name
+}
+
+
+output "eventbus_service_name" {
+  description = "ECS service name for eventbus."
+  value       = aws_ecs_service.eventbus.name
+}
+
+output "frank_service_name" {
+  description = "ECS service name for Frank dispatcher."
+  value       = aws_ecs_service.frank.name
+}
+
+output "stt_http_service_name" {
+  description = "ECS service name for STT HTTP."
+  value       = aws_ecs_service.stt_http.name
+}

@@ -54,6 +54,30 @@ resource "aws_security_group" "gateway" {
   }
 
   egress {
+    description = "gateway_to_queue_http"
+    from_port   = 8081
+    to_port     = 8081
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "gateway_to_cases_http"
+    from_port   = 8083
+    to_port     = 8083
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "gateway_to_eventbus_http"
+    from_port   = 8082
+    to_port     = 8082
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
     description = "gateway_to_efs_clients_db"
     from_port   = 2049
     to_port     = 2049
@@ -252,6 +276,222 @@ resource "aws_security_group" "queue" {
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-queue-sg" })
+}
+
+resource "aws_security_group" "cases" {
+  name        = "${local.name_prefix}-cases-sg"
+  description = "cases tasks: HTTP 8083 ingress from VPC; EFS + HTTPS + DNS egress"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "http_from_vpc"
+    from_port   = 8083
+    to_port     = 8083
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.this.cidr_block]
+  }
+
+  egress {
+    description = "efs_nfs"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "aws_control_plane_https"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_udp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_tcp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-cases-sg" })
+}
+
+resource "aws_security_group" "eventbus" {
+  name        = "${local.name_prefix}-eventbus-sg"
+  description = "eventbus tasks: HTTP 8082 ingress from VPC; HTTPS + DNS egress"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "http_from_vpc"
+    from_port   = 8082
+    to_port     = 8082
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.this.cidr_block]
+  }
+
+  egress {
+    description = "aws_control_plane_https"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_udp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_tcp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-eventbus-sg" })
+}
+
+resource "aws_security_group" "frank" {
+  name        = "${local.name_prefix}-frank-sg"
+  description = "Frank dispatcher tasks: egress to queue/eventbus/cases/gateway/STT; no ingress"
+  vpc_id      = aws_vpc.this.id
+
+  egress {
+    description = "frank_to_queue_http"
+    from_port   = 8081
+    to_port     = 8081
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "frank_to_eventbus_http"
+    from_port   = 8082
+    to_port     = 8082
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "frank_to_cases_http"
+    from_port   = 8083
+    to_port     = 8083
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "frank_to_stt_http"
+    from_port   = 8765
+    to_port     = 8765
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "frank_to_llama_server_openai"
+    from_port   = 3690
+    to_port     = 3690
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    description = "efs_nfs"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "https_egress"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_udp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_tcp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-frank-sg" })
+}
+
+resource "aws_security_group" "stt_http" {
+  name        = "${local.name_prefix}-stt-http-sg"
+  description = "STT HTTP tasks: HTTP 8765 ingress from VPC; EFS + HTTPS + DNS egress"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "http_from_vpc"
+    from_port   = 8765
+    to_port     = 8765
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.this.cidr_block]
+  }
+
+  egress {
+    description = "efs_nfs"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description = "https_egress"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_udp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_tcp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-stt-http-sg" })
 }
 
 resource "aws_security_group" "clients_postgres" {

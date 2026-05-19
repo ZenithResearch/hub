@@ -63,6 +63,24 @@ resource "aws_iam_role" "queue_task" {
   tags               = local.tags
 }
 
+resource "aws_iam_role" "cases_task" {
+  name               = "${local.name_prefix}-cases-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  tags               = local.tags
+}
+
+resource "aws_iam_role" "frank_task" {
+  name               = "${local.name_prefix}-frank-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  tags               = local.tags
+}
+
+resource "aws_iam_role" "stt_http_task" {
+  name               = "${local.name_prefix}-stt-http-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  tags               = local.tags
+}
+
 # Queue task needs elasticfilesystem:ClientMount + ClientWrite to mount EFS.
 data "aws_iam_policy_document" "queue_efs" {
   statement {
@@ -79,6 +97,59 @@ resource "aws_iam_role_policy" "queue_efs" {
   name   = "${local.name_prefix}-queue-efs"
   role   = aws_iam_role.queue_task.id
   policy = data.aws_iam_policy_document.queue_efs.json
+}
+
+# Cases task needs elasticfilesystem:ClientMount + ClientWrite to mount EFS.
+data "aws_iam_policy_document" "cases_efs" {
+  statement {
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientWrite",
+      "elasticfilesystem:ClientRootAccess",
+    ]
+    resources = [aws_efs_file_system.cases.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "cases_efs" {
+  name   = "${local.name_prefix}-cases-efs"
+  role   = aws_iam_role.cases_task.id
+  policy = data.aws_iam_policy_document.cases_efs.json
+}
+
+# Frank task needs EFS access for execution artifacts.
+data "aws_iam_policy_document" "frank_efs" {
+  statement {
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientWrite",
+      "elasticfilesystem:ClientRootAccess",
+    ]
+    resources = [aws_efs_file_system.frank.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "frank_efs" {
+  name   = "${local.name_prefix}-frank-efs"
+  role   = aws_iam_role.frank_task.id
+  policy = data.aws_iam_policy_document.frank_efs.json
+}
+
+# STT HTTP task mounts Frank execution artifacts read-only for transcription.
+data "aws_iam_policy_document" "stt_http_efs" {
+  statement {
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientRootAccess",
+    ]
+    resources = [aws_efs_file_system.frank.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "stt_http_efs" {
+  name   = "${local.name_prefix}-stt-http-efs"
+  role   = aws_iam_role.stt_http_task.id
+  policy = data.aws_iam_policy_document.stt_http_efs.json
 }
 
 # Gateway task needs EFS access for persistent CLIENTS_DB_PATH=/data/clients.db.

@@ -60,9 +60,111 @@ variable "task_cpu" {
 }
 
 variable "task_memory" {
-  description = "Fargate memory in MiB (512 = 0.5 GB)."
+  description = "Default Fargate memory in MiB for low-footprint services. Individual services may override this."
   type        = number
   default     = 512
+}
+
+variable "gateway_task_cpu" {
+  description = "Fargate CPU units for gateway-http. Defaults to the baseline task_cpu."
+  type        = number
+  default     = 256
+}
+
+variable "gateway_task_memory" {
+  description = "Fargate memory in MiB for gateway-http. Defaults to the baseline task_memory."
+  type        = number
+  default     = 512
+}
+
+variable "runtime_task_cpu" {
+  description = "Fargate CPU units for runtime-grpc."
+  type        = number
+  default     = 256
+}
+
+variable "runtime_task_memory" {
+  description = "Fargate memory in MiB for runtime-grpc."
+  type        = number
+  default     = 512
+}
+
+variable "sandbox_task_cpu" {
+  description = "Fargate CPU units for tool-sandbox."
+  type        = number
+  default     = 256
+}
+
+variable "sandbox_task_memory" {
+  description = "Fargate memory in MiB for tool-sandbox."
+  type        = number
+  default     = 512
+}
+
+variable "queue_task_cpu" {
+  description = "Fargate CPU units for queue."
+  type        = number
+  default     = 256
+}
+
+variable "queue_task_memory" {
+  description = "Fargate memory in MiB for queue."
+  type        = number
+  default     = 512
+}
+
+variable "cases_task_cpu" {
+  description = "Fargate CPU units for cases."
+  type        = number
+  default     = 256
+}
+
+variable "cases_task_memory" {
+  description = "Fargate memory in MiB for cases."
+  type        = number
+  default     = 512
+}
+
+variable "eventbus_task_cpu" {
+  description = "Fargate CPU units for eventbus."
+  type        = number
+  default     = 256
+}
+
+variable "eventbus_task_memory" {
+  description = "Fargate memory in MiB for eventbus."
+  type        = number
+  default     = 512
+}
+
+variable "frank_task_cpu" {
+  description = "Fargate CPU units for Frank dispatcher."
+  type        = number
+  default     = 256
+}
+
+variable "frank_task_memory" {
+  description = "Fargate memory in MiB for Frank dispatcher."
+  type        = number
+  default     = 512
+}
+
+variable "stt_http_task_cpu" {
+  description = "Fargate CPU units for STT HTTP. Must stay >=1024 in prod; 256/512 caused Whisper OOM."
+  type        = number
+  default     = 1024
+}
+
+variable "stt_http_task_memory" {
+  description = "Fargate memory in MiB for STT HTTP. Must stay >=2048 in prod; 256/512 caused Whisper OOM."
+  type        = number
+  default     = 2048
+}
+
+variable "llama_server_security_group_id" {
+  description = "Existing live llama-server security group allowed to read Frank EFS before llama-server is fully Terraform-managed. Replace with Terraform-managed SG in the llama-server adoption unit."
+  type        = string
+  default     = ""
 }
 
 variable "start_ecs_services" {
@@ -187,10 +289,59 @@ variable "queue_desired_count" {
   default     = 1
 }
 
+# Cases must stay at 1 while SQLite is backed by EFS.
+variable "cases_desired_count" {
+  description = "Desired task count for cases (must be 1 — SQLite single-writer constraint)."
+  type        = number
+  default     = 1
+}
+
+variable "eventbus_desired_count" {
+  description = "Desired task count for eventbus."
+  type        = number
+  default     = 1
+}
+
+variable "frank_desired_count" {
+  description = "Desired task count for Frank dispatcher."
+  type        = number
+  default     = 1
+}
+
+variable "frank_model" {
+  description = "Model name Frank uses for model-backed paths. Keep aligned with the internal llama-server served model."
+  type        = string
+  default     = "Qwen3.5-9B-Q4_K_M.gguf"
+}
+
+variable "frank_openai_base_url" {
+  description = "OpenAI-compatible base URL used by Frank model-backed paths. Production points at the private internal llama-server."
+  type        = string
+  default     = "http://llama-server.zenith-hub-prod.local:3690/v1"
+}
+
+variable "stt_http_desired_count" {
+  description = "Desired task count for STT HTTP."
+  type        = number
+  default     = 1
+}
+
 variable "image_tag" {
-  description = "Image tag pushed to the ECR repos for each service."
+  description = "Default image tag pushed to the ECR repos for each service."
   type        = string
   default     = "latest"
+}
+
+variable "gateway_image_tag" {
+  description = "Optional gateway-http image tag override. Use when gateway has been hotfix-deployed ahead of the shared image_tag."
+  type        = string
+  default     = ""
+}
+
+variable "stt_image_tag" {
+  description = "Optional STT HTTP image tag override. The image is stored in the gateway ECR repository until a dedicated STT repo is needed."
+  type        = string
+  default     = ""
 }
 
 variable "qdrant_url" {

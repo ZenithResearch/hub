@@ -14,5 +14,10 @@ locals {
   sandbox_target     = "tool-sandbox.${local.cloudmap_namespace}:50052"
   queue_grpc_target  = "queue.${local.cloudmap_namespace}:50053"
   queue_http_target  = "queue.${local.cloudmap_namespace}:8081"
+  cases_http_target  = "cases.${local.cloudmap_namespace}:8083"
+  eventbus_target    = "eventbus.${local.cloudmap_namespace}:8082"
+  stt_http_target    = "stt-http.${local.cloudmap_namespace}:8765"
+  gateway_image_tag  = var.gateway_image_tag != "" ? var.gateway_image_tag : var.image_tag
+  stt_image_tag      = var.stt_image_tag != "" ? var.stt_image_tag : local.gateway_image_tag
 }
 

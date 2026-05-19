@@ -15,6 +15,35 @@ resource "aws_efs_file_system" "queue" {
   tags = merge(local.tags, { Name = "${local.name_prefix}-queue-efs" })
 }
 
+# EFS file system for cases SQLite persistence.
+# Keep cases desired_count at 1 while cases.db is SQLite-backed.
+resource "aws_efs_file_system" "cases" {
+  creation_token   = "${local.name_prefix}-cases-data"
+  encrypted        = true
+  throughput_mode  = "bursting"
+  performance_mode = "generalPurpose"
+
+  lifecycle_policy {
+    transition_to_ia = "AFTER_30_DAYS"
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-cases-efs" })
+}
+
+# EFS file system for Frank dispatcher execution artifacts.
+resource "aws_efs_file_system" "frank" {
+  creation_token   = "${local.name_prefix}-frank-data"
+  encrypted        = true
+  throughput_mode  = "bursting"
+  performance_mode = "generalPurpose"
+
+  lifecycle_policy {
+    transition_to_ia = "AFTER_30_DAYS"
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-frank-efs" })
+}
+
 # EFS file system for gateway-http Review SDK auth clients registry.
 # Keep gateway desired_count at 1 while clients.db is SQLite-backed.
 resource "aws_efs_file_system" "gateway" {
@@ -65,6 +94,20 @@ resource "aws_efs_mount_target" "queue" {
   security_groups = [aws_security_group.efs_queue.id]
 }
 
+resource "aws_efs_mount_target" "cases" {
+  count           = length(aws_subnet.private)
+  file_system_id  = aws_efs_file_system.cases.id
+  subnet_id       = aws_subnet.private[count.index].id
+  security_groups = [aws_security_group.efs_cases.id]
+}
+
+resource "aws_efs_mount_target" "frank" {
+  count           = length(aws_subnet.private)
+  file_system_id  = aws_efs_file_system.frank.id
+  subnet_id       = aws_subnet.private[count.index].id
+  security_groups = [aws_security_group.efs_frank.id]
+}
+
 # Access point scopes the queue container to /data with fixed UID/GID 1000.
 resource "aws_efs_access_point" "queue" {
   file_system_id = aws_efs_file_system.queue.id
@@ -86,6 +129,46 @@ resource "aws_efs_access_point" "queue" {
   tags = merge(local.tags, { Name = "${local.name_prefix}-queue-ap" })
 }
 
+resource "aws_efs_access_point" "cases" {
+  file_system_id = aws_efs_file_system.cases.id
+
+  posix_user {
+    uid = 1000
+    gid = 1000
+  }
+
+  root_directory {
+    path = "/data"
+    creation_info {
+      owner_uid   = 1000
+      owner_gid   = 1000
+      permissions = "750"
+    }
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-cases-ap" })
+}
+
+resource "aws_efs_access_point" "frank" {
+  file_system_id = aws_efs_file_system.frank.id
+
+  posix_user {
+    uid = var.gateway_data_uid
+    gid = var.gateway_data_gid
+  }
+
+  root_directory {
+    path = "/data"
+    creation_info {
+      owner_uid   = var.gateway_data_uid
+      owner_gid   = var.gateway_data_gid
+      permissions = "750"
+    }
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-frank-ap" })
+}
+
 # EFS security group: allows NFS (2049) ingress from queue tasks only.
 resource "aws_security_group" "efs_queue" {
   name        = "${local.name_prefix}-efs-queue-sg"
@@ -101,6 +184,57 @@ resource "aws_security_group" "efs_queue" {
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-efs-queue-sg" })
+}
+
+resource "aws_security_group" "efs_cases" {
+  name        = "${local.name_prefix}-efs-cases-sg"
+  description = "EFS mount targets for cases: NFS ingress from cases tasks only"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description     = "nfs_from_cases_tasks"
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.cases.id]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-efs-cases-sg" })
+}
+
+resource "aws_security_group" "efs_frank" {
+  name        = "${local.name_prefix}-efs-frank-sg"
+  description = "EFS mount targets for Frank: NFS ingress from Frank tasks only"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description     = "nfs_from_frank_tasks"
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.frank.id]
+  }
+
+  ingress {
+    description     = "nfs_from_stt_http_tasks"
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.stt_http.id]
+  }
+
+  dynamic "ingress" {
+    for_each = var.llama_server_security_group_id == "" ? [] : [var.llama_server_security_group_id]
+    content {
+      description     = "nfs_from_llama_server_tasks"
+      from_port       = 2049
+      to_port         = 2049
+      protocol        = "tcp"
+      security_groups = [ingress.value]
+    }
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-efs-frank-sg" })
 }
 
 resource "aws_security_group" "efs_gateway" {

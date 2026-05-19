@@ -135,8 +135,8 @@ Live services use private subnets with `assignPublicIp=DISABLED`.
 | `eventbus.zenith-hub-prod.local` | import/codify if absent | Required for queue/event dispatch. |
 | `stt-http.zenith-hub-prod.local` | import/codify if absent | Required by Frank Step 2. |
 | `llama-server.zenith-hub-prod.local` | import/codify before apply | Required by Frank model-backed paths. |
-| llama-server SG ingress | codify private ingress from Frank/probe-capable service SGs only | No public ingress. |
-| Frank -> llama-server egress | codify explicit egress or VPC egress rule | Must allow TCP 3690. |
+| llama-server SG ingress | preserve via `llama_server_security_group_id` until C3 manages llama-server | Prod plans must pass the live llama-server SG ID or import a managed SG before apply. |
+| Frank -> llama-server egress | codify explicit egress on TCP 3690 | Must allow Frank to reach the OpenAI-compatible endpoint. |
 | STT -> Frank EFS NFS | codify read-only task mount plus SG NFS ingress | STT reads audio from Frank execution path. |
 
 ## Current dirty Terraform assessment

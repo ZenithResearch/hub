@@ -7,8 +7,8 @@ resource "aws_ecs_task_definition" "gateway" {
   family                   = "${local.name_prefix}-gateway-http"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = tostring(var.task_cpu)
-  memory                   = tostring(var.task_memory)
+  cpu                      = tostring(var.gateway_task_cpu)
+  memory                   = tostring(var.gateway_task_memory)
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.gateway_task.arn
 
@@ -30,7 +30,7 @@ resource "aws_ecs_task_definition" "gateway" {
   container_definitions = jsonencode([
     {
       name      = "app"
-      image     = "${aws_ecr_repository.gateway.repository_url}:${var.image_tag}"
+      image     = "${aws_ecr_repository.gateway.repository_url}:${local.gateway_image_tag}"
       essential = true
       command = [
         "uvicorn",
@@ -56,6 +56,9 @@ resource "aws_ecs_task_definition" "gateway" {
         { name = "CLIENTS_PG_DATABASE", value = var.clients_postgres_database_name },
         { name = "CLIENTS_PG_USER", value = var.clients_postgres_username },
         { name = "REVIEWS_DATA_DIR", value = var.gateway_reviews_data_dir },
+        { name = "QUEUE_HTTP_URL", value = "http://${local.queue_http_target}" },
+        { name = "CASES_HTTP_URL", value = "http://${local.cases_http_target}" },
+        { name = "EVENTBUS_URL", value = "http://${local.eventbus_target}" },
         { name = "CORS_ALLOW_ORIGINS", value = var.cors_allow_origins },
         { name = "MAX_BODY_BYTES", value = tostring(var.max_body_bytes) },
         { name = "GATEWAY_GRPC_TIMEOUT_S", value = "5.0" }
@@ -99,8 +102,8 @@ resource "aws_ecs_task_definition" "runtime" {
   family                   = "${local.name_prefix}-runtime-grpc"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = tostring(var.task_cpu)
-  memory                   = tostring(var.task_memory)
+  cpu                      = tostring(var.runtime_task_cpu)
+  memory                   = tostring(var.runtime_task_memory)
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.runtime_task.arn
 
@@ -145,8 +148,8 @@ resource "aws_ecs_task_definition" "sandbox" {
   family                   = "${local.name_prefix}-tool-sandbox"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = tostring(var.task_cpu)
-  memory                   = tostring(var.task_memory)
+  cpu                      = tostring(var.sandbox_task_cpu)
+  memory                   = tostring(var.sandbox_task_memory)
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.sandbox_task.arn
 
@@ -269,8 +272,8 @@ resource "aws_ecs_task_definition" "queue" {
   family                   = "${local.name_prefix}-queue"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = tostring(var.task_cpu)
-  memory                   = tostring(var.task_memory)
+  cpu                      = tostring(var.queue_task_cpu)
+  memory                   = tostring(var.queue_task_memory)
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.queue_task.arn
 
@@ -356,3 +359,361 @@ resource "aws_ecs_service" "queue" {
   tags = local.tags
 }
 
+# Cases — desired_count MUST remain 1. SQLite WAL is safe for concurrent readers
+# but only a single writer. Multiple replicas would corrupt the database.
+resource "aws_ecs_task_definition" "cases" {
+  family                   = "${local.name_prefix}-cases"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = tostring(var.cases_task_cpu)
+  memory                   = tostring(var.cases_task_memory)
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.cases_task.arn
+
+  volume {
+    name = "cases-data"
+
+    efs_volume_configuration {
+      file_system_id          = aws_efs_file_system.cases.id
+      root_directory          = "/"
+      transit_encryption      = "ENABLED"
+      transit_encryption_port = 2999
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.cases.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "app"
+      image     = "${aws_ecr_repository.gateway.repository_url}:${local.gateway_image_tag}"
+      essential = true
+      command   = ["uvicorn", "services.cases.main:app", "--host", "0.0.0.0", "--port", "8083", "--timeout-keep-alive", "5"]
+      portMappings = [
+        { containerPort = 8083, protocol = "tcp" }
+      ]
+      environment = [
+        { name = "LOG_LEVEL", value = "info" },
+        { name = "CASES_HTTP_PORT", value = "8083" },
+        { name = "CASES_DB_PATH", value = "/data/cases.db" }
+      ]
+      mountPoints = [
+        {
+          sourceVolume  = "cases-data"
+          containerPath = "/data"
+          readOnly      = false
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.cases.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "cases" {
+  name            = "${local.name_prefix}-cases"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.cases.arn
+  desired_count   = var.start_ecs_services ? var.cases_desired_count : 0
+  launch_type     = "FARGATE"
+
+  enable_execute_command = var.enable_execute_command
+
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.cases.id]
+    assign_public_ip = false
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.cases.arn
+  }
+
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  depends_on = [
+    aws_efs_mount_target.cases,
+  ]
+
+  tags = local.tags
+}
+
+
+
+resource "aws_ecs_task_definition" "eventbus" {
+  family                   = "${local.name_prefix}-eventbus"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = tostring(var.eventbus_task_cpu)
+  memory                   = tostring(var.eventbus_task_memory)
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.gateway_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "app"
+      image     = "${aws_ecr_repository.gateway.repository_url}:${local.gateway_image_tag}"
+      essential = true
+      command   = ["python", "-m", "services.eventbus.main"]
+      portMappings = [
+        { containerPort = 8082, protocol = "tcp" }
+      ]
+      environment = [
+        { name = "LOG_LEVEL", value = "info" },
+        { name = "PYTHONPATH", value = "/app" }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.eventbus.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "eventbus" {
+  name            = "${local.name_prefix}-eventbus"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.eventbus.arn
+  desired_count   = var.start_ecs_services ? var.eventbus_desired_count : 0
+  launch_type     = "FARGATE"
+
+  enable_execute_command = var.enable_execute_command
+
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.eventbus.id]
+    assign_public_ip = false
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.eventbus.arn
+  }
+
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  tags = local.tags
+}
+
+resource "aws_ecs_task_definition" "frank" {
+  family                   = "${local.name_prefix}-frank"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = tostring(var.frank_task_cpu)
+  memory                   = tostring(var.frank_task_memory)
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.frank_task.arn
+
+  volume {
+    name = "frank-data"
+
+    efs_volume_configuration {
+      file_system_id          = aws_efs_file_system.frank.id
+      root_directory          = "/"
+      transit_encryption      = "ENABLED"
+      transit_encryption_port = 2999
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.frank.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "app"
+      image     = "${aws_ecr_repository.gateway.repository_url}:${local.gateway_image_tag}"
+      essential = true
+      command = [
+        "python",
+        "-c",
+        <<-PY
+import asyncio
+import httpx
+from services.frank.main import handle_enqueued, main
+
+async def boot() -> None:
+    async with httpx.AsyncClient() as client:
+        for _ in range(50):
+            await handle_enqueued(client)
+    await main()
+
+asyncio.run(boot())
+PY
+      ]
+      environment = [
+        { name = "LOG_LEVEL", value = "info" },
+        { name = "PYTHONPATH", value = "/app" },
+        { name = "QUEUE_HTTP_URL", value = "http://${local.queue_http_target}" },
+        { name = "EVENTBUS_URL", value = "http://${local.eventbus_target}" },
+        { name = "CASES_HTTP_URL", value = "http://${local.cases_http_target}" },
+        { name = "GATEWAY_HTTP_URL", value = var.public_hub_domain_name != "" ? "https://${var.public_hub_domain_name}" : "http://${aws_lb.gateway.dns_name}" },
+        { name = "STT_HTTP_URL", value = "http://${local.stt_http_target}" },
+        { name = "QUEUE_NAME", value = "workspace" },
+        { name = "TERMINAL_CWD", value = "/app" },
+        { name = "HERMES_HOME", value = "/data/hermes" },
+        { name = "HERMES_PROFILE_ROOT", value = "/data/hermes/profiles" },
+        { name = "FRANK_EXECUTION_ROOT", value = "/data/frank_execution" },
+        { name = "FRANK_RUNTIME", value = "native_case_pipeline" },
+        { name = "FRANK_MODEL", value = var.frank_model },
+        { name = "OPENAI_BASE_URL", value = var.frank_openai_base_url },
+        { name = "OPENAI_API_KEY", value = "none" }
+      ]
+      mountPoints = [
+        {
+          sourceVolume  = "frank-data"
+          containerPath = "/data"
+          readOnly      = false
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.frank.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "frank" {
+  name            = "${local.name_prefix}-frank"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.frank.arn
+  desired_count   = var.start_ecs_services ? var.frank_desired_count : 0
+  launch_type     = "FARGATE"
+
+  enable_execute_command = var.enable_execute_command
+
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.frank.id]
+    assign_public_ip = false
+  }
+
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  depends_on = [
+    aws_ecs_service.eventbus,
+    aws_ecs_service.queue,
+    aws_ecs_service.cases,
+    aws_efs_mount_target.frank,
+  ]
+
+  tags = local.tags
+}
+
+
+resource "aws_ecs_task_definition" "stt_http" {
+  family                   = "${local.name_prefix}-stt-http"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = tostring(var.stt_http_task_cpu)
+  memory                   = tostring(var.stt_http_task_memory)
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.stt_http_task.arn
+
+  volume {
+    name = "frank-data"
+
+    efs_volume_configuration {
+      file_system_id          = aws_efs_file_system.frank.id
+      root_directory          = "/"
+      transit_encryption      = "ENABLED"
+      transit_encryption_port = 2999
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.frank.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "app"
+      image     = "${aws_ecr_repository.gateway.repository_url}:${local.stt_image_tag}"
+      essential = true
+      environment = [
+        { name = "LOG_LEVEL", value = "info" },
+        { name = "PYTHONPATH", value = "/app" },
+        { name = "STT_ALLOWED_AUDIO_ROOTS", value = "/data/frank_execution" },
+        { name = "STT_WHISPER_MODEL", value = "tiny" },
+        { name = "STT_ALLOWED_WHISPER_MODELS", value = "tiny,base,small" }
+      ]
+      portMappings = [
+        { containerPort = 8765, protocol = "tcp" }
+      ]
+      mountPoints = [
+        {
+          sourceVolume  = "frank-data"
+          containerPath = "/data"
+          readOnly      = true
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.stt_http.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "stt_http" {
+  name            = "${local.name_prefix}-stt-http"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.stt_http.arn
+  desired_count   = var.start_ecs_services ? var.stt_http_desired_count : 0
+  launch_type     = "FARGATE"
+
+  enable_execute_command = var.enable_execute_command
+
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.stt_http.id]
+    assign_public_ip = false
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.stt_http.arn
+  }
+
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  depends_on = [
+    aws_efs_mount_target.frank,
+  ]
+
+  tags = local.tags
+}

@@ -16,12 +16,37 @@ vpc_cidr = "10.20.0.0/16"
 # 3. Set true and apply again to start ECS services.
 start_ecs_services = false
 
-# Baseline cost profile: 1 task each, 0.25 vCPU / 0.5 GB
+# Baseline cost profile: 1 task each. Most services stay at 0.25 vCPU / 0.5 GB.
 gateway_desired_count = 1
 runtime_desired_count = 1
 sandbox_desired_count = 1
 task_cpu              = 256
 task_memory           = 512
+
+# Per-service task sizing. Keep STT at or above 1024/2048; lower memory caused
+# production Whisper OOM failures.
+gateway_task_cpu      = 256
+gateway_task_memory   = 512
+runtime_task_cpu      = 256
+runtime_task_memory   = 512
+sandbox_task_cpu      = 256
+sandbox_task_memory   = 512
+queue_task_cpu        = 256
+queue_task_memory     = 512
+cases_task_cpu        = 256
+cases_task_memory     = 512
+eventbus_task_cpu     = 256
+eventbus_task_memory  = 512
+frank_task_cpu        = 256
+frank_task_memory     = 512
+frank_model           = "Qwen3.5-9B-Q4_K_M.gguf"
+frank_openai_base_url = "http://llama-server.zenith-hub-prod.local:3690/v1"
+stt_http_task_cpu     = 1024
+stt_http_task_memory  = 2048
+
+# Existing live llama-server SG allowed to read Frank EFS until C3 makes
+# llama-server fully Terraform-managed. Leave empty for non-prod/new stacks.
+llama_server_security_group_id = ""
 
 image_tag = "v0.1.0"
 
