@@ -4,7 +4,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+import httpx
 
 from services.cases.contract import compile_process_contract
 from services.frank.case_pipeline_runner import CasePipelineRunner
@@ -131,7 +133,84 @@ class _RunnerClient:
         return _FakeResponse({"review_id": "review_12345678", "status": "processed"})
 
 
+class _SttDisconnectThenSuccessClient(_RunnerClient):
+    def __init__(self, *, fail_attempts: int = 1):
+        super().__init__()
+        self.fail_attempts = fail_attempts
+        self.transcribe_attempts = 0
+
+    async def post(self, url, json=None, timeout=None):
+        if url.endswith("/transcribe"):
+            self.operations.append(("POST", url, json))
+            self.transcribe_attempts += 1
+            if self.transcribe_attempts <= self.fail_attempts:
+                raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+            return _FakeResponse(
+                {
+                    "transcript": "retry succeeded",
+                    "words": [{"text": "retry", "start": 0.2, "end": 0.5}],
+                    "language_code": "en",
+                    "model": "tiny",
+                }
+            )
+        return await super().post(url, json=json, timeout=timeout)
+
+
 class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_step_2_retries_once_when_stt_disconnects(self) -> None:
+        client = _SttDisconnectThenSuccessClient()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = Path(tmpdir) / "audio.webm"
+            audio_path.write_bytes(b"fake audio")
+            case_dir = Path(tmpdir) / "case"
+            case_dir.mkdir()
+            (case_dir / "artifacts").mkdir()
+            runner = CasePipelineRunner(
+                client=client,
+                cases_url="http://cases:8083",
+                gateway_url="http://gateway-http:8080",
+                stt_url="http://stt-http:8765",
+                execution_root=Path(tmpdir),
+            )
+            case_detail = {
+                **client.case_detail,
+                "slots": [{"name": "audio_asset_path", "value": json.dumps(str(audio_path))}],
+            }
+
+            result = await runner.execute_step_2("case_run_1", "step_run_2", case_detail, case_dir)
+
+        self.assertEqual(result["transcript"], "retry succeeded")
+        self.assertEqual(client.transcribe_attempts, 2)
+        transcribe_posts = [op for op in client.operations if op[0] == "POST" and op[1].endswith("/transcribe")]
+        self.assertEqual(len(transcribe_posts), 2)
+
+    async def test_step_2_waits_and_retries_multiple_transient_stt_disconnects(self) -> None:
+        client = _SttDisconnectThenSuccessClient(fail_attempts=2)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = Path(tmpdir) / "audio.webm"
+            audio_path.write_bytes(b"fake audio")
+            case_dir = Path(tmpdir) / "case"
+            case_dir.mkdir()
+            (case_dir / "artifacts").mkdir()
+            runner = CasePipelineRunner(
+                client=client,
+                cases_url="http://cases:8083",
+                gateway_url="http://gateway-http:8080",
+                stt_url="http://stt-http:8765",
+                execution_root=Path(tmpdir),
+            )
+            case_detail = {
+                **client.case_detail,
+                "slots": [{"name": "audio_asset_path", "value": json.dumps(str(audio_path))}],
+            }
+
+            with patch("services.frank.case_pipeline_runner.asyncio.sleep", new_callable=AsyncMock) as sleep:
+                result = await runner.execute_step_2("case_run_1", "step_run_2", case_detail, case_dir)
+
+        self.assertEqual(result["transcript"], "retry succeeded")
+        self.assertEqual(client.transcribe_attempts, 3)
+        self.assertEqual(sleep.await_count, 2)
+
     async def test_native_runner_executes_step_1_and_step_2_with_observability(self) -> None:
         client = _RunnerClient()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -168,6 +247,95 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             index for index, (_, url, payload) in enumerate(client.operations) if url.endswith("/step-runs/step_run_step_db_1") and payload and payload.get("status") == "completed"
         )
         self.assertLess(step1_complete_index, step1_run_complete_index)
+
+    async def test_create_case_run_reuses_idempotent_run_after_read_timeout(self) -> None:
+        class TimeoutThenExistingRunClient(_RunnerClient):
+            async def post(self, url, json=None, timeout=None):
+                if url.endswith("/cases/case_review_1/runs"):
+                    self.operations.append(("POST", url, json))
+                    raise httpx.ReadTimeout("timed out creating case run")
+                return await super().post(url, json=json, timeout=timeout)
+
+            async def get(self, url, timeout=None):
+                if url.endswith("/cases/case_review_1/runs"):
+                    self.operations.append(("GET", url, None))
+                    return _FakeResponse(
+                        {
+                            "case_runs": [
+                                {
+                                    "id": self.case_run_id,
+                                    "status": "running",
+                                    "idempotency_key": "native_case_pipeline:case_review_1",
+                                    "reused_after_timeout": False,
+                                }
+                            ]
+                        }
+                    )
+                return await super().get(url, timeout=timeout)
+
+        client = TimeoutThenExistingRunClient()
+        runner = CasePipelineRunner(
+            client=client,
+            cases_url="http://cases:8083",
+            gateway_url="http://gateway-http:8080",
+            stt_url="http://stt-http:8765",
+            execution_root=Path("/tmp"),
+        )
+
+        case_run = await runner.create_case_run("case_review_1", {"event_type": "review_submitted"})
+
+        self.assertEqual(case_run["id"], client.case_run_id)
+        self.assertTrue(case_run["reused_after_timeout"])
+        self.assertEqual(
+            [(method, url) for method, url, _ in client.operations],
+            [
+                ("POST", "http://cases:8083/cases/case_review_1/runs"),
+                ("GET", "http://cases:8083/cases/case_review_1/runs"),
+            ],
+        )
+
+    async def test_create_case_run_retries_once_after_timeout_when_no_run_exists(self) -> None:
+        class TimeoutThenRetryClient(_RunnerClient):
+            def __init__(self):
+                super().__init__()
+                self.run_post_count = 0
+
+            async def post(self, url, json=None, timeout=None):
+                if url.endswith("/cases/case_review_1/runs"):
+                    self.run_post_count += 1
+                    self.operations.append(("POST", url, json))
+                    if self.run_post_count == 1:
+                        raise httpx.ReadTimeout("timed out creating case run")
+                    return _FakeResponse({"id": self.case_run_id, "status": "running", "reused": False})
+                return await super().post(url, json=json, timeout=timeout)
+
+            async def get(self, url, timeout=None):
+                if url.endswith("/cases/case_review_1/runs"):
+                    self.operations.append(("GET", url, None))
+                    return _FakeResponse({"case_runs": []})
+                return await super().get(url, timeout=timeout)
+
+        client = TimeoutThenRetryClient()
+        runner = CasePipelineRunner(
+            client=client,
+            cases_url="http://cases:8083",
+            gateway_url="http://gateway-http:8080",
+            stt_url="http://stt-http:8765",
+            execution_root=Path("/tmp"),
+        )
+
+        case_run = await runner.create_case_run("case_review_1", {"event_type": "review_submitted"})
+
+        self.assertEqual(case_run["id"], client.case_run_id)
+        self.assertEqual(client.run_post_count, 2)
+        self.assertEqual(
+            [(method, url) for method, url, _ in client.operations],
+            [
+                ("POST", "http://cases:8083/cases/case_review_1/runs"),
+                ("GET", "http://cases:8083/cases/case_review_1/runs"),
+                ("POST", "http://cases:8083/cases/case_review_1/runs"),
+            ],
+        )
 
     async def test_step_3_resolves_component_names_from_target_field(self) -> None:
         runner = CasePipelineRunner(

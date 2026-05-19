@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +14,8 @@ DEFAULT_ALLOWED_AUDIO_ROOTS = "/data/reviews"
 DEFAULT_ALLOWED_MODELS = "tiny,base,small"
 
 app = FastAPI(title="Hub Local STT HTTP", version="0.1.0")
+log = logging.getLogger("stt_http")
+_MODEL_CACHE: dict[str, Any] = {}
 
 
 class TranscribeIn(BaseModel):
@@ -74,6 +78,19 @@ def _validate_audio_path(raw_path: str) -> Path:
     return audio_path
 
 
+def _elapsed_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
+def _load_whisper_model(whisper_module: Any, model_name: str) -> Any:
+    cached = _MODEL_CACHE.get(model_name)
+    if cached is not None:
+        return cached
+    model = whisper_module.load_model(model_name)
+    _MODEL_CACHE[model_name] = model
+    return model
+
+
 def _segment_words(segment: dict[str, Any]) -> list[dict[str, Any]]:
     words = segment.get("words") or []
     if words:
@@ -108,6 +125,7 @@ def health() -> dict[str, str]:
 
 @app.post("/transcribe", response_model=TranscribeOut)
 def transcribe(payload: TranscribeIn) -> dict[str, Any]:
+    request_start = time.perf_counter()
     audio_path = _validate_audio_path(payload.audio_path)
     model_name = _model_name(payload.model)
 
@@ -117,15 +135,21 @@ def transcribe(payload: TranscribeIn) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="openai-whisper is not installed in the STT service") from exc
 
     try:
-        model = whisper.load_model(model_name)
+        load_start = time.perf_counter()
+        model = _load_whisper_model(whisper, model_name)
+        model_load_ms = _elapsed_ms(load_start)
         kwargs: dict[str, Any] = {"verbose": False, "word_timestamps": True}
         if payload.language:
             kwargs["language"] = payload.language
         try:
+            transcribe_start = time.perf_counter()
             result = model.transcribe(str(audio_path), **kwargs)
+            transcribe_ms = _elapsed_ms(transcribe_start)
         except TypeError:
             kwargs.pop("word_timestamps", None)
+            transcribe_start = time.perf_counter()
             result = model.transcribe(str(audio_path), **kwargs)
+            transcribe_ms = _elapsed_ms(transcribe_start)
     except HTTPException:
         raise
     except Exception as exc:
@@ -134,6 +158,19 @@ def transcribe(payload: TranscribeIn) -> dict[str, Any]:
     timing_rows: list[dict[str, Any]] = []
     for segment in list(result.get("segments") or []):
         timing_rows.extend(_segment_words(segment))
+
+    log.info(
+        "stt_transcribe_completed",
+        extra={
+            "audio_basename": audio_path.name,
+            "audio_size_bytes": audio_path.stat().st_size,
+            "model": model_name,
+            "model_load_ms": model_load_ms,
+            "transcribe_ms": transcribe_ms,
+            "elapsed_ms": _elapsed_ms(request_start),
+            "word_count": len(timing_rows),
+        },
+    )
 
     return {
         "transcript": str(result.get("text") or "").strip(),

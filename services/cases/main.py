@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -53,6 +54,17 @@ _subscribers: dict[str, list[asyncio.Queue]] = {}
 def _broadcast(case_id: str, event: str) -> None:
     for q in _subscribers.get(case_id, []):
         q.put_nowait(event)
+
+
+def _elapsed_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
+def _safe_json_size(payload: Any) -> int | None:
+    try:
+        return len(json.dumps(payload, default=str))
+    except Exception:
+        return None
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -1097,6 +1109,8 @@ def create_case(body: CreateCaseIn):
 
 @app.get("/cases/{case_id}")
 def get_case(case_id: str):
+    request_start = time.perf_counter()
+    db_start = time.perf_counter()
     with get_db() as conn:
         _recompute_case_state(conn, case_id)
         row = _load_case_row(conn, case_id)
@@ -1106,10 +1120,11 @@ def get_case(case_id: str):
         audits = _audit_rows(conn, case_id)
         contract = _parse_contract(row)
         dispatch_packet = _parse_dispatch_packet(row)
+    db_ms = _elapsed_ms(db_start)
     step_dicts = [_step_row_to_dict(step) for step in steps]
     case_dict = dict(row)
     case_dict["dispatch_packet_json"] = dispatch_packet
-    return {
+    payload = {
         "case": case_dict,
         "contract": contract,
         "steps": step_dicts,
@@ -1118,14 +1133,31 @@ def get_case(case_id: str):
         "model_task_audits": audits,
         "progress": _build_progress(step_dicts),
     }
+    log.info(
+        "case_detail_built",
+        extra={
+            "case_id": case_id,
+            "elapsed_ms": _elapsed_ms(request_start),
+            "db_ms": db_ms,
+            "step_count": len(step_dicts),
+            "slot_count": len(slots),
+            "log_count": len(logs),
+            "audit_count": len(audits),
+            "response_size_bytes": _safe_json_size(payload),
+        },
+    )
+    return payload
 
 
 @app.post("/cases/{case_id}/runs", status_code=201)
 def create_case_run(case_id: str, body: CreateCaseRunIn):
+    request_start = time.perf_counter()
     t = now()
     status = _normalize_observability_status(body.status, CASE_RUN_STATUSES, field="case run status")
     metadata = body.metadata or {}
     idempotency_key = str(body.idempotency_key or "").strip() or None
+    reused = False
+    db_start = time.perf_counter()
     with get_db() as conn:
         _load_case_row(conn, case_id)
         if idempotency_key:
@@ -1136,6 +1168,16 @@ def create_case_run(case_id: str, body: CreateCaseRunIn):
             if existing is not None:
                 payload = _row_with_json(existing, "metadata_json")
                 payload["reused"] = True
+                log.info(
+                    "case_run_reused",
+                    extra={
+                        "case_id": case_id,
+                        "case_run_id": payload.get("id"),
+                        "idempotency_key": idempotency_key,
+                        "elapsed_ms": _elapsed_ms(request_start),
+                        "db_ms": _elapsed_ms(db_start),
+                    },
+                )
                 return payload
         run_id = new_id("case_run")
         ended_at = t if status in {"completed", "blocked", "failed", "cancelled"} else None
@@ -1157,8 +1199,11 @@ def create_case_run(case_id: str, body: CreateCaseRunIn):
                 ended_at,
             ),
         )
+    db_ms = _elapsed_ms(db_start)
+    broadcast_start = time.perf_counter()
     _broadcast(case_id, f"case_run.created:{run_id}")
     _broadcast(f"case_run:{run_id}", f"case_run.created:{run_id}")
+    broadcast_ms = _elapsed_ms(broadcast_start)
     payload = {
         "id": run_id,
         "case_id": case_id,
@@ -1171,8 +1216,20 @@ def create_case_run(case_id: str, body: CreateCaseRunIn):
         "started_at": started_at,
         "updated_at": t,
         "ended_at": ended_at,
-        "reused": False,
+        "reused": reused,
     }
+    log.info(
+        "case_run_created",
+        extra={
+            "case_id": case_id,
+            "case_run_id": run_id,
+            "idempotency_key": idempotency_key,
+            "elapsed_ms": _elapsed_ms(request_start),
+            "db_ms": db_ms,
+            "broadcast_ms": broadcast_ms,
+            "response_size_bytes": _safe_json_size(payload),
+        },
+    )
     return payload
 
 
@@ -2094,6 +2151,7 @@ async def stream_case(case_id: str):
 
 @app.get("/cases")
 def list_cases(status: str | None = None, sender: str | None = None, limit: int = 50):
+    request_start = time.perf_counter()
     with get_db() as conn:
         q = "SELECT * FROM cases WHERE 1=1"
         params: list[Any] = []
@@ -2107,7 +2165,24 @@ def list_cases(status: str | None = None, sender: str | None = None, limit: int 
         q += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
         rows = conn.execute(q, params).fetchall()
-    return {"cases": [dict(r) for r in rows]}
+    cases = [dict(r) for r in rows]
+    payload = {"cases": cases}
+    log.info(
+        "case_list_built",
+        extra={
+            "status_filter": status,
+            "sender_filter_present": bool(sender),
+            "limit": limit,
+            "case_count": len(cases),
+            "elapsed_ms": _elapsed_ms(request_start),
+            "response_size_bytes": _safe_json_size(payload),
+            "includes_heavy_fields": any(
+                any(field in case for field in ("process_source", "contract_json", "dispatch_packet_json"))
+                for case in cases
+            ),
+        },
+    )
+    return payload
 
 
 app_instance = app
