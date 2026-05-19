@@ -1,3 +1,147 @@
+<!-- PROD_READINESS_PROJECT_A -->
+# Hub Production Readiness and Deployment Notes
+
+This document is the operator runbook for production readiness checks, deployment access paths, and drift-safe Hub operations.
+
+Current production target:
+
+- AWS profile: `zenith-hermes`
+- AWS region: `us-east-1`
+- ECS cluster: `zenith-hub-prod-cluster`
+- Public Hub URL: `https://hub.zenith-research.ca`
+- Internal service discovery namespace: `zenith-hub-prod.local`
+
+Safety rules:
+
+- Do not print tokens, review codes, DB passwords, API keys, session tokens, or access-code hashes.
+- Read admin/operator credentials from environment, macOS Keychain, AWS Secrets Manager, or GitHub environment secrets only.
+- Do not run broad production `terraform apply` until live drift is codified/imported or explicitly marked script-managed.
+- Do not reset local Docker data until production access, backup/export, CI, deploy, and local-recreate paths are verified.
+- Do not build images that bake multi-GB GGUF model files from the local laptop.
+
+---
+
+## Project A readiness smoke
+
+Run the smoke script from the Hub repo root:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode public
+```
+
+Public mode checks only unauthenticated public endpoints and is safe to run without credentials.
+
+Operator mode checks admin/cases/queue reachability. It reads the admin token from `REVIEW_ACCESS_ADMIN_TOKEN` or macOS Keychain service `zenith-hub-review-access-admin-token` and never prints the value:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode operator
+```
+
+Internal mode checks ECS service state for the expected production services:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode internal
+```
+
+Internal private endpoint probes are opt-in because they run a one-off ECS task in the production VPC:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode internal --run-internal-probes
+```
+
+Expected output shape:
+
+```json
+{
+  "files": ["scripts/prod_smoke.py", "infra/aws_baseline_80/DEPLOYMENT.md"],
+  "tests": [],
+  "deploy": {},
+  "blocker": "none",
+  "next": "..."
+}
+```
+
+If any check fails, the script exits non-zero and sets `blocker` to the failing check names.
+
+---
+
+## Production service inventory to preserve
+
+Expected production services:
+
+- `zenith-hub-prod-gateway-http`
+- `zenith-hub-prod-runtime-grpc`
+- `zenith-hub-prod-tool-sandbox`
+- `zenith-hub-prod-queue`
+- `zenith-hub-prod-cases`
+- `zenith-hub-prod-eventbus`
+- `zenith-hub-prod-stt-http`
+- `zenith-hub-prod-frank`
+- `zenith-hub-prod-llama-server`
+
+Known current production contracts:
+
+- STT must stay at or above CPU `1024`, memory `2048`; lower memory previously caused OOM during Whisper transcription.
+- Frank uses `FRANK_RUNTIME=native_case_pipeline`.
+- Frank model-backed paths use `FRANK_MODEL=Qwen3.5-9B-Q4_K_M.gguf` and `OPENAI_BASE_URL=http://llama-server.zenith-hub-prod.local:3690/v1`.
+- Internal llama-server auth uses no bearer token / none-equivalent; do not add a raw API key for this internal endpoint.
+- Llama-server is private/internal only and should not get public ALB ingress.
+- The Qwen GGUF model is staged through private S3 -> one-shot ECS preload -> EFS -> read-only task mount, not through a local-built Docker image.
+
+---
+
+## Data access paths to prove before Docker reset
+
+Before treating local Docker volumes as disposable, verify and document these paths:
+
+1. Public Hub health
+   - command: `python3 scripts/prod_smoke.py --target prod --mode public`
+   - proves: public gateway is reachable.
+
+2. Gateway admin/cases/queue reachability
+   - command: `python3 scripts/prod_smoke.py --target prod --mode operator`
+   - credential source: `REVIEW_ACCESS_ADMIN_TOKEN` env var or macOS Keychain service `zenith-hub-review-access-admin-token`
+   - proves: operator can inspect cases and queue without exposing credentials.
+
+3. ECS service state
+   - command: `python3 scripts/prod_smoke.py --target prod --mode internal`
+   - proves: required ECS services are ACTIVE and desired/running counts match.
+
+4. Internal STT and llama-server reachability
+   - command: `python3 scripts/prod_smoke.py --target prod --mode internal --run-internal-probes`
+   - proves: private Hub services can reach STT and llama-server through service discovery.
+
+5. Review-auth database access
+   - source of truth: production Postgres/RDS clients registry.
+   - access path: approved in-VPC/admin path only; do not ferry DB contents through S3 or local files without explicit approval.
+   - proof to add: redacted session-auth smoke or safe row-count/query that does not print codes/hashes/tokens.
+
+6. Cases/runs/logs access
+   - source of truth: production cases service/storage.
+   - access path: Gateway admin cases endpoint or internal cases service through approved operator path.
+   - proof to add: redacted case list/detail smoke.
+
+7. Review artifacts and model artifacts
+   - source of truth: production storage/EFS/S3 path used by runtime.
+   - model path to preserve: `/data/llama/Qwen3.5-9B-Q4_K_M.gguf` on EFS, mounted read-only as `/models/llama/Qwen3.5-9B-Q4_K_M.gguf`.
+   - proof to add: size/hash/path check without printing credentials.
+
+8. Matrix data if Matrix local volumes are reset
+   - source of truth must be explicit before reset: Matrix DB, media, signing keys, and appservice registrations.
+   - generated runtime config belongs under `/data`, not tracked templates.
+
+---
+
+## Rollback and drift warnings
+
+- If production smoke fails after a deploy, roll back to the previous ECS task definition before broad debugging.
+- If a Terraform plan wants to reduce STT CPU/memory below `1024/2048`, stop.
+- If a Terraform plan wants to remove or publicly expose `zenith-hub-prod-llama-server`, stop.
+- If a Terraform plan wants to mutate durable RDS/EFS/S3 resources unexpectedly, stop.
+- If a deploy path requires local Docker Desktop to build production images, stop and move the build to CI/CodeBuild.
+
+---
+
 # Agent Platform — AWS Baseline (~$80/mo)
 
 Baseline targets ~100 DAU with a simple always-on footprint:
