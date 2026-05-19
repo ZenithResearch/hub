@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Codified the internal llama-server/Qwen ECS service for production drift adoption, including the private security group, Cloud Map entry, task role, log group, EFS read-only model mount, and import blocks for existing live resources.
+- Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
+
 ### Changed
 - Deployed the Review Access production image tag for the Hub ECS baseline — records the `review-access-20260516013607-1994d2d` image tag used for the live admin-rotation rollout so future Terraform plans do not drift back to the previous review-auth image.
 - Documented the quick Matrix/Synapse-backed community setup path — shows the default feedback room bootstrap and how to create additional local Matrix rooms while warning that non-feedback bridge routing is still WIP.

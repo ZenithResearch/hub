@@ -46,3 +46,10 @@ resource "aws_cloudwatch_log_group" "stt_http" {
   retention_in_days = var.log_retention_days
   tags              = local.tags
 }
+
+
+resource "aws_cloudwatch_log_group" "llama_server" {
+  name              = "/ecs/${local.name_prefix}/llama-server"
+  retention_in_days = var.log_retention_days
+  tags              = local.tags
+}

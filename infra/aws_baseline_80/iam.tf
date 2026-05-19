@@ -81,6 +81,12 @@ resource "aws_iam_role" "stt_http_task" {
   tags               = local.tags
 }
 
+resource "aws_iam_role" "llama_server_task" {
+  name               = "${local.name_prefix}-llama-server-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  tags               = local.tags
+}
+
 # Queue task needs elasticfilesystem:ClientMount + ClientWrite to mount EFS.
 data "aws_iam_policy_document" "queue_efs" {
   statement {
@@ -150,6 +156,41 @@ resource "aws_iam_role_policy" "stt_http_efs" {
   name   = "${local.name_prefix}-stt-http-efs"
   role   = aws_iam_role.stt_http_task.id
   policy = data.aws_iam_policy_document.stt_http_efs.json
+}
+
+# Llama-server mounts Frank EFS read-only for the staged GGUF model and may read the
+# private S3 source object during explicit model-staging/preload operations.
+data "aws_iam_policy_document" "llama_server_model_efs" {
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${local.llama_server_model_bucket_name}/${var.llama_server_model_s3_key}"]
+  }
+
+  statement {
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.llama_server_model_bucket_name}"]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["models/*"]
+    }
+  }
+
+  statement {
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientWrite",
+      "elasticfilesystem:ClientRootAccess",
+    ]
+    resources = [aws_efs_file_system.frank.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "llama_server_model_efs" {
+  name   = "llama-server-model-efs"
+  role   = aws_iam_role.llama_server_task.id
+  policy = data.aws_iam_policy_document.llama_server_model_efs.json
 }
 
 # Gateway task needs EFS access for persistent CLIENTS_DB_PATH=/data/clients.db.

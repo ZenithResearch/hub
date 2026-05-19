@@ -389,7 +389,7 @@ resource "aws_ecs_task_definition" "cases" {
   container_definitions = jsonencode([
     {
       name      = "app"
-      image     = "${aws_ecr_repository.gateway.repository_url}:${local.gateway_image_tag}"
+      image     = "${aws_ecr_repository.gateway.repository_url}:${local.cases_image_tag}"
       essential = true
       command   = ["uvicorn", "services.cases.main:app", "--host", "0.0.0.0", "--port", "8083", "--timeout-keep-alive", "5"]
       portMappings = [
@@ -541,7 +541,7 @@ resource "aws_ecs_task_definition" "frank" {
   container_definitions = jsonencode([
     {
       name      = "app"
-      image     = "${aws_ecr_repository.gateway.repository_url}:${local.gateway_image_tag}"
+      image     = "${aws_ecr_repository.gateway.repository_url}:${local.frank_image_tag}"
       essential = true
       command = [
         "python",
@@ -706,6 +706,107 @@ resource "aws_ecs_service" "stt_http" {
 
   service_registries {
     registry_arn = aws_service_discovery_service.stt_http.arn
+  }
+
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  depends_on = [
+    aws_efs_mount_target.frank,
+  ]
+
+  tags = local.tags
+}
+
+
+resource "aws_ecs_task_definition" "llama_server" {
+  family                   = "${local.name_prefix}-llama-server"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = tostring(var.llama_server_task_cpu)
+  memory                   = tostring(var.llama_server_task_memory)
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.llama_server_task.arn
+
+  volume {
+    name = "frank-data"
+
+    efs_volume_configuration {
+      file_system_id          = aws_efs_file_system.frank.id
+      root_directory          = "/"
+      transit_encryption      = "ENABLED"
+      transit_encryption_port = 2999
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.frank.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "app"
+      image     = var.llama_server_image
+      essential = true
+      command = [
+        "-m",
+        "/models/llama/${var.llama_server_model_name}",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "3690",
+        "-c",
+        "4096",
+        "-t",
+        "4",
+        "-ngl",
+        "0",
+        "--reasoning",
+        "off"
+      ]
+      portMappings = [
+        { containerPort = 3690, hostPort = 3690, protocol = "tcp" }
+      ]
+      environment = []
+      mountPoints = [
+        {
+          sourceVolume  = "frank-data"
+          containerPath = "/models"
+          readOnly      = true
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.llama_server.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "llama_server" {
+  name            = "${local.name_prefix}-llama-server"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.llama_server.arn
+  desired_count   = var.start_ecs_services ? var.llama_server_desired_count : 0
+  launch_type     = "FARGATE"
+
+  enable_execute_command = var.enable_execute_command
+
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.llama_server.id]
+    assign_public_ip = false
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.llama_server.arn
   }
 
   deployment_minimum_healthy_percent = 0

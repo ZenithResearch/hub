@@ -161,10 +161,40 @@ variable "stt_http_task_memory" {
   default     = 2048
 }
 
-variable "llama_server_security_group_id" {
-  description = "Existing live llama-server security group allowed to read Frank EFS before llama-server is fully Terraform-managed. Replace with Terraform-managed SG in the llama-server adoption unit."
+variable "llama_server_task_cpu" {
+  description = "Fargate CPU units for internal llama.cpp server. Production Qwen GGUF service uses 4096."
+  type        = number
+  default     = 4096
+}
+
+variable "llama_server_task_memory" {
+  description = "Fargate memory in MiB for internal llama.cpp server. Production Qwen GGUF service uses 16384."
+  type        = number
+  default     = 16384
+}
+
+variable "llama_server_image" {
+  description = "Container image for llama.cpp OpenAI-compatible server. Do not bake multi-GB GGUFs into local-built images."
+  type        = string
+  default     = "ghcr.io/ggml-org/llama.cpp:server"
+}
+
+variable "llama_server_model_name" {
+  description = "GGUF model filename served by internal llama-server."
+  type        = string
+  default     = "Qwen3.5-9B-Q4_K_M.gguf"
+}
+
+variable "llama_server_model_bucket_name" {
+  description = "Private S3 bucket containing staged llama-server models. Empty derives the production-style bucket name from name_prefix/account/region."
   type        = string
   default     = ""
+}
+
+variable "llama_server_model_s3_key" {
+  description = "S3 key for the staged llama-server GGUF model. C4 owns the preload/runbook path."
+  type        = string
+  default     = "models/Qwen3.5-9B-Q4_K_M.gguf"
 }
 
 variable "start_ecs_services" {
@@ -326,6 +356,12 @@ variable "stt_http_desired_count" {
   default     = 1
 }
 
+variable "llama_server_desired_count" {
+  description = "Desired task count for internal llama-server. Keep at 1 unless model memory/concurrency is redesigned."
+  type        = number
+  default     = 1
+}
+
 variable "image_tag" {
   description = "Default image tag pushed to the ECR repos for each service."
   type        = string
@@ -334,6 +370,18 @@ variable "image_tag" {
 
 variable "gateway_image_tag" {
   description = "Optional gateway-http image tag override. Use when gateway has been hotfix-deployed ahead of the shared image_tag."
+  type        = string
+  default     = ""
+}
+
+variable "cases_image_tag" {
+  description = "Optional cases service image tag override. Use when cases has been hotfix-deployed ahead of gateway-http."
+  type        = string
+  default     = ""
+}
+
+variable "frank_image_tag" {
+  description = "Optional Frank service image tag override. Use when Frank has been hotfix-deployed ahead of gateway-http."
   type        = string
   default     = ""
 }

@@ -130,3 +130,14 @@ output "stt_http_service_name" {
   description = "ECS service name for STT HTTP."
   value       = aws_ecs_service.stt_http.name
 }
+
+
+output "llama_server_service_name" {
+  description = "ECS service name for internal llama-server."
+  value       = aws_ecs_service.llama_server.name
+}
+
+output "llama_server_openai_target" {
+  description = "Internal OpenAI-compatible llama-server target."
+  value       = "http://${local.llama_server_target}/v1"
+}

@@ -494,6 +494,70 @@ resource "aws_security_group" "stt_http" {
   tags = merge(local.tags, { Name = "${local.name_prefix}-stt-http-sg" })
 }
 
+resource "aws_security_group" "llama_server" {
+  name        = "${local.name_prefix}-llama-server-sg"
+  description = "Internal llama-server Qwen endpoint"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description = "openai_compatible_from_vpc"
+    from_port   = 3690
+    to_port     = 3690
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.this.cidr_block]
+  }
+
+  egress {
+    description = "efs_nfs"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.this.cidr_block]
+  }
+
+  egress {
+    description = "llama_server_smoke_test"
+    from_port   = 3690
+    to_port     = 3690
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.this.cidr_block]
+  }
+
+  egress {
+    description = "aws_control_plane_https"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_udp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "dns_tcp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description      = "live_ipv6_default_egress_preserved_during_import"
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-llama-server-sg" })
+}
+
 resource "aws_security_group" "clients_postgres" {
   count = var.enable_clients_postgres ? 1 : 0
 

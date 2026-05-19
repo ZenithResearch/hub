@@ -254,3 +254,11 @@ Proceed first with C1 and C2 as narrow commits:
 2. C2: Frank model env preserved.
 
 Then handle C3 llama-server as its own Terraform adoption unit with explicit import/state handling.
+
+
+## C3 working-tree patch: llama-server Terraform adoption
+
+The clean adoption worktree now codifies the live internal llama-server surface as a separate adoption unit. It adds Terraform resources and import blocks for the existing private security group, Cloud Map service, ECS task definition/service, task role/policy, and CloudWatch log group. The service remains private-only on port 3690, uses `ghcr.io/ggml-org/llama.cpp:server`, serves `/models/llama/Qwen3.5-9B-Q4_K_M.gguf`, mounts Frank EFS read-only at `/models`, and keeps CPU/memory at `4096/16384`. No Terraform apply has been run; the import/apply plan must be reviewed before execution.
+
+
+C3 also splits image tag overrides for cases, Frank, and STT so Terraform plans can preserve service-specific production hotfix images instead of accidentally pointing every service at `gateway_image_tag`. Production plans should pass or record current live hotfix tags for `cases_image_tag`, `frank_image_tag`, and `stt_image_tag` before apply.

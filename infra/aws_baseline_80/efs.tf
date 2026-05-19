@@ -223,15 +223,12 @@ resource "aws_security_group" "efs_frank" {
     security_groups = [aws_security_group.stt_http.id]
   }
 
-  dynamic "ingress" {
-    for_each = var.llama_server_security_group_id == "" ? [] : [var.llama_server_security_group_id]
-    content {
-      description     = "nfs_from_llama_server_tasks"
-      from_port       = 2049
-      to_port         = 2049
-      protocol        = "tcp"
-      security_groups = [ingress.value]
-    }
+  ingress {
+    description     = "nfs_from_llama_server_tasks"
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.llama_server.id]
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-efs-frank-sg" })
