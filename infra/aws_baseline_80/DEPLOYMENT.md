@@ -207,7 +207,7 @@ terraform init \
   -backend-config="bucket=$STATE_BUCKET" \
   -backend-config="key=agent-platform/${AWS_REGION}/baseline80.tfstate" \
   -backend-config="region=$AWS_REGION" \
-  -backend-config="dynamodb_table=$LOCK_TABLE" \
+  -backend-config="use_lockfile=true" \
   -backend-config="encrypt=true"
 
 terraform plan
