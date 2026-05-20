@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Added configurable external-root contracts and Terraform wrapper scripts — keeps large local caches, temp files, model artifacts, and tool state off the Mac internal disk without duplicating providers per module or treating the repo as an artifact warehouse.
+
 - Added deployment profile contracts and validation for local-dev, self-hosted-single-node, cloud-aws-staging, and cloud-aws-prod — makes data source-of-truth, Matrix/model posture, smoke commands, backup/reset policy, and CD authority explicit per environment.
 
 - Added Matrix deployment parity docs and static checks — makes local Docker, self-hosted/cloud Matrix, appservice rendering, backup/restore, and non-health appservice smoke expectations explicit before any Matrix production deploy.
