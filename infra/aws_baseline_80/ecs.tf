@@ -467,7 +467,7 @@ resource "aws_ecs_task_definition" "eventbus" {
   container_definitions = jsonencode([
     {
       name      = "app"
-      image     = "${aws_ecr_repository.gateway.repository_url}:${local.gateway_image_tag}"
+      image     = "${aws_ecr_repository.gateway.repository_url}:${var.image_tag}"
       essential = true
       command   = ["python", "-m", "services.eventbus.main"]
       portMappings = [
