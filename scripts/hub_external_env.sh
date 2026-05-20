@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Source this file to configure Hub local tooling to use an external root.
 # Usage:
-#   source scripts/hub_external_env.sh /Volumes/BJJ/zenith-cache
+#   source scripts/hub_external_env.sh /Volumes/BJJ-Cache/zenith-cache
 #   source scripts/hub_external_env.sh   # uses HUB_REMOTE_ROOT or first mounted default
 
 hub_external_find_root() {
@@ -9,7 +9,7 @@ hub_external_find_root() {
     printf '%s\n' "$HUB_REMOTE_ROOT"
     return 0
   fi
-  for candidate in /Volumes/BJJ/zenith-cache /mnt/zenith-cache /media/zenith-cache; do
+  for candidate in /Volumes/BJJ-Cache/zenith-cache /Volumes/BJJ/zenith-cache /mnt/zenith-cache /media/zenith-cache; do
     if [ -d "$candidate" ]; then
       printf '%s\n' "$candidate"
       return 0

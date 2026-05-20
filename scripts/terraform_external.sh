@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/terraform_external.sh infra/aws_baseline_80 validate -no-color
-#   HUB_REMOTE_ROOT=/Volumes/BJJ/zenith-cache scripts/terraform_external.sh infra/matrix/aws init -backend=false
+#   HUB_REMOTE_ROOT=/Volumes/BJJ-Cache/zenith-cache scripts/terraform_external.sh infra/matrix/aws init -backend=false
 
 if [ "$#" -lt 2 ]; then
   echo "usage: $0 <terraform-module-dir> <terraform args...>" >&2

@@ -2,6 +2,7 @@ roots:
   external:
     env: HUB_REMOTE_ROOT
     default_candidates:
+      - /Volumes/BJJ-Cache/zenith-cache
       - /Volumes/BJJ/zenith-cache
       - /mnt/zenith-cache
       - /media/zenith-cache
@@ -48,7 +49,7 @@ ontology:
     path: runtime-state
     durable: operator-managed
     commit: false
-    description: "Optional local runtime data moved out of internal disk; must be backed up or explicitly abandoned before deletion."
+    description: "Optional local runtime data moved out of internal disk; must be backed up or explicitly abandoned before deletion. For the BJJ APFS layout, Docker Desktop runtime data lives outside HUB_REMOTE_ROOT under /Volumes/BJJ-Runtime/zenith/data/cache/docker-desktop."
 
 rules:
   - "Do not duplicate Terraform providers per module on internal disk."

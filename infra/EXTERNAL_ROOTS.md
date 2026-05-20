@@ -9,7 +9,7 @@ Canonical config:
 Bootstrap env:
 
 ```bash
-source scripts/hub_external_env.sh /Volumes/BJJ/zenith-cache
+source scripts/hub_external_env.sh /Volumes/BJJ-Cache/zenith-cache
 ```
 
 Terraform wrapper:
@@ -32,11 +32,17 @@ Namespaces:
 - `build-cache/` — build-system caches, not committed.
 - `runtime-state/` — optional local runtime state that must be explicitly backed up before deletion.
 
-## Current recommended Mac external root
+## Current recommended Mac external roots
 
-`/Volumes/BJJ/zenith-cache`
+Tooling/cache root:
 
-This drive currently has enough space for large provider/model/build caches. The scripts do not assume it is always mounted: set `HUB_REMOTE_ROOT` or pass a root path explicitly.
+`/Volumes/BJJ-Cache/zenith-cache`
+
+Runtime-data root:
+
+`/Volumes/BJJ-Runtime/zenith/data/cache`
+
+The BJJ external disk is now GPT/APFS with separate APFS volumes for archive, cache, and runtime data. Use `BJJ-Cache` for recreatable tooling caches and `BJJ-Runtime` for explicitly migrated local runtime state such as Docker Desktop's `Docker.raw`. The scripts do not assume the drive is always mounted: set `HUB_REMOTE_ROOT` or pass a root path explicitly.
 
 ## Rules
 
@@ -52,7 +58,7 @@ This drive currently has enough space for large provider/model/build caches. The
 Use:
 
 ```bash
-source scripts/hub_external_env.sh /Volumes/BJJ/zenith-cache
+source scripts/hub_external_env.sh /Volumes/BJJ-Cache/zenith-cache
 scripts/terraform_external.sh infra/aws_baseline_80 validate -no-color
 scripts/terraform_external.sh infra/matrix/aws validate -no-color
 ```
@@ -64,10 +70,14 @@ The wrapper sets:
 - `HUB_EXTERNAL_TMPDIR=$HUB_REMOTE_ROOT/temp`
 - `TMPDIR=$HUB_REMOTE_ROOT/temp` only when the external filesystem supports Unix domain sockets
 
-That prevents Terraform from writing hundreds of MB to each module's internal `.terraform` directory. If the external drive is exFAT/NTFS, Terraform provider plugins still need a socket-capable temp directory, so `TMPDIR` may stay on internal APFS while the large provider cache and state dirs live externally.
+That prevents Terraform from writing hundreds of MB to each module's internal `.terraform` directory. The current BJJ cache volume is APFS and supports Unix domain sockets, so `TMPDIR` can move to the external root for Terraform and other local tooling. If a different external drive is exFAT/NTFS, Terraform provider plugins still need a socket-capable temp directory, so `TMPDIR` may stay on internal APFS while the large provider cache and state dirs live externally.
 
-## External disk caveat
+## External disk state
 
-The current drive is mounted as exFAT. Basic writes and executable files work, but macOS may create AppleDouble `._*` sidecars, and exFAT does not support Unix domain sockets. This is acceptable for local caches, model files, and Terraform plugin/state directories, but not ideal for source repos, committed files, or tools that require socket-capable temp directories.
+The current BJJ drive has been destructively backed up, reformatted as GPT/APFS, and split into shared-space APFS volumes:
 
-Deferred follow-up: do not repartition now. Revisit creating an APFS volume or partition only when we deliberately want the external drive to become a full temp/build/runtime root and have reviewed backup/destructive-format risk.
+- `/Volumes/BJJ-Archive` — restored/archive material when needed.
+- `/Volumes/BJJ-Cache` — recreatable tooling and build caches; canonical Hub root is `/Volumes/BJJ-Cache/zenith-cache`.
+- `/Volumes/BJJ-Runtime` — explicitly migrated local runtime state; Docker Desktop's sparse `Docker.raw` is symlinked from the internal Docker path to `/Volumes/BJJ-Runtime/zenith/data/cache/docker-desktop/vms/0/data/Docker.raw`.
+
+The pre-reformat drive backup is in `s3://zenith-bjj-drive-backup-044528206149-us-east-1/bjj-drive-2026-05-20/`. Do not delete that backup until the operator explicitly approves lifecycle/cost cleanup.

@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Updated external-root docs/scripts for the post-reformat BJJ APFS layout: tooling caches now default to `/Volumes/BJJ-Cache/zenith-cache`, explicit runtime migrations use `/Volumes/BJJ-Runtime/zenith/data/cache`, and Docker Desktop's `Docker.raw` migration is recorded as external runtime state.
+
 - Added a manual Gateway image build workflow and threaded `gateway_image_tag` through production CD so Project H Gateway endpoint code can be built in CI and rolled without local Docker builds.
 
 - Added Gateway model-profile runtime persistence wiring — production task definitions now pass explicit model profile contract, override, and audit paths so ZenithOS/Hermes model-profile changes persist on gateway EFS instead of container-local state.
