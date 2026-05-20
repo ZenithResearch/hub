@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Added a baseline GitHub Actions CI workflow and local `scripts/ci_check.sh` runner — keeps Python tests, private artifact scanning, Terraform fmt/validate, and Docker Compose config validation reproducible without requiring AWS production credentials.
+
 - Fixed the llama model preload task image default to use the available AWS CLI public ECR `latest` tag after ECS could not pull `public.ecr.aws/aws-cli/aws-cli:2`.
 
 - Added a reproducible llama-server model preload path: Terraform now defines a one-shot S3-to-EFS preload task and outputs, while `scripts/stage_llama_model.py` can upload a GGUF to private S3, run the preload task in private subnets, and verify the staged EFS artifact without local Docker builds.
