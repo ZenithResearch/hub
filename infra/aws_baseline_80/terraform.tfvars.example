@@ -68,6 +68,9 @@ cors_allow_origins = "https://yourdomain.com"
 # Keep gateway_desired_count at 1 while this is SQLite-backed.
 gateway_clients_db_path = "/data/clients.db"
 gateway_reviews_data_dir = "/data/reviews"
+gateway_model_profiles_path = "infra/model-profiles.yaml"
+gateway_model_profile_overrides_path = "/data/model-profile-overrides.yaml"
+gateway_model_profile_audit_path = "/data/model-profile-audit.jsonl"
 
 # Production clients registry Postgres. Set true after the application image includes
 # Postgres review-auth backend support and before seeding live reviewer rows.

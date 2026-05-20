@@ -24,6 +24,15 @@ if [[ "${SKIP_PRIVATE_ARTIFACT_SCAN:-0}" != "1" ]]; then
   fi
 fi
 
+if [[ "${SKIP_STATIC_CONTRACT_CHECKS:-0}" != "1" ]]; then
+  "$PYTHON_BIN" scripts/model_profile_check.py >/dev/null
+  "$PYTHON_BIN" scripts/matrix_deployment_check.py >/dev/null
+  "$PYTHON_BIN" scripts/deployment_profile_check.py >/dev/null
+  if [[ -n "${HUB_REMOTE_ROOT:-}" || -d "/Volumes/BJJ/zenith-cache" ]]; then
+    "$PYTHON_BIN" scripts/external_root_check.py >/dev/null
+  fi
+fi
+
 if [[ "${SKIP_TERRAFORM:-0}" != "1" ]]; then
   "$TERRAFORM_BIN" -chdir=infra/aws_baseline_80 fmt -check -diff
 

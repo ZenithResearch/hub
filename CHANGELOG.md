@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Added Gateway model-profile runtime persistence wiring — production task definitions now pass explicit model profile contract, override, and audit paths so ZenithOS/Hermes model-profile changes persist on gateway EFS instead of container-local state.
+
 - Added audited model-profile binding updates — Gateway can now write safe runtime overrides, merge them into effective reads/checks, and append JSONL audit records with actor/time/config hashes/connectivity result while rejecting raw secret-looking updates.
 
 - Added redacted model-profile connectivity checks — Gateway can now run a minimal OpenAI-compatible chat-completions probe for an effective agent/profile/deployment binding and return only safe operational status for ZenithOS.

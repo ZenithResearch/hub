@@ -233,6 +233,24 @@ variable "gateway_reviews_data_dir" {
   default     = "/data/reviews"
 }
 
+variable "gateway_model_profiles_path" {
+  description = "Canonical static model profile contract path mounted in gateway-http."
+  type        = string
+  default     = "infra/model-profiles.yaml"
+}
+
+variable "gateway_model_profile_overrides_path" {
+  description = "Writable model profile runtime override path on gateway EFS."
+  type        = string
+  default     = "/data/model-profile-overrides.yaml"
+}
+
+variable "gateway_model_profile_audit_path" {
+  description = "Writable model profile audit JSONL path on gateway EFS."
+  type        = string
+  default     = "/data/model-profile-audit.jsonl"
+}
+
 variable "gateway_data_uid" {
   description = "POSIX uid used by the gateway container app user for the EFS access point."
   type        = number
