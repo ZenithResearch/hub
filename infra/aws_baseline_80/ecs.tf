@@ -818,3 +818,89 @@ resource "aws_ecs_service" "llama_server" {
 
   tags = local.tags
 }
+
+
+resource "aws_ecs_task_definition" "llama_model_preload" {
+  family                   = "${local.name_prefix}-llama-model-preload"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "1024"
+  memory                   = "2048"
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.llama_server_task.arn
+
+  volume {
+    name = "frank-data"
+
+    efs_volume_configuration {
+      file_system_id          = aws_efs_file_system.frank.id
+      root_directory          = "/"
+      transit_encryption      = "ENABLED"
+      transit_encryption_port = 2999
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.frank.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
+  container_definitions = jsonencode([
+    {
+      name       = "preload"
+      image      = var.llama_model_preload_image
+      essential  = true
+      entryPoint = ["sh", "-lc"]
+      command = [
+        <<-SH
+set -euo pipefail
+: "$${MODEL_BUCKET:?MODEL_BUCKET is required}"
+: "$${MODEL_KEY:?MODEL_KEY is required}"
+: "$${MODEL_NAME:?MODEL_NAME is required}"
+TARGET_DIR="/models/llama"
+TARGET="$${TARGET_DIR}/$${MODEL_NAME}"
+TMP="$${TARGET}.tmp"
+mkdir -p "$${TARGET_DIR}"
+echo "Downloading s3://$${MODEL_BUCKET}/$${MODEL_KEY} to $${TARGET}"
+aws s3 cp "s3://$${MODEL_BUCKET}/$${MODEL_KEY}" "$${TMP}" --no-progress
+if [ -n "$${EXPECTED_SHA256:-}" ]; then
+  ACTUAL_SHA256="$(sha256sum "$${TMP}" | awk '{print $1}')"
+  if [ "$${ACTUAL_SHA256}" != "$${EXPECTED_SHA256}" ]; then
+    echo "SHA256 mismatch for $${MODEL_NAME}: expected $${EXPECTED_SHA256}, got $${ACTUAL_SHA256}" >&2
+    rm -f "$${TMP}"
+    exit 42
+  fi
+  echo "SHA256 verified: $${ACTUAL_SHA256}"
+else
+  sha256sum "$${TMP}"
+fi
+mv "$${TMP}" "$${TARGET}"
+ls -lh "$${TARGET}"
+        SH
+      ]
+      environment = [
+        { name = "MODEL_BUCKET", value = local.llama_server_model_bucket_name },
+        { name = "MODEL_KEY", value = var.llama_server_model_s3_key },
+        { name = "MODEL_NAME", value = var.llama_server_model_name },
+        { name = "EXPECTED_SHA256", value = var.llama_server_model_expected_sha256 }
+      ]
+      mountPoints = [
+        {
+          sourceVolume  = "frank-data"
+          containerPath = "/models"
+          readOnly      = false
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.llama_server.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "preload"
+        }
+      }
+    }
+  ])
+
+  tags = merge(local.tags, { Purpose = "llama-model-preload" })
+}

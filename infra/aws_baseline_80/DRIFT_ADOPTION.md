@@ -262,3 +262,8 @@ The clean adoption worktree now codifies the live internal llama-server surface 
 
 
 C3 also splits image tag overrides for cases, Frank, and STT so Terraform plans can preserve service-specific production hotfix images instead of accidentally pointing every service at `gateway_image_tag`. Production plans should pass or record current live hotfix tags for `cases_image_tag`, `frank_image_tag`, and `stt_image_tag` before apply.
+
+
+## C4 working-tree patch: reproducible llama model staging
+
+C4 adds a source-controlled model artifact path without local Docker model embedding. Terraform defines a one-shot `llama_model_preload` Fargate task that uses the AWS CLI image, private subnets, the llama-server security group, the llama-server task role, and the Frank EFS access point to download the configured GGUF from private S3 into `/models/llama/`. `scripts/stage_llama_model.py` can optionally upload a local GGUF to the configured private S3 bucket, run the preload task, wait for completion, and enforce an expected SHA256. The running llama-server service continues to mount the model path read-only.

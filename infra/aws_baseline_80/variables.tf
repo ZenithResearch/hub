@@ -192,9 +192,21 @@ variable "llama_server_model_bucket_name" {
 }
 
 variable "llama_server_model_s3_key" {
-  description = "S3 key for the staged llama-server GGUF model. C4 owns the preload/runbook path."
+  description = "S3 key for the staged llama-server GGUF model."
   type        = string
   default     = "models/Qwen3.5-9B-Q4_K_M.gguf"
+}
+
+variable "llama_server_model_expected_sha256" {
+  description = "Optional SHA256 expected for the staged llama-server GGUF model. Empty skips checksum enforcement in the preload task."
+  type        = string
+  default     = ""
+}
+
+variable "llama_model_preload_image" {
+  description = "AWS CLI image used by the one-shot model preload task. This downloads from S3 into EFS; it must not bake model bytes into the image."
+  type        = string
+  default     = "public.ecr.aws/aws-cli/aws-cli:2"
 }
 
 variable "start_ecs_services" {

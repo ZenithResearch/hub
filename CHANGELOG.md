@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Added a reproducible llama-server model preload path: Terraform now defines a one-shot S3-to-EFS preload task and outputs, while `scripts/stage_llama_model.py` can upload a GGUF to private S3, run the preload task in private subnets, and verify the staged EFS artifact without local Docker builds.
+
 - Codified the internal llama-server/Qwen ECS service for production drift adoption, including the private security group, Cloud Map entry, task role, log group, EFS read-only model mount, and import blocks for existing live resources.
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 

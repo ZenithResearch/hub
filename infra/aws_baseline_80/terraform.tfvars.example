@@ -44,10 +44,13 @@ frank_openai_base_url = "http://llama-server.zenith-hub-prod.local:3690/v1"
 stt_http_task_cpu     = 1024
 stt_http_task_memory  = 2048
 
-llama_server_task_cpu    = 4096
-llama_server_task_memory = 16384
-llama_server_image       = "ghcr.io/ggml-org/llama.cpp:server"
-llama_server_model_name  = "Qwen3.5-9B-Q4_K_M.gguf"
+llama_server_task_cpu              = 4096
+llama_server_task_memory           = 16384
+llama_server_image                 = "ghcr.io/ggml-org/llama.cpp:server"
+llama_server_model_name            = "Qwen3.5-9B-Q4_K_M.gguf"
+llama_server_model_s3_key          = "models/Qwen3.5-9B-Q4_K_M.gguf"
+llama_server_model_expected_sha256 = ""
+llama_model_preload_image          = "public.ecr.aws/aws-cli/aws-cli:2"
 
 image_tag = "v0.1.0"
 

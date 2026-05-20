@@ -141,3 +141,34 @@ output "llama_server_openai_target" {
   description = "Internal OpenAI-compatible llama-server target."
   value       = "http://${local.llama_server_target}/v1"
 }
+
+
+output "private_subnet_ids" {
+  description = "Private subnet IDs for one-shot ECS tasks."
+  value       = aws_subnet.private[*].id
+}
+
+output "llama_server_security_group_id" {
+  description = "Security group ID used by llama-server and model preload tasks."
+  value       = aws_security_group.llama_server.id
+}
+
+output "llama_model_preload_task_definition_arn" {
+  description = "Task definition ARN for the one-shot S3 to EFS llama model preload task."
+  value       = aws_ecs_task_definition.llama_model_preload.arn
+}
+
+output "llama_server_model_bucket_name" {
+  description = "Private S3 bucket containing llama-server model artifacts."
+  value       = local.llama_server_model_bucket_name
+}
+
+output "llama_server_model_s3_key" {
+  description = "S3 key for the configured llama-server model artifact."
+  value       = var.llama_server_model_s3_key
+}
+
+output "llama_server_model_name" {
+  description = "Configured llama-server GGUF model filename."
+  value       = var.llama_server_model_name
+}

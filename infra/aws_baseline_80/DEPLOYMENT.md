@@ -126,6 +126,33 @@ Before treating local Docker volumes as disposable, verify and document these pa
    - model path to preserve: `/data/llama/Qwen3.5-9B-Q4_K_M.gguf` on EFS, mounted read-only as `/models/llama/Qwen3.5-9B-Q4_K_M.gguf`.
    - proof to add: size/hash/path check without printing credentials.
 
+### Llama-server model staging
+
+The Qwen GGUF model artifact is staged through private S3 and a one-shot ECS preload task, not by baking the multi-GB model into a Docker image.
+
+1. Upload the local GGUF to the private model bucket and preload it into Frank EFS:
+
+```bash
+python3 scripts/stage_llama_model.py \
+  --workdir . \
+  --upload-local /path/to/Qwen3.5-9B-Q4_K_M.gguf \
+  --expected-sha256 03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8
+```
+
+2. If the object is already in S3, run only the private ECS preload task:
+
+```bash
+python3 scripts/stage_llama_model.py --workdir . --expected-sha256 03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8
+```
+
+3. Verify llama-server after staging:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode internal --run-internal-probes
+```
+
+The preload task mounts Frank EFS writable at `/models`, downloads `s3://<bucket>/models/Qwen3.5-9B-Q4_K_M.gguf`, verifies SHA256 when provided, and atomically moves the artifact into `/models/llama/Qwen3.5-9B-Q4_K_M.gguf`. The llama-server service mounts the same EFS path read-only.
+
 8. Matrix data if Matrix local volumes are reset
    - source of truth must be explicit before reset: Matrix DB, media, signing keys, and appservice registrations.
    - generated runtime config belongs under `/data`, not tracked templates.
