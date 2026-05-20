@@ -1,0 +1,182 @@
+profiles:
+  local-dev:
+    purpose: "Disposable local development and demos on a developer machine."
+    source_of_truth:
+      code_config: "git checkout plus local .env"
+      review_auth: "local clients-postgres volume unless pointed at prod intentionally"
+      cases_runs: "local Docker volumes and data/ paths"
+      artifacts: "local review/frank execution volumes"
+      matrix: "local matrix-db-data and matrix-data Docker volumes"
+      model_artifacts: "local provider APIs or host model files; not durable system of record"
+    services:
+      required:
+        - clients-postgres
+        - qdrant
+        - queue
+        - eventbus
+        - cases
+        - gateway-http
+        - stt-http
+        - frank
+        - hermes-worker-queue
+      optional:
+        - matrix-synapse
+        - matrix-bridge
+        - ingest
+        - llama-server
+    env_contract:
+      template: ".env.example"
+      secrets: "developer-local .env only; never commit"
+      public_edge: "127.0.0.1 gateway binding by default"
+    matrix:
+      enabled: "optional, enabled by scripts/start.sh when local Matrix tokens are generated"
+      contract: "generated appservice registrations stay in /data/appservices; tracked homeserver template stays clean"
+    model_serving:
+      default: "external provider or configured local model"
+      qwen_path: "optional local llama.cpp/GGUF; production Qwen uses S3/EFS instead"
+    backup_restore:
+      required_before_reset: "explicit user acceptance plus export/move-aside of any local-only Docker volumes the user wants to keep"
+      durable: false
+    smoke:
+      static:
+        - "python3 scripts/ci_check.sh is shell script; run scripts/ci_check.sh with appropriate PYTHON_BIN"
+        - "python3 scripts/matrix_deployment_check.py"
+      runtime:
+        - "./scripts/start.sh"
+        - "curl -fsS http://localhost:${HTTP_PORT:-8080}/health"
+    cd_policy: "none; local is manually rebuilt/restarted"
+
+  self-hosted-single-node:
+    purpose: "Fork/operator-owned single host or small VM deployment, including on-prem or community node."
+    source_of_truth:
+      code_config: "git tag/commit plus host env files or secret manager"
+      review_auth: "host Postgres volume or managed Postgres selected by operator"
+      cases_runs: "host volume/database backups"
+      artifacts: "host volume/object-store backups"
+      matrix: "host Synapse Postgres/media/signing-key backups"
+      model_artifacts: "host model directory or private object store; never baked into app image"
+    services:
+      required:
+        - gateway-http
+        - queue
+        - eventbus
+        - cases
+        - frank
+        - stt-http
+        - clients-postgres
+      optional:
+        - matrix-synapse
+        - matrix-bridge
+        - qdrant
+        - llama-server
+    env_contract:
+      template: ".env.example plus operator-specific deployment env"
+      secrets: "host secret store, systemd env file, or orchestrator secret; no committed .env"
+      public_edge: "operator reverse proxy/WAF/TLS terminates to gateway only"
+    matrix:
+      enabled: "first-class optional profile component"
+      contract: "DEPLOYMENT_PARITY.md backup/appservice rules apply before durable use"
+    model_serving:
+      default: "operator chooses external provider or local llama.cpp"
+      qwen_path: "host model dir or private object store -> host volume -> read-only llama-server mount"
+    backup_restore:
+      required_before_reset: "DB/media/signing-key/model/artifact backup plus restore drill"
+      durable: true
+    smoke:
+      static:
+        - "python3 scripts/matrix_deployment_check.py"
+        - "docker compose config --quiet or orchestrator-native config check"
+      runtime:
+        - "GET /health on public gateway"
+        - "queue/cases admin inspection through authenticated gateway"
+        - "Matrix appservice delivery smoke if Matrix enabled"
+    cd_policy: "manual pull/deploy with rollback to previous image/tag; automation is operator-specific"
+
+  cloud-aws-staging:
+    purpose: "AWS rehearsal environment for Hub deploys, review SDK previews, Matrix decisions, and destructive tests before prod."
+    source_of_truth:
+      code_config: "git branch/commit plus Terraform state for staging"
+      review_auth: "staging Postgres/RDS or explicitly disposable clients registry"
+      cases_runs: "staging cases storage, resettable by policy"
+      artifacts: "staging EFS/S3, resettable by policy"
+      matrix: "staging Matrix stack if enabled; separate server name and backups"
+      model_artifacts: "private staging S3 bucket -> preload task -> EFS or smaller external model"
+    services:
+      required:
+        - gateway-http
+        - queue
+        - eventbus
+        - cases
+        - frank
+        - stt-http
+      optional:
+        - runtime-grpc
+        - tool-sandbox
+        - llama-server
+        - matrix-synapse
+    env_contract:
+      template: "infra/aws_baseline_80/terraform.tfvars.example plus staging tfvars secret"
+      secrets: "GitHub environment/OIDC + AWS Secrets Manager; no long-lived AWS keys"
+      public_edge: "staging domain/ALB only; visibly not prod"
+    matrix:
+      enabled: "optional, used to rehearse Matrix production topology"
+      contract: "separate domain/server name; appservice delivery smoke required"
+    model_serving:
+      default: "cheap/small model or same Qwen S3/EFS preload pattern at reduced scale"
+      qwen_path: "private staging S3 -> one-shot ECS preload -> EFS -> read-only llama-server"
+    backup_restore:
+      required_before_reset: "document reset policy; backups optional only if staging data is intentionally retained"
+      durable: false
+    smoke:
+      static:
+        - "scripts/ci_check.sh"
+        - "terraform validate"
+      runtime:
+        - "scripts/prod_smoke.py equivalent targeting staging"
+        - "review submission smoke against staging Review SDK deployment"
+    cd_policy: "manual workflow_dispatch first; later automatic promotion target after CI is green"
+
+  cloud-aws-prod:
+    purpose: "Authoritative production Hub runtime and durable live data."
+    source_of_truth:
+      code_config: "reviewed git commits plus Terraform state"
+      review_auth: "production RDS clients registry"
+      cases_runs: "production cases service/storage"
+      artifacts: "production EFS/S3 review and model artifacts"
+      matrix: "production Matrix DB/media/signing-key backup once enabled"
+      model_artifacts: "production private S3 model bucket plus EFS staged copy"
+    services:
+      required:
+        - gateway-http
+        - runtime-grpc
+        - tool-sandbox
+        - queue
+        - eventbus
+        - cases
+        - frank
+        - stt-http
+        - llama-server
+      optional:
+        - matrix-synapse
+    env_contract:
+      template: "infra/aws_baseline_80/terraform.tfvars.example plus protected production tfvars secret"
+      secrets: "AWS Secrets Manager and GitHub production environment secrets; no repo/local Docker dependency"
+      public_edge: "https://hub.zenith-research.ca via ALB/ACM"
+    matrix:
+      enabled: "not yet adopted into production Hub baseline"
+      contract: "must satisfy DEPLOYMENT_PARITY.md before production enablement"
+    model_serving:
+      default: "internal Qwen llama-server through Cloud Map OpenAI-compatible endpoint"
+      qwen_path: "private S3 -> ECS preload task -> Frank EFS /data/llama -> llama-server read-only /models"
+    backup_restore:
+      required_before_reset: "prod smoke/access verified before any local Docker reset; durable backups per data class"
+      durable: true
+    smoke:
+      static:
+        - "scripts/ci_check.sh"
+        - "scripts/prod_terraform_cd.sh plan"
+      runtime:
+        - "python3 scripts/prod_smoke.py --target prod --mode public"
+        - "python3 scripts/prod_smoke.py --target prod --mode operator"
+        - "python3 scripts/prod_smoke.py --target prod --mode internal --run-internal-probes"
+    cd_policy: "manual production GitHub environment approval + OIDC + exact apply confirmation + post-deploy smoke"
