@@ -159,13 +159,13 @@ Allowed update fields are deliberately narrow: provider, endpoint ref, model, se
 
 Each save appends one JSONL audit record at `MODEL_PROFILE_AUDIT_PATH` with actor, timestamp, agent/profile/deployment profile, old effective-config hash, new effective-config hash, optional redacted connectivity result, and `secrets_printed: false`.
 
-Production/IaC wiring:
+The Gateway production task definition is wired with these defaults:
 
-- `MODEL_PROFILES_PATH` defaults to `infra/model-profiles.yaml`.
-- `MODEL_PROFILE_OVERRIDES_PATH` defaults to `/data/model-profile-overrides.yaml`.
-- `MODEL_PROFILE_AUDIT_PATH` defaults to `/data/model-profile-audit.jsonl`.
+- `MODEL_PROFILES_PATH=infra/model-profiles.yaml`
+- `MODEL_PROFILE_OVERRIDES_PATH=/data/model-profile-overrides.yaml`
+- `MODEL_PROFILE_AUDIT_PATH=/data/model-profile-audit.jsonl`
 
-In the AWS baseline, these paths are passed into the `gateway-http` task definition. The override and audit paths live under the gateway EFS `/data` mount, so operator changes survive task restarts without being baked into the image or committed to source.
+Project H endpoints require both the Gateway runtime env above and a Gateway image built from source that contains the endpoint code. Use the manual `Gateway Image` GitHub Actions workflow to push a `zenith-hub-prod-gateway-http` image tag, then run `Production CD` with that `gateway_image_tag` plus the current cases/Frank/STT hotfix tags to roll only the Gateway service.
 
 ## Verification
 
