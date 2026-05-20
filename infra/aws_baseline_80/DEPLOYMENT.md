@@ -360,15 +360,51 @@ curl -sS -X POST "http://$ALB_DNS/v1/messages" \
 
 ---
 
-## Rollback
+## Project E: manual production CD baseline
 
-Roll back by reverting the `image_tag` to a previous immutable tag and running:
+Production CD starts as a manual GitHub Actions workflow, not an automatic deploy path:
+
+- Workflow: `.github/workflows/production-cd.yml`
+- OIDC/IAM setup reference: `infra/aws_baseline_80/GITHUB_OIDC.md`
+- Environment: `production` — configure GitHub environment approval before allowing applies.
+- AWS auth: OIDC only via repository/environment variable `AWS_PROD_DEPLOY_ROLE_ARN`; do not store long-lived AWS keys.
+- Terraform variables: store the production tfvars file as secret `PROD_TERRAFORM_TFVARS_B64`:
 
 ```bash
-terraform apply
+base64 -i infra/aws_baseline_80/terraform.tfvars | pbcopy
 ```
 
-Or force-deploy the prior tag by updating the task definition revision and redeploying (ECS console / CLI).
+Paste the copied value into the GitHub Actions secret. Do not commit the real tfvars file.
+
+The workflow has three actions:
+
+- `smoke`: public production smoke only; no Terraform.
+- `plan`: initializes the real backend, runs fmt/validate, produces a production Terraform plan, and uploads the plan text artifact.
+- `apply`: requires GitHub environment approval plus exact confirmation text `APPLY zenith-hub-prod`; runs the reviewed plan and then public smoke.
+
+Current production hotfix image tags are explicit workflow inputs so Terraform does not accidentally regress cases/Frank/STT back to the shared image tag:
+
+- cases: `native-timeout-hotfix-20260519004401`
+- Frank: `frank-stt-backoff-hotfix-20260519190823`
+- STT: `stt-cache-hotfix-20260519013103`
+
+Local operator equivalent:
+
+```bash
+AWS_PROFILE=zenith-hermes AWS_REGION=us-east-1 \
+  PROD_TFVARS_PATH=/path/to/local/prod/terraform.tfvars \
+  scripts/prod_terraform_cd.sh plan
+```
+
+Only use `scripts/prod_terraform_cd.sh apply` after reviewing the saved plan text and confirming the production change window.
+
+---
+
+## Rollback
+
+Roll back by reverting the `image_tag` or service-specific image tag override to a previous immutable tag and running a reviewed production plan/apply through `.github/workflows/production-cd.yml` or `scripts/prod_terraform_cd.sh`.
+
+For urgent ECS-only rollback, update the affected service back to the prior task definition revision in ECS, then codify that revision/tag in Terraform immediately after the incident.
 
 ---
 

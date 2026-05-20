@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Added a manual production CD baseline workflow, Terraform CD helper, and OIDC setup reference — enables approved OIDC-backed prod smoke/plan/apply runs with reviewed plan artifacts while keeping automatic deploys and long-lived AWS keys out of scope.
+
 - Added a baseline GitHub Actions CI workflow and local `scripts/ci_check.sh` runner — keeps Python tests, private artifact scanning, Terraform fmt/validate, and Docker Compose config validation reproducible without requiring AWS production credentials.
 
 - Fixed the llama model preload task image default to use the available AWS CLI public ECR `latest` tag after ECS could not pull `public.ecr.aws/aws-cli/aws-cli:2`.
