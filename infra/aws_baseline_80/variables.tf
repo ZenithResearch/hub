@@ -206,7 +206,7 @@ variable "llama_server_model_expected_sha256" {
 variable "llama_model_preload_image" {
   description = "AWS CLI image used by the one-shot model preload task. This downloads from S3 into EFS; it must not bake model bytes into the image."
   type        = string
-  default     = "public.ecr.aws/aws-cli/aws-cli:2"
+  default     = "public.ecr.aws/aws-cli/aws-cli:latest"
 }
 
 variable "start_ecs_services" {

@@ -50,7 +50,7 @@ llama_server_image                 = "ghcr.io/ggml-org/llama.cpp:server"
 llama_server_model_name            = "Qwen3.5-9B-Q4_K_M.gguf"
 llama_server_model_s3_key          = "models/Qwen3.5-9B-Q4_K_M.gguf"
 llama_server_model_expected_sha256 = ""
-llama_model_preload_image          = "public.ecr.aws/aws-cli/aws-cli:2"
+llama_model_preload_image          = "public.ecr.aws/aws-cli/aws-cli:latest"
 
 image_tag = "v0.1.0"
 
