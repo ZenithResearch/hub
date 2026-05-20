@@ -80,6 +80,29 @@ Future secret-backed providers should store the raw value in Hub/AWS/Keychain-ba
 4. Add ZenithOS UI for profile editing and test/save flows.
 5. Retire direct single-purpose env-var editing once typed profile resolution is active.
 
+## Current Hub read API
+
+Gateway exposes a first read-only operator endpoint:
+
+```bash
+GET /v1/admin/model-profiles/effective?agent=frank&profile=review_brief_compiler&deployment_profile=cloud-aws-prod
+Authorization: Bearer <review-access-admin-token>
+```
+
+The response is intentionally safe for ZenithOS display:
+
+- effective agent/profile/deployment binding
+- provider kind and endpoint handle
+- endpoint base URL and visibility
+- model name
+- runtime knobs such as timeout, temperature, max tokens, cost tier, and latency tier
+- fallback profile
+- secret handle/configured state, never raw secret material
+- safe bootstrap env values only
+- `secrets_printed: false`
+
+Unknown agents/profiles/deployment profiles fail visibly instead of falling back to a global model.
+
 ## Verification
 
 Run:

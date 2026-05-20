@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import importlib
+import json
+import os
+import sys
+import tempfile
+import types
+import unittest
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+
+class ModelProfileResolverTests(unittest.TestCase):
+    def test_resolves_effective_profile_without_raw_secret(self) -> None:
+        from libs.common.model_profiles import load_model_profile_contract, resolve_effective_model_profile
+
+        contract = load_model_profile_contract(Path("infra/model-profiles.yaml"))
+        effective = resolve_effective_model_profile(
+            contract,
+            agent="frank",
+            profile="review_brief_compiler",
+            deployment_profile="cloud-aws-prod",
+        )
+
+        assert effective["agent"] == "frank"
+        assert effective["profile"] == "review_brief_compiler"
+        assert effective["deployment_profile"] == "cloud-aws-prod"
+        assert effective["provider"] == "hub-internal-openai-compatible"
+        assert effective["endpoint_ref"] == "prod-llama-server"
+        assert effective["endpoint"]["base_url"] == "http://llama-server.zenith-hub-prod.local:3690/v1"
+        assert effective["model"] == "Qwen3.5-9B-Q4_K_M.gguf"
+        assert effective["secret"] == {
+            "ref": "none",
+            "configured": False,
+            "display": "No bearer secret; internal/private endpoint only.",
+        }
+        assert effective["fallback_profile"] == "fallback_fast"
+        assert effective["bootstrap_env"] == {
+            "FRANK_MODEL": "Qwen3.5-9B-Q4_K_M.gguf",
+            "OPENAI_BASE_URL": "http://llama-server.zenith-hub-prod.local:3690/v1",
+        }
+        serialized = json.dumps(effective)
+        assert "OPENAI_API_KEY" not in serialized
+        assert "sk-" not in serialized
+        assert "Bearer " not in serialized
+
+    def test_unknown_profile_blocks_visibly(self) -> None:
+        from libs.common.model_profiles import ModelProfileResolutionError, load_model_profile_contract, resolve_effective_model_profile
+
+        contract = load_model_profile_contract(Path("infra/model-profiles.yaml"))
+        with self.assertRaises(ModelProfileResolutionError) as ctx:
+            resolve_effective_model_profile(
+                contract,
+                agent="frank",
+                profile="does_not_exist",
+                deployment_profile="cloud-aws-prod",
+            )
+        assert "unknown profile" in str(ctx.exception)
+
+
+class GatewayModelProfileAdminTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        root = Path(self.tmpdir.name)
+        reviews_dir = root / "reviews"
+        reviews_dir.mkdir(parents=True)
+        hermes_dir = root / ".hermes"
+        hermes_dir.mkdir(parents=True)
+
+        os.environ["REVIEWS_DATA_DIR"] = str(reviews_dir)
+        os.environ.pop("REVIEW_AUTH_DB_PATH", None)
+        os.environ.pop("CLIENTS_DB_BACKEND", None)
+        os.environ.pop("CLIENTS_DATABASE_URL", None)
+        os.environ["CLIENTS_DB_PATH"] = str(root / "clients.db")
+        os.environ["REVIEW_SESSION_TTL_SECONDS"] = "3600"
+        os.environ["REVIEW_ACCESS_ADMIN_TOKEN"] = "admin-secret"
+        os.environ.pop("REVIEW_DEPLOY_HOOK_TOKEN", None)
+        os.environ.pop("REVIEW_DEPLOY_ALLOWED_HOST_SUFFIXES", None)
+        os.environ["QUEUE_HTTP_URL"] = "http://queue:8081"
+        os.environ["CASES_HTTP_URL"] = "http://cases:8083"
+        os.environ["EVENTBUS_URL"] = "http://eventbus:8082"
+        os.environ["CORS_ALLOW_ORIGINS"] = "https://staging.example.com"
+        os.environ["RUNTIME_GRPC_TARGET"] = "runtime-grpc:50051"
+        os.environ["HERMES_SESSION_ROOTS"] = str(hermes_dir)
+        os.environ["HUB_CONFIG_SECRETS_PATH"] = str(root / "config-secrets.env")
+        os.environ["MODEL_PROFILES_PATH"] = "infra/model-profiles.yaml"
+
+        async def _close() -> None:
+            return None
+
+        self._orig_grpc = sys.modules.get("grpc")
+        self._orig_agent_pb2 = sys.modules.get("libs.common.proto.agent_pb2")
+        self._orig_agent_pb2_grpc = sys.modules.get("libs.common.proto.agent_pb2_grpc")
+
+        fake_grpc = types.SimpleNamespace()
+        fake_grpc.aio = types.SimpleNamespace(
+            insecure_channel=lambda target: types.SimpleNamespace(close=_close)
+        )
+        sys.modules["grpc"] = fake_grpc
+        sys.modules["libs.common.proto.agent_pb2_grpc"] = types.SimpleNamespace(AgentRuntimeStub=lambda channel: object())
+        sys.modules["libs.common.proto.agent_pb2"] = types.SimpleNamespace()
+
+        sys.modules.pop("services.gateway_http.app", None)
+        module = importlib.import_module("services.gateway_http.app")
+        self.module = importlib.reload(module)
+        self.client_context = TestClient(self.module.app)
+        self.client = self.client_context.__enter__()
+
+    def tearDown(self) -> None:
+        self.client_context.__exit__(None, None, None)
+        if self._orig_grpc is not None:
+            sys.modules["grpc"] = self._orig_grpc
+        else:
+            sys.modules.pop("grpc", None)
+        if self._orig_agent_pb2 is not None:
+            sys.modules["libs.common.proto.agent_pb2"] = self._orig_agent_pb2
+        else:
+            sys.modules.pop("libs.common.proto.agent_pb2", None)
+        if self._orig_agent_pb2_grpc is not None:
+            sys.modules["libs.common.proto.agent_pb2_grpc"] = self._orig_agent_pb2_grpc
+        else:
+            sys.modules.pop("libs.common.proto.agent_pb2_grpc", None)
+        os.environ.pop("MODEL_PROFILES_PATH", None)
+        self.tmpdir.cleanup()
+
+    def test_admin_effective_profile_endpoint_requires_admin_token(self) -> None:
+        response = self.client.get(
+            "/v1/admin/model-profiles/effective",
+            params={"agent": "frank", "profile": "review_brief_compiler", "deployment_profile": "cloud-aws-prod"},
+        )
+
+        assert response.status_code == 401
+
+    def test_admin_effective_profile_endpoint_returns_safe_config(self) -> None:
+        response = self.client.get(
+            "/v1/admin/model-profiles/effective",
+            params={"agent": "frank", "profile": "review_brief_compiler", "deployment_profile": "cloud-aws-prod"},
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["agent"] == "frank"
+        assert payload["profile"] == "review_brief_compiler"
+        assert payload["model"] == "Qwen3.5-9B-Q4_K_M.gguf"
+        assert payload["endpoint"]["base_url"] == "http://llama-server.zenith-hub-prod.local:3690/v1"
+        assert payload["secret"]["ref"] == "none"
+        assert payload["secret"]["configured"] is False
+        assert payload["secrets_printed"] is False
+        serialized = json.dumps(payload)
+        assert "OPENAI_API_KEY" not in serialized
+        assert "sk-" not in serialized
+        assert "Bearer " not in serialized

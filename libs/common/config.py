@@ -41,6 +41,7 @@ class GatewaySettings(BaseServiceSettings):
     review_access_admin_token: str = Field(default="", alias="REVIEW_ACCESS_ADMIN_TOKEN")
     hermes_session_roots: str = Field(default="", alias="HERMES_SESSION_ROOTS")
     hub_config_secrets_path: str = Field(default="/data/hub-config-secrets.env", alias="HUB_CONFIG_SECRETS_PATH")
+    model_profiles_path: str = Field(default="infra/model-profiles.yaml", alias="MODEL_PROFILES_PATH")
     queue_http_url: str = Field(default="http://localhost:8081", alias="QUEUE_HTTP_URL")
     eventbus_url: str = Field(default="http://localhost:8082", alias="EVENTBUS_URL")
     cases_http_url: str = Field(default="http://cases:8083", alias="CASES_HTTP_URL")

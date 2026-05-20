@@ -20,6 +20,11 @@ from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 
 from libs.common.config import GatewaySettings
 from libs.common.logging import configure_logging
+from libs.common.model_profiles import (
+    ModelProfileResolutionError,
+    load_model_profile_contract,
+    resolve_effective_model_profile,
+)
 from libs.common.proto import agent_pb2, agent_pb2_grpc
 from libs.common.schemas import (
     HttpInvokeToolIn,
@@ -531,6 +536,26 @@ def create_app() -> FastAPI:
                 "secrets_printed": False,
             }
         )
+
+    @app.get("/v1/admin/model-profiles/effective")
+    async def get_effective_model_profile(
+        request: Request,
+        agent: str,
+        profile: str,
+        deployment_profile: str,
+    ) -> JSONResponse:
+        _require_review_access_admin(request)
+        try:
+            contract = load_model_profile_contract(Path(settings.model_profiles_path))
+            effective = resolve_effective_model_profile(
+                contract,
+                agent=agent,
+                profile=profile,
+                deployment_profile=deployment_profile,
+            )
+        except ModelProfileResolutionError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        return JSONResponse(effective)
 
     async def _admin_proxy_get(upstream_url: str, request: Request, params: dict[str, str] | None = None) -> JSONResponse:
         _require_review_access_admin(request)
