@@ -56,4 +56,7 @@ jobs:
       - name: Run baseline CI checks
         env:
           PRIVATE_ARTIFACT_SCAN_RANGE: ${{ steps.scan-range.outputs.range }}
+          # GitHub-hosted runners have Docker, but this baseline should stay
+          # credentials/data-free until Compose env fixtures are explicit.
+          SKIP_COMPOSE_CONFIG: "1"
         run: scripts/ci_check.sh
