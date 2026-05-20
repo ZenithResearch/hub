@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Added redacted model-profile connectivity checks — Gateway can now run a minimal OpenAI-compatible chat-completions probe for an effective agent/profile/deployment binding and return only safe operational status for ZenithOS.
+
 - Added Hub-side model-profile resolution and a read-only admin endpoint for safe effective config display — ZenithOS can now query Frank's effective profile/model/endpoint/fallback metadata without raw secrets, while unknown profile bindings fail visibly instead of falling back to one global model.
 
 - Added ZenithOS/Hermes-native model profile contracts and validation — records agent/persona → purpose profile → deployment profile bindings, the current Frank production Qwen llama-server default, safe secret-handle posture, fallback policy, and the future ZenithOS operator control-surface shape without introducing a single global model setting.

@@ -22,6 +22,7 @@ from libs.common.config import GatewaySettings
 from libs.common.logging import configure_logging
 from libs.common.model_profiles import (
     ModelProfileResolutionError,
+    check_model_profile_connectivity,
     load_model_profile_contract,
     resolve_effective_model_profile,
 )
@@ -556,6 +557,27 @@ def create_app() -> FastAPI:
         except ModelProfileResolutionError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from None
         return JSONResponse(effective)
+
+    @app.post("/v1/admin/model-profiles/connectivity-check")
+    async def post_model_profile_connectivity_check(
+        request: Request,
+        agent: str,
+        profile: str,
+        deployment_profile: str,
+    ) -> JSONResponse:
+        _require_review_access_admin(request)
+        try:
+            contract = load_model_profile_contract(Path(settings.model_profiles_path))
+            effective = resolve_effective_model_profile(
+                contract,
+                agent=agent,
+                profile=profile,
+                deployment_profile=deployment_profile,
+            )
+            result = await check_model_profile_connectivity(effective)
+        except ModelProfileResolutionError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        return JSONResponse(result, status_code=200 if result.get("ok") else 502)
 
     async def _admin_proxy_get(upstream_url: str, request: Request, params: dict[str, str] | None = None) -> JSONResponse:
         _require_review_access_admin(request)

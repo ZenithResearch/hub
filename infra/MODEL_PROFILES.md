@@ -103,6 +103,34 @@ The response is intentionally safe for ZenithOS display:
 
 Unknown agents/profiles/deployment profiles fail visibly instead of falling back to a global model.
 
+## Current Hub connectivity-check API
+
+Gateway also exposes a read-only/action-test endpoint:
+
+```bash
+POST /v1/admin/model-profiles/connectivity-check?agent=frank&profile=review_brief_compiler&deployment_profile=cloud-aws-prod
+Authorization: Bearer <review-access-admin-token>
+```
+
+The endpoint resolves the effective profile and sends a minimal OpenAI-compatible chat-completions probe to the configured endpoint:
+
+- `messages: [{role: user, content: health check}]`
+- `max_tokens: 1`
+- `temperature: 0`
+- `stream: false`
+
+The response is redacted operational status only:
+
+- `ok`
+- agent/profile/deployment profile
+- provider, endpoint ref, model
+- status code
+- latency in milliseconds
+- short detail string
+- `secrets_printed: false`
+
+It must not return raw provider responses, prompts beyond the fixed health-check string, authorization headers, API keys, bearer tokens, or model output text. Failed connectivity returns safe status without exposing secrets.
+
 ## Verification
 
 Run:

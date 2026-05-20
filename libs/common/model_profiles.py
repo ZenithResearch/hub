@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
+import httpx
 import yaml
 
 
@@ -108,5 +110,69 @@ def resolve_effective_model_profile(
             "display": secret.get("display", "configured by secret handle"),
         },
         "bootstrap_env": safe_bootstrap_env,
+        "secrets_printed": False,
+    }
+
+
+def _base_url_join(base_url: str, suffix: str) -> str:
+    return f"{base_url.rstrip('/')}/{suffix.lstrip('/')}"
+
+
+async def _httpx_post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> httpx.Response:
+    async with httpx.AsyncClient() as client:
+        return await client.post(url, json=payload, headers=headers, timeout=timeout)
+
+
+async def check_model_profile_connectivity(
+    effective: dict[str, Any],
+    *,
+    post_json: Callable[[str, dict[str, Any], dict[str, str], float], Awaitable[Any]] | None = None,
+) -> dict[str, Any]:
+    """Run a minimal OpenAI-compatible chat probe and return redacted status only."""
+    endpoint = _as_dict(effective.get("endpoint"))
+    base_url = str(endpoint.get("base_url") or "")
+    if not base_url:
+        raise ModelProfileResolutionError("effective model profile has no endpoint base_url")
+    model = str(effective.get("model") or "")
+    if not model:
+        raise ModelProfileResolutionError("effective model profile has no model")
+
+    timeout = float(effective.get("timeout_seconds") or 30)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "health check"}],
+        "max_tokens": 1,
+        "temperature": 0,
+        "stream": False,
+    }
+    headers: dict[str, str] = {}
+    post = post_json or _httpx_post_json
+    start = time.monotonic()
+    try:
+        response = await post(
+            _base_url_join(base_url, "chat/completions"),
+            payload,
+            headers,
+            timeout,
+        )
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        ok = 200 <= status_code < 300
+        detail = "ok" if ok else "model provider returned non-success status"
+    except (httpx.RequestError, TimeoutError, OSError) as exc:
+        status_code = None
+        ok = False
+        detail = exc.__class__.__name__
+    latency_ms = int((time.monotonic() - start) * 1000)
+    return {
+        "ok": ok,
+        "agent": effective.get("agent", ""),
+        "profile": effective.get("profile", ""),
+        "deployment_profile": effective.get("deployment_profile", ""),
+        "provider": effective.get("provider", ""),
+        "endpoint_ref": effective.get("endpoint_ref", ""),
+        "model": model,
+        "status_code": status_code,
+        "latency_ms": latency_ms,
+        "detail": detail,
         "secrets_printed": False,
     }

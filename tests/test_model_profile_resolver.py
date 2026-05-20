@@ -60,6 +60,61 @@ class ModelProfileResolverTests(unittest.TestCase):
         assert "unknown profile" in str(ctx.exception)
 
 
+class _FakeOpenAIResponse:
+    status_code = 200
+
+    def json(self) -> dict:
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+
+class ModelProfileConnectivityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_connectivity_check_posts_minimal_chat_probe_without_secret(self) -> None:
+        from libs.common.model_profiles import (
+            check_model_profile_connectivity,
+            load_model_profile_contract,
+            resolve_effective_model_profile,
+        )
+
+        contract = load_model_profile_contract(Path("infra/model-profiles.yaml"))
+        effective = resolve_effective_model_profile(
+            contract,
+            agent="frank",
+            profile="review_brief_compiler",
+            deployment_profile="cloud-aws-prod",
+        )
+        calls: list[dict] = []
+
+        async def fake_post_json(url: str, payload: dict, headers: dict[str, str], timeout: float) -> _FakeOpenAIResponse:
+            calls.append({"url": url, "payload": payload, "headers": headers, "timeout": timeout})
+            return _FakeOpenAIResponse()
+
+        result = await check_model_profile_connectivity(effective, post_json=fake_post_json)
+
+        assert result["ok"] is True
+        assert result["status_code"] == 200
+        assert result["endpoint_ref"] == "prod-llama-server"
+        assert result["model"] == "Qwen3.5-9B-Q4_K_M.gguf"
+        assert result["secrets_printed"] is False
+        assert calls == [
+            {
+                "url": "http://llama-server.zenith-hub-prod.local:3690/v1/chat/completions",
+                "payload": {
+                    "model": "Qwen3.5-9B-Q4_K_M.gguf",
+                    "messages": [{"role": "user", "content": "health check"}],
+                    "max_tokens": 1,
+                    "temperature": 0,
+                    "stream": False,
+                },
+                "headers": {},
+                "timeout": 120,
+            }
+        ]
+        serialized = json.dumps(result)
+        assert "OPENAI_API_KEY" not in serialized
+        assert "sk-" not in serialized
+        assert "Bearer " not in serialized
+
+
 class GatewayModelProfileAdminTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
@@ -148,6 +203,39 @@ class GatewayModelProfileAdminTests(unittest.TestCase):
         assert payload["endpoint"]["base_url"] == "http://llama-server.zenith-hub-prod.local:3690/v1"
         assert payload["secret"]["ref"] == "none"
         assert payload["secret"]["configured"] is False
+        assert payload["secrets_printed"] is False
+        serialized = json.dumps(payload)
+        assert "OPENAI_API_KEY" not in serialized
+        assert "sk-" not in serialized
+        assert "Bearer " not in serialized
+
+    def test_admin_connectivity_check_endpoint_returns_redacted_status(self) -> None:
+        async def fake_check(effective: dict) -> dict:
+            assert effective["agent"] == "frank"
+            return {
+                "ok": True,
+                "agent": "frank",
+                "profile": "review_brief_compiler",
+                "deployment_profile": "cloud-aws-prod",
+                "endpoint_ref": "prod-llama-server",
+                "model": "Qwen3.5-9B-Q4_K_M.gguf",
+                "status_code": 200,
+                "latency_ms": 12,
+                "secrets_printed": False,
+            }
+
+        self.module.check_model_profile_connectivity = fake_check
+        response = self.client.post(
+            "/v1/admin/model-profiles/connectivity-check",
+            params={"agent": "frank", "profile": "review_brief_compiler", "deployment_profile": "cloud-aws-prod"},
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["endpoint_ref"] == "prod-llama-server"
+        assert payload["model"] == "Qwen3.5-9B-Q4_K_M.gguf"
         assert payload["secrets_printed"] is False
         serialized = json.dumps(payload)
         assert "OPENAI_API_KEY" not in serialized
