@@ -8,9 +8,13 @@ def test_production_cd_accepts_gateway_image_tag_override():
     helper = (ROOT / "scripts/prod_terraform_cd.sh").read_text()
 
     assert "gateway_image_tag:" in workflow
+    assert "eventbus_image_tag:" in workflow
     assert "GATEWAY_IMAGE_TAG: ${{ inputs.gateway_image_tag }}" in workflow
+    assert "EVENTBUS_IMAGE_TAG: ${{ inputs.eventbus_image_tag }}" in workflow
     assert "${GATEWAY_IMAGE_TAG" in helper
+    assert "${EVENTBUS_IMAGE_TAG" in helper
     assert '-var="gateway_image_tag=$GATEWAY_IMAGE_TAG"' in helper
+    assert '-var="eventbus_image_tag=$EVENTBUS_IMAGE_TAG"' in helper
 
 
 def test_manual_gateway_image_build_workflow_pushes_to_gateway_ecr_only():
@@ -34,5 +38,5 @@ def test_gateway_image_override_does_not_roll_eventbus():
         'resource "aws_ecs_service" "eventbus" {', 1
     )[0]
 
-    assert 'image     = "${aws_ecr_repository.gateway.repository_url}:${var.image_tag}"' in eventbus_block
+    assert 'image     = "${aws_ecr_repository.gateway.repository_url}:${local.eventbus_image_tag}"' in eventbus_block
     assert "local.gateway_image_tag" not in eventbus_block

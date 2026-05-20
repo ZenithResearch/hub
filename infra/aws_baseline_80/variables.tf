@@ -404,6 +404,12 @@ variable "gateway_image_tag" {
   default     = ""
 }
 
+variable "eventbus_image_tag" {
+  description = "Optional eventbus image tag override. Use to preserve a live eventbus revision when rolling gateway-http only."
+  type        = string
+  default     = ""
+}
+
 variable "cases_image_tag" {
   description = "Optional cases service image tag override. Use when cases has been hotfix-deployed ahead of gateway-http."
   type        = string

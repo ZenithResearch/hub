@@ -20,6 +20,10 @@ on:
         description: "Production gateway-http image tag override. Use a tag built by Gateway Image when deploying new Gateway code."
         required: false
         default: gateway-admin-queue-case-20260518003135-5ae0998
+      eventbus_image_tag:
+        description: "Production eventbus image tag override to preserve live eventbus when rolling Gateway only."
+        required: true
+        default: gateway-admin-queue-case-20260518003135-5ae0998
       cases_image_tag:
         description: "Production cases image tag override to preserve live hotfixes."
         required: true
@@ -101,6 +105,7 @@ jobs:
           TERRAFORM_PLAN_PATH: ${{ runner.temp }}/hub-prod/hub-prod.tfplan
           TERRAFORM_PLAN_TEXT: ${{ runner.temp }}/hub-prod/hub-prod-plan.txt
           GATEWAY_IMAGE_TAG: ${{ inputs.gateway_image_tag }}
+          EVENTBUS_IMAGE_TAG: ${{ inputs.eventbus_image_tag }}
           CASES_IMAGE_TAG: ${{ inputs.cases_image_tag }}
           FRANK_IMAGE_TAG: ${{ inputs.frank_image_tag }}
           STT_IMAGE_TAG: ${{ inputs.stt_image_tag }}
