@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Added Matrix deployment parity docs and static checks — makes local Docker, self-hosted/cloud Matrix, appservice rendering, backup/restore, and non-health appservice smoke expectations explicit before any Matrix production deploy.
+
 - Added a manual production CD baseline workflow, Terraform CD helper, and OIDC setup reference — enables approved OIDC-backed prod smoke/plan/apply runs with reviewed plan artifacts while keeping automatic deploys and long-lived AWS keys out of scope.
 
 - Added a baseline GitHub Actions CI workflow and local `scripts/ci_check.sh` runner — keeps Python tests, private artifact scanning, Terraform fmt/validate, and Docker Compose config validation reproducible without requiring AWS production credentials.

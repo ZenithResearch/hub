@@ -2,7 +2,7 @@
 
 Matrix (Synapse) deployment for hub-to-hub communication across the Zenith network.
 
-Two deployment paths — local Docker and AWS EC2.
+Two deployment paths — local Docker and AWS EC2. See `DEPLOYMENT_PARITY.md` for the source-of-truth, backup/restore, appservice, and cloud/self-hosted parity contract.
 
 ---
 
