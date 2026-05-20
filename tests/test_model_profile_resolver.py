@@ -141,6 +141,8 @@ class GatewayModelProfileAdminTests(unittest.TestCase):
         os.environ["HERMES_SESSION_ROOTS"] = str(hermes_dir)
         os.environ["HUB_CONFIG_SECRETS_PATH"] = str(root / "config-secrets.env")
         os.environ["MODEL_PROFILES_PATH"] = "infra/model-profiles.yaml"
+        os.environ["MODEL_PROFILE_OVERRIDES_PATH"] = str(root / "model-profile-overrides.yaml")
+        os.environ["MODEL_PROFILE_AUDIT_PATH"] = str(root / "model-profile-audit.jsonl")
 
         async def _close() -> None:
             return None
@@ -178,6 +180,8 @@ class GatewayModelProfileAdminTests(unittest.TestCase):
         else:
             sys.modules.pop("libs.common.proto.agent_pb2_grpc", None)
         os.environ.pop("MODEL_PROFILES_PATH", None)
+        os.environ.pop("MODEL_PROFILE_OVERRIDES_PATH", None)
+        os.environ.pop("MODEL_PROFILE_AUDIT_PATH", None)
         self.tmpdir.cleanup()
 
     def test_admin_effective_profile_endpoint_requires_admin_token(self) -> None:
@@ -241,3 +245,49 @@ class GatewayModelProfileAdminTests(unittest.TestCase):
         assert "OPENAI_API_KEY" not in serialized
         assert "sk-" not in serialized
         assert "Bearer " not in serialized
+
+
+    def test_admin_binding_update_writes_override_and_audit_without_secret(self) -> None:
+        response = self.client.put(
+            "/v1/admin/model-profiles/bindings",
+            params={"agent": "frank", "profile": "review_brief_compiler", "deployment_profile": "cloud-aws-prod"},
+            headers={"Authorization": "Bearer admin-secret", "X-Zenith-Operator": "zenithos-test"},
+            json={
+                "updates": {
+                    "model": "Qwen3.5-9B-Q4_K_M.gguf",
+                    "temperature": 0.15,
+                    "max_tokens": 1536,
+                    "secret_ref": "none",
+                },
+                "connectivity_result": {"ok": True, "status_code": 200, "secrets_printed": False},
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["agent"] == "frank"
+        assert payload["profile"] == "review_brief_compiler"
+        assert payload["deployment_profile"] == "cloud-aws-prod"
+        assert payload["audit"]["actor"] == "zenithos-test"
+        assert payload["audit"]["old_effective_config_hash"] != payload["audit"]["new_effective_config_hash"]
+        assert payload["effective"]["temperature"] == 0.15
+        assert payload["effective"]["max_tokens"] == 1536
+        assert payload["secrets_printed"] is False
+
+        audit_path = Path(os.environ["MODEL_PROFILE_AUDIT_PATH"])
+        audit_record = json.loads(audit_path.read_text().splitlines()[-1])
+        assert audit_record["actor"] == "zenithos-test"
+        assert audit_record["connectivity_check_result"] == {"ok": True, "status_code": 200, "secrets_printed": False}
+        serialized = json.dumps(payload) + audit_path.read_text()
+        assert "OPENAI_API_KEY" not in serialized
+        assert "sk-" not in serialized
+        assert "Bearer " not in serialized
+
+        effective_response = self.client.get(
+            "/v1/admin/model-profiles/effective",
+            params={"agent": "frank", "profile": "review_brief_compiler", "deployment_profile": "cloud-aws-prod"},
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+        assert effective_response.status_code == 200
+        assert effective_response.json()["temperature"] == 0.15
+        assert effective_response.json()["max_tokens"] == 1536

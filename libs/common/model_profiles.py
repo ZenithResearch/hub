@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -16,13 +20,41 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def load_model_profile_contract(path: Path | str) -> dict[str, Any]:
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+def _safe_hash(value: dict[str, Any]) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _reject_secret_like_updates(updates: dict[str, Any]) -> None:
+    serialized = json.dumps(updates, sort_keys=True)
+    if any(marker in serialized for marker in ("OPENAI_API_KEY", "Bearer ", "sk-")):
+        raise ModelProfileResolutionError("model profile updates must not contain raw secret material")
+
+
+def load_model_profile_contract(path: Path | str, overrides_path: Path | str | None = None) -> dict[str, Any]:
     profile_path = Path(path)
     if not profile_path.exists():
         raise ModelProfileResolutionError(f"model profile contract not found: {profile_path}")
     data = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ModelProfileResolutionError("model profile contract must be a mapping")
+    if overrides_path:
+        override_path = Path(overrides_path)
+        if override_path.exists():
+            overrides = yaml.safe_load(override_path.read_text(encoding="utf-8"))
+            if not isinstance(overrides, dict):
+                raise ModelProfileResolutionError("model profile overrides must be a mapping")
+            data = _deep_merge(data, overrides)
     return data
 
 
@@ -110,6 +142,101 @@ def resolve_effective_model_profile(
             "display": secret.get("display", "configured by secret handle"),
         },
         "bootstrap_env": safe_bootstrap_env,
+        "secrets_printed": False,
+    }
+
+
+def _load_overrides(path: Path | str) -> dict[str, Any]:
+    override_path = Path(path)
+    if not override_path.exists():
+        return {}
+    data = yaml.safe_load(override_path.read_text(encoding="utf-8"))
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ModelProfileResolutionError("model profile overrides must be a mapping")
+    return data
+
+
+def update_model_profile_binding(
+    *,
+    contract_path: Path | str,
+    overrides_path: Path | str,
+    audit_path: Path | str,
+    agent: str,
+    profile: str,
+    deployment_profile: str,
+    updates: dict[str, Any],
+    actor: str,
+    connectivity_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    allowed = {
+        "provider",
+        "endpoint_ref",
+        "model",
+        "secret_ref",
+        "temperature",
+        "max_tokens",
+        "timeout_seconds",
+        "cost_tier",
+        "latency_tier",
+        "fallback_profile",
+    }
+    unknown = sorted(set(updates) - allowed)
+    if unknown:
+        raise ModelProfileResolutionError(f"unsupported model profile update keys: {', '.join(unknown)}")
+    _reject_secret_like_updates(updates)
+
+    old_contract = load_model_profile_contract(contract_path, overrides_path)
+    old_effective = resolve_effective_model_profile(
+        old_contract,
+        agent=agent,
+        profile=profile,
+        deployment_profile=deployment_profile,
+    )
+
+    overrides = _load_overrides(overrides_path)
+    binding_path = overrides.setdefault("agents", {}).setdefault(agent, {}).setdefault("profiles", {}).setdefault(profile, {}).setdefault("bindings", {}).setdefault(deployment_profile, {})
+    if not isinstance(binding_path, dict):
+        raise ModelProfileResolutionError("model profile override binding must be a mapping")
+    binding_path.update(copy.deepcopy(updates))
+
+    override_path = Path(overrides_path)
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_text(yaml.safe_dump(overrides, sort_keys=True), encoding="utf-8")
+
+    new_contract = load_model_profile_contract(contract_path, overrides_path)
+    new_effective = resolve_effective_model_profile(
+        new_contract,
+        agent=agent,
+        profile=profile,
+        deployment_profile=deployment_profile,
+    )
+
+    safe_connectivity = connectivity_result or {}
+    _reject_secret_like_updates(safe_connectivity)
+    record = {
+        "actor": actor or "unknown",
+        "changed_at": datetime.now(timezone.utc).isoformat(),
+        "agent": agent,
+        "profile": profile,
+        "deployment_profile": deployment_profile,
+        "old_effective_config_hash": _safe_hash(old_effective),
+        "new_effective_config_hash": _safe_hash(new_effective),
+        "connectivity_check_result": safe_connectivity,
+        "secrets_printed": False,
+    }
+    audit = Path(audit_path)
+    audit.parent.mkdir(parents=True, exist_ok=True)
+    with audit.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+    return {
+        "agent": agent,
+        "profile": profile,
+        "deployment_profile": deployment_profile,
+        "effective": new_effective,
+        "audit": record,
         "secrets_printed": False,
     }
 

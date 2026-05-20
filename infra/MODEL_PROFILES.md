@@ -131,6 +131,34 @@ The response is redacted operational status only:
 
 It must not return raw provider responses, prompts beyond the fixed health-check string, authorization headers, API keys, bearer tokens, or model output text. Failed connectivity returns safe status without exposing secrets.
 
+## Current Hub audited update API
+
+Gateway exposes a first audited override endpoint:
+
+```bash
+PUT /v1/admin/model-profiles/bindings?agent=frank&profile=review_brief_compiler&deployment_profile=cloud-aws-prod
+Authorization: Bearer <review-access-admin-token>
+X-Zenith-Operator: <operator-id>
+```
+
+Payload shape:
+
+```json
+{
+  "updates": {
+    "model": "Qwen3.5-9B-Q4_K_M.gguf",
+    "temperature": 0.15,
+    "max_tokens": 1536,
+    "secret_ref": "none"
+  },
+  "connectivity_result": {"ok": true, "status_code": 200, "secrets_printed": false}
+}
+```
+
+Allowed update fields are deliberately narrow: provider, endpoint ref, model, secret ref, temperature, max tokens, timeout, cost tier, latency tier, and fallback profile. Raw secret-looking values are rejected. The canonical `infra/model-profiles.yaml` remains static; runtime/operator changes write to `MODEL_PROFILE_OVERRIDES_PATH` and are merged over the canonical contract for effective reads/checks.
+
+Each save appends one JSONL audit record at `MODEL_PROFILE_AUDIT_PATH` with actor, timestamp, agent/profile/deployment profile, old effective-config hash, new effective-config hash, optional redacted connectivity result, and `secrets_printed: false`.
+
 ## Verification
 
 Run:

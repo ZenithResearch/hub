@@ -25,6 +25,7 @@ from libs.common.model_profiles import (
     check_model_profile_connectivity,
     load_model_profile_contract,
     resolve_effective_model_profile,
+    update_model_profile_binding,
 )
 from libs.common.proto import agent_pb2, agent_pb2_grpc
 from libs.common.schemas import (
@@ -148,6 +149,11 @@ class CaseFollowUpIn(BaseModel):
 
 class SecretUpdateIn(BaseModel):
     value: str
+
+
+class ModelProfileBindingUpdateIn(BaseModel):
+    updates: dict[str, Any]
+    connectivity_result: dict[str, Any] | None = None
 
 
 class ReviewAccessAdminTokenUpdateOut(BaseModel):
@@ -547,7 +553,7 @@ def create_app() -> FastAPI:
     ) -> JSONResponse:
         _require_review_access_admin(request)
         try:
-            contract = load_model_profile_contract(Path(settings.model_profiles_path))
+            contract = load_model_profile_contract(Path(settings.model_profiles_path), Path(settings.model_profile_overrides_path))
             effective = resolve_effective_model_profile(
                 contract,
                 agent=agent,
@@ -567,7 +573,7 @@ def create_app() -> FastAPI:
     ) -> JSONResponse:
         _require_review_access_admin(request)
         try:
-            contract = load_model_profile_contract(Path(settings.model_profiles_path))
+            contract = load_model_profile_contract(Path(settings.model_profiles_path), Path(settings.model_profile_overrides_path))
             effective = resolve_effective_model_profile(
                 contract,
                 agent=agent,
@@ -578,6 +584,32 @@ def create_app() -> FastAPI:
         except ModelProfileResolutionError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from None
         return JSONResponse(result, status_code=200 if result.get("ok") else 502)
+
+    @app.put("/v1/admin/model-profiles/bindings")
+    async def put_model_profile_binding(
+        payload: ModelProfileBindingUpdateIn,
+        request: Request,
+        agent: str,
+        profile: str,
+        deployment_profile: str,
+    ) -> JSONResponse:
+        _require_review_access_admin(request)
+        actor = (request.headers.get("x-zenith-operator") or "gateway-admin").strip()
+        try:
+            result = update_model_profile_binding(
+                contract_path=Path(settings.model_profiles_path),
+                overrides_path=Path(settings.model_profile_overrides_path),
+                audit_path=Path(settings.model_profile_audit_path),
+                agent=agent,
+                profile=profile,
+                deployment_profile=deployment_profile,
+                updates=payload.updates,
+                actor=actor,
+                connectivity_result=payload.connectivity_result,
+            )
+        except ModelProfileResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return JSONResponse(result)
 
     async def _admin_proxy_get(upstream_url: str, request: Request, params: dict[str, str] | None = None) -> JSONResponse:
         _require_review_access_admin(request)
