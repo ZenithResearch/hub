@@ -78,6 +78,14 @@ resource "aws_security_group" "gateway" {
   }
 
   egress {
+    description = "gateway_to_llama_server_openai"
+    from_port   = 3690
+    to_port     = 3690
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
     description = "gateway_to_efs_clients_db"
     from_port   = 2049
     to_port     = 2049
