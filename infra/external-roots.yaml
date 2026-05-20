@@ -1,0 +1,58 @@
+roots:
+  external:
+    env: HUB_REMOTE_ROOT
+    default_candidates:
+      - /Volumes/BJJ-Cache/zenith-cache
+      - /Volumes/BJJ/zenith-cache
+      - /mnt/zenith-cache
+      - /media/zenith-cache
+    description: "Configurable root for local operational substrate that should not live in the repo or consume internal disk."
+
+ontology:
+  tooling-cache:
+    path: tooling-cache
+    durable: false
+    commit: false
+    description: "Recreatable package/tool caches."
+    children:
+      terraform-plugin-cache:
+        path: tooling-cache/terraform-plugin-cache
+        env: TF_PLUGIN_CACHE_DIR
+        description: "Shared Terraform provider/plugin cache; use one copy across modules."
+  tooling-state:
+    path: tooling-state
+    durable: false
+    commit: false
+    description: "Tool working dirs that are safe to recreate."
+    children:
+      terraform:
+        path: tooling-state/terraform
+        env: TF_DATA_DIR
+        description: "Per-module Terraform working dirs, outside repo-local .terraform directories."
+  temp:
+    path: temp
+    durable: false
+    commit: false
+    env: TMPDIR
+    description: "Temporary files for commands that would otherwise use the nearly-full system temp directory. Only set as TMPDIR for tools requiring Unix sockets if the filesystem supports sockets."
+  model-artifacts:
+    path: model-artifacts
+    durable: operator-managed
+    commit: false
+    description: "Local models, GGUF files, and model caches; production source of truth remains S3/EFS where configured."
+  build-cache:
+    path: build-cache
+    durable: false
+    commit: false
+    description: "Docker/build/package caches, safe to recreate."
+  runtime-state:
+    path: runtime-state
+    durable: operator-managed
+    commit: false
+    description: "Optional local runtime data moved out of internal disk; must be backed up or explicitly abandoned before deletion. For the BJJ APFS layout, Docker Desktop runtime data lives outside HUB_REMOTE_ROOT under /Volumes/BJJ-Runtime/zenith/data/cache/docker-desktop."
+
+rules:
+  - "Do not duplicate Terraform providers per module on internal disk."
+  - "Do not commit external root contents or generated cache paths."
+  - "Prefer CI for clean installs; use external root for local validation."
+  - "Production data remains in production systems; external root is local operational substrate, not prod source of truth."

@@ -75,6 +75,8 @@ cp .env.example .env
 
 Expect to edit `.env` for local secrets, model providers, Matrix tokens, and service-specific settings.
 
+Runtime state is intentionally local-only. The repo can be pushed publicly while real usage data stays ignored: `.env`, `.hermes/`, `data/*.db`, review artifacts, generated Matrix registrations, and `repos/workspace/` are not tracked. See `docs/local-runtime-state.md`.
+
 For focused development, prefer targeted compose/test commands over assuming the whole stack is stable.
 
 ## Quick Matrix-backed community

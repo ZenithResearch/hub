@@ -1,15 +1,56 @@
 project_name = "agent-platform"
 environment  = "dev"
-aws_region   = "us-west-2"
+aws_region   = "us-east-1"
+
+public_hub_domain_name         = "hub.zenith-research.ca"
+enable_dual_stack_public_edge  = true
+# First apply creates the ACM certificate and outputs DNS validation records.
+# Set true only after GoDaddy DNS validation has propagated and ACM is issued.
+enable_https_listener = false
 
 vpc_cidr = "10.20.0.0/16"
 
-# Baseline cost profile: 1 task each, 0.25 vCPU / 0.5 GB
+# Two-phase deploy:
+# 1. Keep false for first apply so infra/ECR/cert/storage can be created before images exist.
+# 2. Build and push images.
+# 3. Set true and apply again to start ECS services.
+start_ecs_services = false
+
+# Baseline cost profile: 1 task each. Most services stay at 0.25 vCPU / 0.5 GB.
 gateway_desired_count = 1
 runtime_desired_count = 1
 sandbox_desired_count = 1
 task_cpu              = 256
 task_memory           = 512
+
+# Per-service task sizing. Keep STT at or above 1024/2048; lower memory caused
+# production Whisper OOM failures.
+gateway_task_cpu      = 256
+gateway_task_memory   = 512
+runtime_task_cpu      = 256
+runtime_task_memory   = 512
+sandbox_task_cpu      = 256
+sandbox_task_memory   = 512
+queue_task_cpu        = 256
+queue_task_memory     = 512
+cases_task_cpu        = 256
+cases_task_memory     = 512
+eventbus_task_cpu     = 256
+eventbus_task_memory  = 512
+frank_task_cpu        = 256
+frank_task_memory     = 512
+frank_model           = "Qwen3.5-9B-Q4_K_M.gguf"
+frank_openai_base_url = "http://llama-server.zenith-hub-prod.local:3690/v1"
+stt_http_task_cpu     = 1024
+stt_http_task_memory  = 2048
+
+llama_server_task_cpu              = 4096
+llama_server_task_memory           = 16384
+llama_server_image                 = "ghcr.io/ggml-org/llama.cpp:server"
+llama_server_model_name            = "Qwen3.5-9B-Q4_K_M.gguf"
+llama_server_model_s3_key          = "models/Qwen3.5-9B-Q4_K_M.gguf"
+llama_server_model_expected_sha256 = ""
+llama_model_preload_image          = "public.ecr.aws/aws-cli/aws-cli:latest"
 
 image_tag = "v0.1.0"
 
@@ -19,6 +60,23 @@ qdrant_url = "https://your-qdrant-cloud-url"
 # Recommended: do NOT set this in tfvars for production (it will be stored in TF state).
 # Instead, create the secret value out-of-band (see DEPLOYMENT.md).
 # qdrant_api_key = "REPLACE_ME"
+# review_access_admin_token = "REPLACE_ME_OPERATOR_TOKEN"
 
 cors_allow_origins = "https://yourdomain.com"
+
+# Gateway Review SDK auth can use either persistent SQLite on EFS or private RDS Postgres.
+# Keep gateway_desired_count at 1 while this is SQLite-backed.
+gateway_clients_db_path = "/data/clients.db"
+gateway_reviews_data_dir = "/data/reviews"
+gateway_model_profiles_path = "infra/model-profiles.yaml"
+gateway_model_profile_overrides_path = "/data/model-profile-overrides.yaml"
+gateway_model_profile_audit_path = "/data/model-profile-audit.jsonl"
+
+# Production clients registry Postgres. Set true after the application image includes
+# Postgres review-auth backend support and before seeding live reviewer rows.
+enable_clients_postgres              = false
+clients_postgres_database_name       = "hub_clients"
+clients_postgres_username            = "hub_clients"
+clients_postgres_instance_class      = "db.t4g.micro"
+clients_postgres_backup_retention_days = 7
 

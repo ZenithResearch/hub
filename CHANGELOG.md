@@ -5,7 +5,39 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Updated external-root docs/scripts for the post-reformat BJJ APFS layout: tooling caches now default to `/Volumes/BJJ-Cache/zenith-cache`, explicit runtime migrations use `/Volumes/BJJ-Runtime/zenith/data/cache`, and Docker Desktop's `Docker.raw` migration is recorded as external runtime state.
+
+- Added a manual Gateway image build workflow and threaded `gateway_image_tag` through production CD so Project H Gateway endpoint code can be built in CI and rolled without local Docker builds.
+
+- Added Gateway model-profile runtime persistence wiring — production task definitions now pass explicit model profile contract, override, and audit paths so ZenithOS/Hermes model-profile changes persist on gateway EFS instead of container-local state.
+
+- Added audited model-profile binding updates — Gateway can now write safe runtime overrides, merge them into effective reads/checks, and append JSONL audit records with actor/time/config hashes/connectivity result while rejecting raw secret-looking updates.
+
+- Added redacted model-profile connectivity checks — Gateway can now run a minimal OpenAI-compatible chat-completions probe for an effective agent/profile/deployment binding and return only safe operational status for ZenithOS.
+
+- Added Hub-side model-profile resolution and a read-only admin endpoint for safe effective config display — ZenithOS can now query Frank's effective profile/model/endpoint/fallback metadata without raw secrets, while unknown profile bindings fail visibly instead of falling back to one global model.
+
+- Added ZenithOS/Hermes-native model profile contracts and validation — records agent/persona → purpose profile → deployment profile bindings, the current Frank production Qwen llama-server default, safe secret-handle posture, fallback policy, and the future ZenithOS operator control-surface shape without introducing a single global model setting.
+
+- Added configurable external-root contracts and Terraform wrapper scripts — keeps large local caches, temp files, model artifacts, and tool state off the Mac internal disk without duplicating providers per module or treating the repo as an artifact warehouse.
+
+- Added deployment profile contracts and validation for local-dev, self-hosted-single-node, cloud-aws-staging, and cloud-aws-prod — makes data source-of-truth, Matrix/model posture, smoke commands, backup/reset policy, and CD authority explicit per environment.
+
+- Added Matrix deployment parity docs and static checks — makes local Docker, self-hosted/cloud Matrix, appservice rendering, backup/restore, and non-health appservice smoke expectations explicit before any Matrix production deploy.
+
+- Added a manual production CD baseline workflow, Terraform CD helper, and OIDC setup reference — enables approved OIDC-backed prod smoke/plan/apply runs with reviewed plan artifacts while keeping automatic deploys and long-lived AWS keys out of scope.
+
+- Added a baseline GitHub Actions CI workflow and local `scripts/ci_check.sh` runner — keeps Python tests, private artifact scanning, Terraform fmt/validate, and Docker Compose config validation reproducible without requiring AWS production credentials.
+
+- Fixed the llama model preload task image default to use the available AWS CLI public ECR `latest` tag after ECS could not pull `public.ecr.aws/aws-cli/aws-cli:2`.
+
+- Added a reproducible llama-server model preload path: Terraform now defines a one-shot S3-to-EFS preload task and outputs, while `scripts/stage_llama_model.py` can upload a GGUF to private S3, run the preload task in private subnets, and verify the staged EFS artifact without local Docker builds.
+
+- Codified the internal llama-server/Qwen ECS service for production drift adoption, including the private security group, Cloud Map entry, task role, log group, EFS read-only model mount, and import blocks for existing live resources.
+- Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
+
 ### Changed
+- Deployed the Review Access production image tag for the Hub ECS baseline — records the `review-access-20260516013607-1994d2d` image tag used for the live admin-rotation rollout so future Terraform plans do not drift back to the previous review-auth image.
 - Documented the quick Matrix/Synapse-backed community setup path — shows the default feedback room bootstrap and how to create additional local Matrix rooms while warning that non-feedback bridge routing is still WIP.
 - Rewrote the README around the current WIP trust boundary — tells new readers to expect breaking changes and to rely primarily on queue/cases orchestration plus Synapse while experimental surfaces keep moving.
 - Clarified the Frank/Sophia runtime boundary and Frank model provider config — keeps Frank on the Hermes Codex provider path while Sophia remains a comms/profile surface rather than an execution profile.
@@ -14,6 +46,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Removed Sophia-local case/step execution-loop skills — keeps Sophia strictly comms-only and prevents future dispatch paths from mistaking Sophia for an internal case executor.
 
 ### Added
+- Added Terraform baseline resources for cases, eventbus, Frank, and STT HTTP — starts codifying the production native review service topology so ECS services, EFS mounts, IAM roles, security groups, service discovery, and task sizing can be reviewed instead of remaining hotfix-only drift.
+- Added protected admin queue/case gateway read endpoints — lets ZenithOS operator surfaces read production queue and case state through Hub with the existing Review Access admin bearer-token boundary instead of direct internal service URLs.
+- Added public-repo private artifact guardrails — staged/pre-push scans now block local runtime state, private ClaudeHub references, database files, local absolute paths, and likely secrets before they can enter or leave the public Hub repository.
+- Added Postgres-backed Review SDK access management for production Hub — supports dynamic deploy registration, private RDS clients registry wiring, guarded operator access-code rotation for ZenithOS, one-time generated reviewer codes, project-scoped reviewer access, and redacted seeding/smoke-test tooling so public staging review auth can be managed without frontend secrets or local SQLite DB ferrying.
+- Added authenticated Review SDK intake for public staging branches — Hub now owns a SQLite-backed review auth registry, short-lived review session tokens, project/deployment/origin-scoped validation, authenticated asset/review submission enforcement, attribution stamping, and regression tests so staging clients can submit reviews without bundling durable frontend secrets.
 - Added Frank native case pipeline execution and cases observability APIs — `FRANK_RUNTIME` now defaults to `native_case_pipeline`, Frank can schedule/recover service-code case runs without Hermes Kanban child dispatch, and cases exposes run/step/span/event/artifact plus board projection endpoints so Swift ZenithOS can monitor execution from cases state.
 - Added normalized Frank step I/O contracts for Kanban-projected case tasks — each task now carries a `StepIOContract` with named inputs, named outputs, and output schemas, while worker-facing task bodies describe the atomic `inputs/context -> metadata.zenith.outputs` contract and allow rich JSON or artifact-pointer values under declared output names.
 - Added Frank review-packet hardening follow-up plan and acceptance harness — turns the Franklin26 inline production probe into a rerunnable local script and keeps post-signoff work bounded.
@@ -46,6 +83,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - `httpx>=0.27.0` dependency for async HTTP client used by the enqueue call.
 
 ### Fixed
+- Fixed browser-opaque Review SDK submission failures — `POST /v1/reviews` now converts queue enqueue `httpx` failures into CORS-visible `502` responses instead of leaking raw exceptions as Safari-reported CORS failures.
 - Fixed Matrix appservice startup rendering — tracked Synapse templates now stay stable while generated appservice registrations render under `/data/appservices`, and startup only registers appservices whose receivers are launched by the same path.
 - Hardened Hub-local Kanban worker prompt contract before fresh E2E — dispatcher-spawned workers are now explicitly told to call `kanban_show` first, report `KANBAN_TOOLS_MISSING` instead of narrating when tools are absent, avoid Docker/worker spawning, include `metadata.zenith.audit`, and write only declared `metadata.zenith.outputs` names.
 - Fixed Hub-local Hermes Kanban dispatcher worker spawn context — spawned worker profiles now inherit the active `HERMES_KANBAN_BOARD` and an explicit `HERMES_HOME`, preserving case-board isolation without creating Docker-per-task environments.

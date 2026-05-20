@@ -1,0 +1,81 @@
+name: Gateway Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Gateway image tag to push. Defaults to gateway-<short-sha>."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gateway-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY: zenith-hub-prod-gateway-http
+
+jobs:
+  build:
+    name: Build and push gateway image
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials by OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PROD_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image metadata
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.image_tag }}" ]]; then
+            TAG="${{ inputs.image_tag }}"
+          else
+            TAG="gateway-${GITHUB_SHA::12}"
+          fi
+          if [[ ! "$TAG" =~ ^[A-Za-z0-9_.-]{1,128}$ ]]; then
+            echo "Invalid Docker tag: $TAG" >&2
+            exit 2
+          fi
+          IMAGE_URI="${{ steps.ecr-login.outputs.registry }}/${ECR_REPOSITORY}:${TAG}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+          echo "Gateway image tag: $TAG"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.image_uri }}
+          provenance: false
+          cache-from: type=gha,scope=gateway-http
+          cache-to: type=gha,mode=max,scope=gateway-http
+
+      - name: Deployment hint
+        run: |
+          echo "Pushed gateway image: ${{ steps.image.outputs.image_uri }}"
+          echo "Use Production CD with gateway_image_tag=${{ steps.image.outputs.tag }} to roll Gateway."

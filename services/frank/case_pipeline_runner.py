@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,6 +25,7 @@ from services.frank.review_packet import (
 
 TERMINAL_STEP_STATUSES = {"COMPLETED", "FAILED", "SKIPPED"}
 TERMINAL_CASE_STATUSES = {"COMPLETED", "FAILED", "BLOCKED"}
+log = logging.getLogger("frank.case_pipeline")
 
 
 def utc_now() -> str:
@@ -91,7 +94,7 @@ def resolve_subject_codebase_root(subject_id: str | None) -> str | None:
         if pattern and root and subject.startswith(pattern):
             return root
     if subject.startswith("http://localhost:3000") or subject.startswith("http://host.docker.internal:3000"):
-        default_root = "/Users/bananawalnut/repos/zenith-hub"
+        default_root = os.environ.get("FRANK_DEFAULT_SUBJECT_CODEBASE_ROOT", "/workspace/zenith-hub")
         if Path(default_root).exists():
             return default_root
     return None
@@ -265,6 +268,43 @@ class CasePipelineRunner:
             "events": events_payload,
         }
 
+    async def _post_stt_transcribe(self, audio_path: str, *, attempts: int = 4, retry_delay_s: float = 5.0) -> dict[str, Any]:
+        last_exc: Exception | None = None
+        audio = Path(audio_path)
+        metadata = {
+            "tool": "stt-http",
+            "audio_basename": audio.name,
+            "audio_size_bytes": audio.stat().st_size if audio.exists() and audio.is_file() else None,
+        }
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await self.client.post(
+                    f"{self.stt_url}/transcribe",
+                    json={"audio_path": audio_path},
+                    timeout=180.0,
+                )
+                response.raise_for_status()
+                return response.json()
+            except (httpx.RemoteProtocolError, httpx.TransportError) as exc:
+                last_exc = exc
+                next_delay_s = retry_delay_s * attempt
+                log.warning(
+                    "stt_transcribe_transport_error",
+                    extra={
+                        **metadata,
+                        "attempt": attempt,
+                        "max_attempts": attempts,
+                        "error_type": type(exc).__name__,
+                        "next_delay_s": None if attempt >= attempts else next_delay_s,
+                    },
+                )
+                if attempt >= attempts:
+                    raise
+                await asyncio.sleep(next_delay_s)
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("stt transcription did not return a response")
+
     async def execute_step_2(self, case_run_id: str, step_run_id: str, case_detail: dict[str, Any], case_dir: Path) -> dict[str, Any]:
         slots = read_slot_values(case_detail)
         audio_path = str(slots.get("audio_asset_path") or "").strip()
@@ -273,13 +313,7 @@ class CasePipelineRunner:
         span = await self.create_span(case_run_id, step_run_id, "stt-http transcription", metadata={"tool": "stt-http"})
         span_id = str(span["id"])
         await self.emit_event(case_run_id, "tool.call.started", "stt-http transcription started", step_run_id=step_run_id, span_id=span_id, metadata={"tool": "stt-http"})
-        response = await self.client.post(
-            f"{self.stt_url}/transcribe",
-            json={"audio_path": audio_path},
-            timeout=120.0,
-        )
-        response.raise_for_status()
-        payload = response.json()
+        payload = await self._post_stt_transcribe(audio_path)
         words = self.normalize_words(payload.get("words") or [])
         audio_offset_ms = int(words[0].get("start_ms") or 0) if words else 0
         transcript_payload = {
@@ -590,19 +624,59 @@ class CasePipelineRunner:
         response.raise_for_status()
 
     async def create_case_run(self, case_id: str, dispatch_packet: dict[str, Any]) -> dict[str, Any]:
-        response = await self.client.post(
-            f"{self.cases_url}/cases/{case_id}/runs",
-            json={
-                "runtime_mode": "native_case_pipeline",
-                "runner": "frank.case_pipeline",
-                "status": "running",
-                "idempotency_key": f"native_case_pipeline:{case_id}",
-                "metadata": {"event_type": dispatch_packet.get("event_type")},
-            },
-            timeout=10.0,
-        )
+        idempotency_key = f"native_case_pipeline:{case_id}"
+        payload = {
+            "runtime_mode": "native_case_pipeline",
+            "runner": "frank.case_pipeline",
+            "status": "running",
+            "idempotency_key": idempotency_key,
+            "metadata": {"event_type": dispatch_packet.get("event_type")},
+        }
+        try:
+            response = await self.client.post(
+                f"{self.cases_url}/cases/{case_id}/runs",
+                json=payload,
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ReadTimeout:
+            log.warning(
+                "case_run_create_timeout_recovering",
+                extra={"case_id": case_id, "idempotency_key": idempotency_key},
+            )
+            existing = await self.find_case_run_by_idempotency_key(case_id, idempotency_key)
+            if existing is not None:
+                existing["reused_after_timeout"] = True
+                log.info(
+                    "case_run_reused_after_timeout",
+                    extra={"case_id": case_id, "case_run_id": existing.get("id")},
+                )
+                return existing
+            try:
+                retry_response = await self.client.post(
+                    f"{self.cases_url}/cases/{case_id}/runs",
+                    json=payload,
+                    timeout=20.0,
+                )
+                retry_response.raise_for_status()
+                retry_payload = retry_response.json()
+                retry_payload["retried_after_timeout"] = True
+                return retry_payload
+            except Exception:
+                log.exception(
+                    "case_run_retry_after_timeout_failed",
+                    extra={"case_id": case_id, "idempotency_key": idempotency_key},
+                )
+                raise
+
+    async def find_case_run_by_idempotency_key(self, case_id: str, idempotency_key: str) -> dict[str, Any] | None:
+        response = await self.client.get(f"{self.cases_url}/cases/{case_id}/runs", timeout=10.0)
         response.raise_for_status()
-        return response.json()
+        for run in (response.json().get("case_runs") or []):
+            if run.get("idempotency_key") == idempotency_key:
+                return dict(run)
+        return None
 
     async def update_case_run(self, case_run_id: str, status: str, *, metadata: dict[str, Any] | None = None) -> None:
         response = await self.client.put(

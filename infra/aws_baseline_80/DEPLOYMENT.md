@@ -1,3 +1,174 @@
+<!-- PROD_READINESS_PROJECT_A -->
+# Hub Production Readiness and Deployment Notes
+
+This document is the operator runbook for production readiness checks, deployment access paths, and drift-safe Hub operations.
+
+Current production target:
+
+- AWS profile: `zenith-hermes`
+- AWS region: `us-east-1`
+- ECS cluster: `zenith-hub-prod-cluster`
+- Public Hub URL: `https://hub.zenith-research.ca`
+- Internal service discovery namespace: `zenith-hub-prod.local`
+
+Safety rules:
+
+- Do not print tokens, review codes, DB passwords, API keys, session tokens, or access-code hashes.
+- Read admin/operator credentials from environment, macOS Keychain, AWS Secrets Manager, or GitHub environment secrets only.
+- Do not run broad production `terraform apply` until live drift is codified/imported or explicitly marked script-managed.
+- Do not reset local Docker data until production access, backup/export, CI, deploy, and local-recreate paths are verified.
+- Do not build images that bake multi-GB GGUF model files from the local laptop.
+
+---
+
+## Project A readiness smoke
+
+Run the smoke script from the Hub repo root:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode public
+```
+
+Public mode checks only unauthenticated public endpoints and is safe to run without credentials.
+
+Operator mode checks admin/cases/queue reachability. It reads the admin token from `REVIEW_ACCESS_ADMIN_TOKEN` or macOS Keychain service `zenith-hub-review-access-admin-token` and never prints the value:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode operator
+```
+
+Internal mode checks ECS service state for the expected production services:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode internal
+```
+
+Internal private endpoint probes are opt-in because they run a one-off ECS task in the production VPC:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode internal --run-internal-probes
+```
+
+Expected output shape:
+
+```json
+{
+  "files": ["scripts/prod_smoke.py", "infra/aws_baseline_80/DEPLOYMENT.md"],
+  "tests": [],
+  "deploy": {},
+  "blocker": "none",
+  "next": "..."
+}
+```
+
+If any check fails, the script exits non-zero and sets `blocker` to the failing check names.
+
+---
+
+## Production service inventory to preserve
+
+Expected production services:
+
+- `zenith-hub-prod-gateway-http`
+- `zenith-hub-prod-runtime-grpc`
+- `zenith-hub-prod-tool-sandbox`
+- `zenith-hub-prod-queue`
+- `zenith-hub-prod-cases`
+- `zenith-hub-prod-eventbus`
+- `zenith-hub-prod-stt-http`
+- `zenith-hub-prod-frank`
+- `zenith-hub-prod-llama-server`
+
+Known current production contracts:
+
+- STT must stay at or above CPU `1024`, memory `2048`; lower memory previously caused OOM during Whisper transcription.
+- Frank uses `FRANK_RUNTIME=native_case_pipeline`.
+- Frank model-backed paths use `FRANK_MODEL=Qwen3.5-9B-Q4_K_M.gguf` and `OPENAI_BASE_URL=http://llama-server.zenith-hub-prod.local:3690/v1`.
+- Internal llama-server auth uses no bearer token / none-equivalent; do not add a raw API key for this internal endpoint.
+- Llama-server is private/internal only and should not get public ALB ingress.
+- The Qwen GGUF model is staged through private S3 -> one-shot ECS preload -> EFS -> read-only task mount, not through a local-built Docker image.
+
+---
+
+## Data access paths to prove before Docker reset
+
+Before treating local Docker volumes as disposable, verify and document these paths:
+
+1. Public Hub health
+   - command: `python3 scripts/prod_smoke.py --target prod --mode public`
+   - proves: public gateway is reachable.
+
+2. Gateway admin/cases/queue reachability
+   - command: `python3 scripts/prod_smoke.py --target prod --mode operator`
+   - credential source: `REVIEW_ACCESS_ADMIN_TOKEN` env var or macOS Keychain service `zenith-hub-review-access-admin-token`
+   - proves: operator can inspect cases and queue without exposing credentials.
+
+3. ECS service state
+   - command: `python3 scripts/prod_smoke.py --target prod --mode internal`
+   - proves: required ECS services are ACTIVE and desired/running counts match.
+
+4. Internal STT and llama-server reachability
+   - command: `python3 scripts/prod_smoke.py --target prod --mode internal --run-internal-probes`
+   - proves: private Hub services can reach STT and llama-server through service discovery.
+
+5. Review-auth database access
+   - source of truth: production Postgres/RDS clients registry.
+   - access path: approved in-VPC/admin path only; do not ferry DB contents through S3 or local files without explicit approval.
+   - proof to add: redacted session-auth smoke or safe row-count/query that does not print codes/hashes/tokens.
+
+6. Cases/runs/logs access
+   - source of truth: production cases service/storage.
+   - access path: Gateway admin cases endpoint or internal cases service through approved operator path.
+   - proof to add: redacted case list/detail smoke.
+
+7. Review artifacts and model artifacts
+   - source of truth: production storage/EFS/S3 path used by runtime.
+   - model path to preserve: `/data/llama/Qwen3.5-9B-Q4_K_M.gguf` on EFS, mounted read-only as `/models/llama/Qwen3.5-9B-Q4_K_M.gguf`.
+   - proof to add: size/hash/path check without printing credentials.
+
+### Llama-server model staging
+
+The Qwen GGUF model artifact is staged through private S3 and a one-shot ECS preload task, not by baking the multi-GB model into a Docker image.
+
+1. Upload the local GGUF to the private model bucket and preload it into Frank EFS:
+
+```bash
+python3 scripts/stage_llama_model.py \
+  --workdir . \
+  --upload-local /path/to/Qwen3.5-9B-Q4_K_M.gguf \
+  --expected-sha256 03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8
+```
+
+2. If the object is already in S3, run only the private ECS preload task:
+
+```bash
+python3 scripts/stage_llama_model.py --workdir . --expected-sha256 03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8
+```
+
+3. Verify llama-server after staging:
+
+```bash
+python3 scripts/prod_smoke.py --target prod --mode internal --run-internal-probes
+```
+
+The preload task mounts Frank EFS writable at `/models`, downloads `s3://<bucket>/models/Qwen3.5-9B-Q4_K_M.gguf`, verifies SHA256 when provided, and atomically moves the artifact into `/models/llama/Qwen3.5-9B-Q4_K_M.gguf`. The llama-server service mounts the same EFS path read-only.
+
+8. Matrix data if Matrix local volumes are reset
+   - source of truth must be explicit before reset: Matrix DB, media, signing keys, and appservice registrations.
+   - generated runtime config belongs under `/data`, not tracked templates.
+
+---
+
+## Rollback and drift warnings
+
+- If production smoke fails after a deploy, roll back to the previous ECS task definition before broad debugging.
+- If a Terraform plan wants to reduce STT CPU/memory below `1024/2048`, stop.
+- If a Terraform plan wants to remove or publicly expose `zenith-hub-prod-llama-server`, stop.
+- If a Terraform plan wants to mutate durable RDS/EFS/S3 resources unexpectedly, stop.
+- If a deploy path requires local Docker Desktop to build production images, stop and move the build to CI/CodeBuild.
+
+---
+
 # Agent Platform — AWS Baseline (~$80/mo)
 
 Baseline targets ~100 DAU with a simple always-on footprint:
@@ -63,7 +234,7 @@ terraform init \
   -backend-config="bucket=$STATE_BUCKET" \
   -backend-config="key=agent-platform/${AWS_REGION}/baseline80.tfstate" \
   -backend-config="region=$AWS_REGION" \
-  -backend-config="dynamodb_table=$LOCK_TABLE" \
+  -backend-config="use_lockfile=true" \
   -backend-config="encrypt=true"
 
 terraform plan
@@ -189,15 +360,51 @@ curl -sS -X POST "http://$ALB_DNS/v1/messages" \
 
 ---
 
-## Rollback
+## Project E: manual production CD baseline
 
-Roll back by reverting the `image_tag` to a previous immutable tag and running:
+Production CD starts as a manual GitHub Actions workflow, not an automatic deploy path:
+
+- Workflow: `.github/workflows/production-cd.yml`
+- OIDC/IAM setup reference: `infra/aws_baseline_80/GITHUB_OIDC.md`
+- Environment: `production` — configure GitHub environment approval before allowing applies.
+- AWS auth: OIDC only via repository/environment variable `AWS_PROD_DEPLOY_ROLE_ARN`; do not store long-lived AWS keys.
+- Terraform variables: store the production tfvars file as secret `PROD_TERRAFORM_TFVARS_B64`:
 
 ```bash
-terraform apply
+base64 -i infra/aws_baseline_80/terraform.tfvars | pbcopy
 ```
 
-Or force-deploy the prior tag by updating the task definition revision and redeploying (ECS console / CLI).
+Paste the copied value into the GitHub Actions secret. Do not commit the real tfvars file.
+
+The workflow has three actions:
+
+- `smoke`: public production smoke only; no Terraform.
+- `plan`: initializes the real backend, runs fmt/validate, produces a production Terraform plan, and uploads the plan text artifact.
+- `apply`: requires GitHub environment approval plus exact confirmation text `APPLY zenith-hub-prod`; runs the reviewed plan and then public smoke.
+
+Current production hotfix image tags are explicit workflow inputs so Terraform does not accidentally regress cases/Frank/STT back to the shared image tag:
+
+- cases: `native-timeout-hotfix-20260519004401`
+- Frank: `frank-stt-backoff-hotfix-20260519190823`
+- STT: `stt-cache-hotfix-20260519013103`
+
+Local operator equivalent:
+
+```bash
+AWS_PROFILE=zenith-hermes AWS_REGION=us-east-1 \
+  PROD_TFVARS_PATH=/path/to/local/prod/terraform.tfvars \
+  scripts/prod_terraform_cd.sh plan
+```
+
+Only use `scripts/prod_terraform_cd.sh apply` after reviewing the saved plan text and confirming the production change window.
+
+---
+
+## Rollback
+
+Roll back by reverting the `image_tag` or service-specific image tag override to a previous immutable tag and running a reviewed production plan/apply through `.github/workflows/production-cd.yml` or `scripts/prod_terraform_cd.sh`.
+
+For urgent ECS-only rollback, update the affected service back to the prior task definition revision in ECS, then codify that revision/tag in Terraform immediately after the incident.
 
 ---
 

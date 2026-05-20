@@ -3,6 +3,13 @@
 !.env.example
 .env.local
 .terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.tfvars
+*.tfvars.json
+*.tfbackend.local
+infra/aws_baseline_80/last-image-tag.local
 .venv*
 __pycache__/
 *.pyc
@@ -26,6 +33,9 @@ agent_platform.egg-info/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+*.log
 data/*
 !data/.gitkeep
 rolodex/agents/*/.skills_prompt_snapshot.json

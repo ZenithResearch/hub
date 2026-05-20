@@ -2,6 +2,21 @@
 
 This repo supports multiple deployment “shapes” without application code changes (configuration only via environment variables and secrets).
 
+Canonical deployment profile contract:
+
+- [`DEPLOYMENT_PROFILES.md`](DEPLOYMENT_PROFILES.md)
+- [`deployment-profiles.yaml`](deployment-profiles.yaml)
+
+External local operational substrate contract:
+
+- [`EXTERNAL_ROOTS.md`](EXTERNAL_ROOTS.md)
+- [`external-roots.yaml`](external-roots.yaml)
+
+Agent model/profile configuration contract:
+
+- [`MODEL_PROFILES.md`](MODEL_PROFILES.md)
+- [`model-profiles.yaml`](model-profiles.yaml)
+
 New to the repo? Follow [`doc/setup.md`](../doc/setup.md) first for GitHub SSH + AWS prerequisites and the `.env.local` workflow.
 
 ## Choose a path

@@ -1,0 +1,119 @@
+name: Production CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to run. apply requires exact confirmation."
+        type: choice
+        required: true
+        default: plan
+        options:
+          - smoke
+          - plan
+          - apply
+      confirm_apply:
+        description: "For apply only, type: APPLY zenith-hub-prod"
+        required: false
+        default: ""
+      gateway_image_tag:
+        description: "Production gateway-http image tag override. Use a tag built by Gateway Image when deploying new Gateway code."
+        required: false
+        default: gateway-admin-queue-case-20260518003135-5ae0998
+      cases_image_tag:
+        description: "Production cases image tag override to preserve live hotfixes."
+        required: true
+        default: native-timeout-hotfix-20260519004401
+      frank_image_tag:
+        description: "Production Frank image tag override to preserve live hotfixes."
+        required: true
+        default: frank-stt-backoff-hotfix-20260519190823
+      stt_image_tag:
+        description: "Production STT image tag override to preserve live hotfixes."
+        required: true
+        default: stt-cache-hotfix-20260519013103
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+jobs:
+  production:
+    name: Production ${{ inputs.action }}
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate apply confirmation
+        if: inputs.action == 'apply' && inputs.confirm_apply != 'APPLY zenith-hub-prod'
+        run: |
+          echo "Apply requires exact confirmation: APPLY zenith-hub-prod" >&2
+          exit 2
+
+      - name: Configure AWS credentials by OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PROD_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" pytest
+
+      - name: Set up Terraform
+        if: inputs.action != 'smoke'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.0"
+
+      - name: Decode production tfvars
+        if: inputs.action != 'smoke'
+        env:
+          PROD_TERRAFORM_TFVARS_B64: ${{ secrets.PROD_TERRAFORM_TFVARS_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$PROD_TERRAFORM_TFVARS_B64"
+          umask 077
+          mkdir -p "$RUNNER_TEMP/hub-prod"
+          printf '%s' "$PROD_TERRAFORM_TFVARS_B64" | base64 -d > "$RUNNER_TEMP/hub-prod/terraform.tfvars"
+
+      - name: Preflight public smoke
+        run: python scripts/prod_smoke.py --target prod --mode public
+
+      - name: Terraform plan/apply
+        if: inputs.action != 'smoke'
+        env:
+          PROD_TFVARS_PATH: ${{ runner.temp }}/hub-prod/terraform.tfvars
+          TERRAFORM_PLAN_PATH: ${{ runner.temp }}/hub-prod/hub-prod.tfplan
+          TERRAFORM_PLAN_TEXT: ${{ runner.temp }}/hub-prod/hub-prod-plan.txt
+          GATEWAY_IMAGE_TAG: ${{ inputs.gateway_image_tag }}
+          CASES_IMAGE_TAG: ${{ inputs.cases_image_tag }}
+          FRANK_IMAGE_TAG: ${{ inputs.frank_image_tag }}
+          STT_IMAGE_TAG: ${{ inputs.stt_image_tag }}
+        run: scripts/prod_terraform_cd.sh "${{ inputs.action }}"
+
+      - name: Upload Terraform plan text
+        if: inputs.action != 'smoke' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hub-prod-terraform-plan
+          path: ${{ runner.temp }}/hub-prod/hub-prod-plan.txt
+          if-no-files-found: ignore
+
+      - name: Post-deploy public smoke
+        if: inputs.action == 'apply'
+        run: python scripts/prod_smoke.py --target prod --mode public

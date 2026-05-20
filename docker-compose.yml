@@ -1,4 +1,20 @@
 services:
+
+  clients-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${CLIENTS_PG_DATABASE:-hub_clients}
+      POSTGRES_USER: ${CLIENTS_PG_USER:-hub_clients}
+      POSTGRES_PASSWORD: ${CLIENTS_PG_PASSWORD:-hub_clients_dev_password}
+    volumes:
+      - clients_postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+
   qdrant:
     image: qdrant/qdrant:latest
     expose:
@@ -142,6 +158,13 @@ services:
       QUEUE_HTTP_URL: http://queue:8081
       EVENTBUS_URL: http://eventbus:8082
       REVIEWS_DATA_DIR: /data/reviews
+      CLIENTS_DB_BACKEND: ${CLIENTS_DB_BACKEND:-postgres}
+      REVIEW_ACCESS_ADMIN_TOKEN: ${REVIEW_ACCESS_ADMIN_TOKEN:-}
+      CLIENTS_PG_HOST: ${CLIENTS_PG_HOST:-clients-postgres}
+      CLIENTS_PG_PORT: ${CLIENTS_PG_PORT:-5432}
+      CLIENTS_PG_DATABASE: ${CLIENTS_PG_DATABASE:-hub_clients}
+      CLIENTS_PG_USER: ${CLIENTS_PG_USER:-hub_clients}
+      CLIENTS_PG_PASSWORD: ${CLIENTS_PG_PASSWORD:-hub_clients_dev_password}
       HERMES_HOME: /hub/.hermes
       HERMES_SESSION_ROOTS: /hub/.hermes
       HUB_CONFIG_SECRETS_PATH: /hub/.hermes/config-secrets.env
@@ -159,6 +182,7 @@ services:
       - runtime-grpc
       - queue
       - eventbus
+      - clients-postgres
     networks:
       - agentnet
     security_opt:
@@ -321,7 +345,7 @@ services:
       TOOL_DIR: ${TOOL_DIR:-/app/libs/tools}
       HERMES_PROFILE_ROOT: /hub/.hermes/profiles
       FRANK_EXECUTION_ROOT: /hub/.hermes/frank_execution
-      FRANK_SUBJECT_CODEBASE_MAP: ${FRANK_SUBJECT_CODEBASE_MAP:-http://localhost:3000=/Users/bananawalnut/repos/zenith-hub;http://host.docker.internal:3000=/Users/bananawalnut/repos/zenith-hub}
+      FRANK_SUBJECT_CODEBASE_MAP: ${FRANK_SUBJECT_CODEBASE_MAP:-http://localhost:3000=/workspace/zenith-hub;http://host.docker.internal:3000=/workspace/zenith-hub}
       HUB_CONFIG_SECRETS_PATH: /hub/.hermes/config-secrets.env
       RECONNECT_DELAY_S: ${FRANK_RECONNECT_DELAY_S:-5}
       REVIEWS_DATA_DIR: /data/reviews
@@ -331,7 +355,7 @@ services:
       - ./.hermes:/hub/.hermes
       - ./rolodex/agents/frank:/hub/rolodex/agents/frank
       - reviews_data:/data/reviews:ro
-      - ${FRANK_ZENITH_HUB_PATH:-/Users/bananawalnut/repos/zenith-hub}:/Users/bananawalnut/repos/zenith-hub:ro
+      - ${FRANK_ZENITH_HUB_PATH:-./repos/workspace/zenith-hub}:/workspace/zenith-hub:ro
     depends_on:
       - queue
       - eventbus
@@ -408,6 +432,7 @@ networks:
     external: true
 
 volumes:
+  clients_postgres_data:
   qdrant_data:
   queue_data:
   feeds_data:

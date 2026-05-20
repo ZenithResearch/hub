@@ -1,0 +1,165 @@
+schema_version: 1
+status: project-h-contract
+principles:
+  - ZenithOS is the operator control surface, not the model-call executor.
+  - Hub resolves effective model/profile config at runtime.
+  - Secrets are referenced by handles only and must not appear in this file.
+  - Environment variables remain a bootstrap bridge, not the durable product surface.
+
+deployment_profiles:
+  - local-dev
+  - self-hosted-single-node
+  - cloud-aws-staging
+  - cloud-aws-prod
+
+providers:
+  hub-internal-openai-compatible:
+    kind: openai-compatible
+    trust_boundary: private-hub-network
+    secret_policy: none-or-secret-handle-only
+    supports_streaming: false
+    default_connectivity_check: chat_completion_smoke
+  external-openai-compatible:
+    kind: openai-compatible
+    trust_boundary: external-provider
+    secret_policy: secret-handle-required
+    supports_streaming: true
+    default_connectivity_check: models_or_chat_completion_smoke
+
+endpoints:
+  prod-llama-server:
+    provider: hub-internal-openai-compatible
+    base_url: http://llama-server.zenith-hub-prod.local:3690/v1
+    visibility: private-vpc-only
+    deployment_profiles: [cloud-aws-prod]
+    auth: none
+    notes: Current production Frank native-review Qwen endpoint.
+  local-llama-server:
+    provider: hub-internal-openai-compatible
+    base_url: http://localhost:3690/v1
+    visibility: operator-local-only
+    deployment_profiles: [local-dev]
+    auth: none
+    notes: Optional disposable local development endpoint when explicitly started.
+
+secret_refs:
+  none:
+    kind: no-secret-required
+    display: No bearer secret; internal/private endpoint only.
+  hub-secret-handle:
+    kind: secret-manager-handle
+    display: Hub/AWS/Keychain-backed handle; raw value is never stored here.
+
+fallback_policies:
+  none:
+    mode: fail_visible
+    max_attempts: 1
+  fast_then_visible_block:
+    mode: fallback_profile_then_block
+    max_attempts: 2
+    operator_visible: true
+
+agents:
+  frank:
+    owner: hub-runtime
+    persona_type: orchestrator
+    description: Native review/case pipeline runtime owner.
+    profiles:
+      review_brief_compiler:
+        purpose: Compile review observations, transcript evidence, and code context into implementation-ready review briefs.
+        runtime_surface: native_case_pipeline
+        capability_expectations:
+          - openai_compatible_chat_completion
+          - structured_review_reasoning
+        bindings:
+          cloud-aws-prod:
+            provider: hub-internal-openai-compatible
+            endpoint_ref: prod-llama-server
+            model: Qwen3.5-9B-Q4_K_M.gguf
+            secret_ref: none
+            temperature: 0.2
+            max_tokens: 2048
+            timeout_seconds: 120
+            cost_tier: internal-low-cost
+            latency_tier: medium
+            fallback_profile: fallback_fast
+            bootstrap_env:
+              FRANK_MODEL: Qwen3.5-9B-Q4_K_M.gguf
+              OPENAI_BASE_URL: http://llama-server.zenith-hub-prod.local:3690/v1
+            auth_policy: Runtime auth uses a none-equivalent placeholder, never a real bearer secret in config.
+          local-dev:
+            provider: hub-internal-openai-compatible
+            endpoint_ref: local-llama-server
+            model: Qwen3.5-9B-Q4_K_M.gguf
+            secret_ref: none
+            temperature: 0.2
+            max_tokens: 2048
+            timeout_seconds: 120
+            cost_tier: local-disposable
+            latency_tier: variable
+            fallback_profile: fallback_fast
+      review_reasoning:
+        purpose: Perform heavier synthesis or adjudication for review cases when a stronger profile is available.
+        runtime_surface: native_case_pipeline
+        capability_expectations:
+          - openai_compatible_chat_completion
+          - longer_context_reasoning
+        bindings:
+          cloud-aws-prod:
+            provider: hub-internal-openai-compatible
+            endpoint_ref: prod-llama-server
+            model: Qwen3.5-9B-Q4_K_M.gguf
+            secret_ref: none
+            temperature: 0.1
+            max_tokens: 4096
+            timeout_seconds: 180
+            cost_tier: internal-low-cost
+            latency_tier: slower
+            fallback_profile: review_brief_compiler
+      fallback_fast:
+        purpose: Cheap, bounded fallback for degraded review compilation paths.
+        runtime_surface: native_case_pipeline
+        capability_expectations:
+          - openai_compatible_chat_completion
+        bindings:
+          cloud-aws-prod:
+            provider: hub-internal-openai-compatible
+            endpoint_ref: prod-llama-server
+            model: Qwen3.5-9B-Q4_K_M.gguf
+            secret_ref: none
+            temperature: 0.0
+            max_tokens: 1024
+            timeout_seconds: 60
+            cost_tier: internal-low-cost
+            latency_tier: fast
+            fallback_profile: none
+  sophia:
+    owner: comms-profile
+    persona_type: comms
+    description: Communications/profile surface; not an internal case executor.
+    profiles: {}
+
+zenithos_operator_surface:
+  route_shape: Agents -> Agent -> Profiles -> Profile -> Provider/Model/Fallback -> Test -> Save
+  must_show:
+    - effective_config_without_secrets
+    - defaults_vs_overrides
+    - last_connectivity_check
+    - fallback_policy
+    - audit_trail
+  must_not_show:
+    - raw_provider_secret
+    - raw_admin_token
+    - raw_runtime_env_secret
+
+audit:
+  required_fields:
+    - actor
+    - changed_at
+    - agent
+    - profile
+    - deployment_profile
+    - old_effective_config_hash
+    - new_effective_config_hash
+    - connectivity_check_result
+  storage_owner: Hub

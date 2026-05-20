@@ -12,3 +12,8 @@ __pycache__/
 .cursor/
 .DS_Store
 *.log
+# Runtime/local state must never be baked into service images.
+data/*.db
+data/*.db-*
+data/aws-seed/
+data/reviews/

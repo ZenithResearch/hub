@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hmac
 import json
-import os
 import re
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
+from urllib.parse import quote_plus, urlparse
 
 import grpc
 import httpx
@@ -18,6 +20,13 @@ from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 
 from libs.common.config import GatewaySettings
 from libs.common.logging import configure_logging
+from libs.common.model_profiles import (
+    ModelProfileResolutionError,
+    check_model_profile_connectivity,
+    load_model_profile_contract,
+    resolve_effective_model_profile,
+    update_model_profile_binding,
+)
 from libs.common.proto import agent_pb2, agent_pb2_grpc
 from libs.common.schemas import (
     HttpInvokeToolIn,
@@ -29,6 +38,72 @@ from libs.common.schemas import (
 )
 
 from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
+from .review_auth import ReviewAuthSession, create_review_auth_store
+
+
+class ReviewAuthSessionIn(BaseModel):
+    project_id: str
+    deployment_id: str
+    email: str | None = None
+    access_code: str
+    subject_id: str
+
+
+class ReviewDeploymentRegisterIn(BaseModel):
+    project_id: str
+    deployment_slug: str
+    branch: str
+    allowed_origin: str
+    subject_pattern: str
+    vercel_deployment_id: str | None = None
+    commit_sha: str | None = None
+
+
+class ReviewDeploymentRegisterOut(BaseModel):
+    deployment: dict[str, Any]
+    secrets_printed: bool = False
+
+
+class ReviewAccessRotateIn(BaseModel):
+    client_id: str
+    client_slug: str
+    client_name: str
+    rolodex_entry_path: str | None = None
+    project_id: str
+    project_slug: str
+    project_name: str
+    deployment_id: str | None = None
+    deployment_slug: str | None = None
+    allowed_origin: str | None = None
+    subject_pattern: str | None = None
+    access_code_id: str
+    access_label: str
+    access_email: str | None = None
+    mode: Literal["generate", "provided"] = "generate"
+    access_code: str | None = None
+    deployment_scoped_access: bool = False
+
+
+class ReviewAccessRotateOut(BaseModel):
+    client_id: str
+    project_id: str
+    deployment_id: str | None = None
+    access_code_id: str
+    access_label: str
+    raw_code: str | None = None
+    raw_code_present: bool = False
+    project_scoped_access: bool
+    email_configured: bool
+    active: bool
+    last_rotated_at: str
+    secrets_printed: bool = False
+
+
+class ReviewAccessCapabilitiesOut(BaseModel):
+    ok: bool
+    hub: str
+    capabilities: list[str]
+    secrets_printed: bool = False
 
 
 class ReviewAssetUploadOut(BaseModel):
@@ -42,10 +117,12 @@ class ReviewAssetUploadOut(BaseModel):
 class ReviewSubmitIn(BaseModel):
     review_id: str
     subject_id: str
-    submitted_by: str
+    submitted_by: str | None = None
     started_at: str
     stopped_at: str
     duration_ms: int
+    project_id: str
+    deployment_id: str
     asset_ids: list[str] = []
     events_asset_id: str | None = None
     audio_asset_id: str | None = None
@@ -72,6 +149,17 @@ class CaseFollowUpIn(BaseModel):
 
 class SecretUpdateIn(BaseModel):
     value: str
+
+
+class ModelProfileBindingUpdateIn(BaseModel):
+    updates: dict[str, Any]
+    connectivity_result: dict[str, Any] | None = None
+
+
+class ReviewAccessAdminTokenUpdateOut(BaseModel):
+    configured: bool
+    capabilities: list[str]
+    secrets_printed: bool = False
 
 
 def _read_secret_file(path: Path) -> dict[str, str]:
@@ -331,11 +419,31 @@ def create_app() -> FastAPI:
             }
         )
 
+    def _clients_postgres_dsn() -> str:
+        explicit = (settings.clients_database_url or "").strip()
+        if explicit:
+            return explicit
+        if not settings.clients_pg_host or not settings.clients_pg_password:
+            return ""
+        user = quote_plus(settings.clients_pg_user)
+        password = quote_plus(settings.clients_pg_password)
+        host = settings.clients_pg_host
+        port = settings.clients_pg_port
+        database = quote_plus(settings.clients_pg_database)
+        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
     # Review intake storage
     reviews_dir = Path(settings.reviews_data_dir)
     assets_dir = reviews_dir / "assets"
     reviews_dir.mkdir(parents=True, exist_ok=True)
     assets_dir.mkdir(parents=True, exist_ok=True)
+    review_auth_store = create_review_auth_store(
+        backend=settings.clients_db_backend,
+        db_path=settings.clients_db_path,
+        postgres_dsn=_clients_postgres_dsn(),
+        session_ttl_seconds=settings.review_session_ttl_seconds,
+    )
+    app.state.review_auth_store = review_auth_store
     secret_path = Path(settings.hub_config_secrets_path)
     allowed_secret_keys = {"ELEVENLABS_API_KEY"}
 
@@ -381,6 +489,238 @@ def create_app() -> FastAPI:
         configured = bool(values.get("ELEVENLABS_API_KEY"))
         return JSONResponse({"ok": configured, "missing": [] if configured else ["ELEVENLABS_API_KEY"]})
 
+    def _effective_review_access_admin_token() -> str:
+        values = _read_secret_file(secret_path)
+        dynamic = (values.get("REVIEW_ACCESS_ADMIN_TOKEN") or "").strip()
+        if dynamic:
+            return dynamic
+        return settings.review_access_admin_token.strip()
+
+    def _review_access_admin_capabilities() -> list[str]:
+        return ["review_access_admin", "review_access_rotate"]
+
+    def _require_review_access_admin(request: Request) -> None:
+        expected = _effective_review_access_admin_token()
+        if not expected:
+            raise HTTPException(status_code=503, detail="review access admin token is not configured")
+        authorization = request.headers.get("authorization") or ""
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="invalid review access admin token")
+        if not hmac.compare_digest(token.strip(), expected):
+            raise HTTPException(status_code=401, detail="invalid review access admin token")
+
+    @app.put("/v1/admin/review-auth/admin-token", response_model=ReviewAccessAdminTokenUpdateOut)
+    async def put_review_access_admin_token(payload: SecretUpdateIn, request: Request) -> JSONResponse:
+        existing = _effective_review_access_admin_token()
+        if existing:
+            _require_review_access_admin(request)
+        raw_value = payload.value
+        if "\n" in raw_value or "\r" in raw_value:
+            raise HTTPException(status_code=422, detail="admin token must be single-line")
+        value = raw_value.strip()
+        if len(value) < 32:
+            raise HTTPException(status_code=422, detail="admin token must be at least 32 characters")
+        values = _read_secret_file(secret_path)
+        values["REVIEW_ACCESS_ADMIN_TOKEN"] = value
+        _write_secret_file(secret_path, values)
+        return JSONResponse(
+            {
+                "configured": True,
+                "capabilities": _review_access_admin_capabilities(),
+                "secrets_printed": False,
+            }
+        )
+
+    @app.get("/v1/admin/review-auth/capabilities", response_model=ReviewAccessCapabilitiesOut)
+    async def get_review_access_admin_capabilities(request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
+        return JSONResponse(
+            {
+                "ok": True,
+                "hub": "gateway-http",
+                "capabilities": _review_access_admin_capabilities(),
+                "secrets_printed": False,
+            }
+        )
+
+    @app.get("/v1/admin/model-profiles/effective")
+    async def get_effective_model_profile(
+        request: Request,
+        agent: str,
+        profile: str,
+        deployment_profile: str,
+    ) -> JSONResponse:
+        _require_review_access_admin(request)
+        try:
+            contract = load_model_profile_contract(Path(settings.model_profiles_path), Path(settings.model_profile_overrides_path))
+            effective = resolve_effective_model_profile(
+                contract,
+                agent=agent,
+                profile=profile,
+                deployment_profile=deployment_profile,
+            )
+        except ModelProfileResolutionError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        return JSONResponse(effective)
+
+    @app.post("/v1/admin/model-profiles/connectivity-check")
+    async def post_model_profile_connectivity_check(
+        request: Request,
+        agent: str,
+        profile: str,
+        deployment_profile: str,
+    ) -> JSONResponse:
+        _require_review_access_admin(request)
+        try:
+            contract = load_model_profile_contract(Path(settings.model_profiles_path), Path(settings.model_profile_overrides_path))
+            effective = resolve_effective_model_profile(
+                contract,
+                agent=agent,
+                profile=profile,
+                deployment_profile=deployment_profile,
+            )
+            result = await check_model_profile_connectivity(effective)
+        except ModelProfileResolutionError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+        return JSONResponse(result, status_code=200 if result.get("ok") else 502)
+
+    @app.put("/v1/admin/model-profiles/bindings")
+    async def put_model_profile_binding(
+        payload: ModelProfileBindingUpdateIn,
+        request: Request,
+        agent: str,
+        profile: str,
+        deployment_profile: str,
+    ) -> JSONResponse:
+        _require_review_access_admin(request)
+        actor = (request.headers.get("x-zenith-operator") or "gateway-admin").strip()
+        try:
+            result = update_model_profile_binding(
+                contract_path=Path(settings.model_profiles_path),
+                overrides_path=Path(settings.model_profile_overrides_path),
+                audit_path=Path(settings.model_profile_audit_path),
+                agent=agent,
+                profile=profile,
+                deployment_profile=deployment_profile,
+                updates=payload.updates,
+                actor=actor,
+                connectivity_result=payload.connectivity_result,
+            )
+        except ModelProfileResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return JSONResponse(result)
+
+    async def _admin_proxy_get(upstream_url: str, request: Request, params: dict[str, str] | None = None) -> JSONResponse:
+        _require_review_access_admin(request)
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(upstream_url, params=params or None, timeout=10.0)
+        except httpx.RequestError:
+            raise HTTPException(status_code=502, detail="upstream admin service unavailable") from None
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {"detail": "upstream admin service returned non-json response"}
+        return JSONResponse(payload, status_code=response.status_code)
+
+    @app.get("/v1/admin/queues/workspace/peek")
+    async def admin_queue_workspace_peek(request: Request) -> JSONResponse:
+        params = {
+            key: value
+            for key, value in request.query_params.items()
+            if key in {"n", "limit", "status", "visibility_timeout"}
+        }
+        return await _admin_proxy_get(f"{settings.queue_http_url}/queues/workspace/peek", request, params)
+
+    @app.get("/v1/admin/cases")
+    async def admin_cases(request: Request) -> JSONResponse:
+        params = {
+            key: value
+            for key, value in request.query_params.items()
+            if key in {"status", "limit"}
+        }
+        return await _admin_proxy_get(f"{settings.cases_http_url}/cases", request, params)
+
+    @app.get("/v1/admin/cases/{case_id}")
+    async def admin_case_detail(case_id: str, request: Request) -> JSONResponse:
+        return await _admin_proxy_get(f"{settings.cases_http_url}/cases/{case_id}", request)
+
+    def _validate_review_access_rotation(payload: ReviewAccessRotateIn) -> str:
+        has_deployment_metadata = any(
+            bool((value or "").strip())
+            for value in (payload.deployment_id, payload.deployment_slug, payload.allowed_origin, payload.subject_pattern)
+        )
+        if payload.deployment_scoped_access and not (payload.deployment_id or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="deployment_id is required for deployment-scoped access",
+            )
+        if has_deployment_metadata:
+            missing = [
+                name
+                for name, value in {
+                    "deployment_id": payload.deployment_id,
+                    "allowed_origin": payload.allowed_origin,
+                    "subject_pattern": payload.subject_pattern,
+                }.items()
+                if not (value or "").strip()
+            ]
+            if missing:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"incomplete deployment metadata: missing {', '.join(missing)}",
+                )
+            parsed_origin = urlparse(payload.allowed_origin or "")
+            parsed_subject = urlparse((payload.subject_pattern or "").split("*", 1)[0])
+            if not parsed_origin.scheme or not parsed_origin.netloc or parsed_origin.path not in ("", "/"):
+                raise HTTPException(status_code=422, detail="allowed_origin must be an origin")
+            hostname = (parsed_origin.hostname or "").lower()
+            if hostname in {"localhost", "127.0.0.1", "::1"}:
+                if parsed_origin.scheme.lower() not in {"http", "https"}:
+                    raise HTTPException(status_code=422, detail="local review origins must use http or https")
+            elif parsed_origin.scheme.lower() != "https":
+                raise HTTPException(status_code=422, detail="review origins must use https outside local development")
+            if parsed_subject.scheme.lower() != parsed_origin.scheme.lower() or parsed_subject.netloc.lower() != parsed_origin.netloc.lower():
+                raise HTTPException(status_code=422, detail="subject_pattern origin must match allowed_origin")
+        if payload.mode == "provided":
+            code = (payload.access_code or "").strip()
+            if len(code) < 16:
+                raise HTTPException(status_code=422, detail="access_code must be at least 16 characters")
+            return code
+        return "zrv_" + secrets.token_urlsafe(32)
+
+    @app.post("/v1/admin/review-auth/access-codes/rotate", response_model=ReviewAccessRotateOut)
+    async def rotate_review_access_code(payload: ReviewAccessRotateIn, request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
+        raw_code = _validate_review_access_rotation(payload)
+        result = review_auth_store.rotate_access_code(
+            client_id=payload.client_id.strip(),
+            client_slug=payload.client_slug.strip(),
+            client_name=payload.client_name.strip(),
+            rolodex_entry_path=(payload.rolodex_entry_path or "").strip() or None,
+            project_id=payload.project_id.strip(),
+            project_slug=payload.project_slug.strip(),
+            project_name=payload.project_name.strip(),
+            deployment_id=(payload.deployment_id or "").strip() or None,
+            deployment_slug=(payload.deployment_slug or "").strip() or None,
+            allowed_origin=(payload.allowed_origin or "").strip() or None,
+            subject_pattern=(payload.subject_pattern or "").strip() or None,
+            access_code_id=payload.access_code_id.strip(),
+            access_label=payload.access_label.strip(),
+            access_code=raw_code,
+            access_email=(payload.access_email or "").strip() or None,
+            deployment_scoped_access=payload.deployment_scoped_access,
+        )
+        response = {
+            **result,
+            "raw_code_present": payload.mode == "generate",
+            "secrets_printed": False,
+        }
+        if payload.mode == "generate":
+            response["raw_code"] = raw_code
+        return JSONResponse(response)
+
     def _session_roots() -> list[Path]:
         raw = settings.hermes_session_roots.strip()
         if not raw:
@@ -404,11 +744,142 @@ def create_app() -> FastAPI:
                     return candidate
         return None
 
+    @app.post("/v1/review-auth/session")
+    async def create_review_auth_session(payload: ReviewAuthSessionIn, request: Request) -> JSONResponse:
+        origin = request.headers.get("origin") or ""
+        if not origin:
+            raise HTTPException(status_code=400, detail="Origin header required")
+        result = review_auth_store.create_session(
+            project_identifier=payload.project_id,
+            deployment_identifier=payload.deployment_id,
+            origin=origin,
+            subject_id=payload.subject_id,
+            access_code=payload.access_code,
+            email=payload.email,
+        )
+        if result is None:
+            raise HTTPException(status_code=401, detail="invalid review credentials")
+        return JSONResponse(result)
+
+    def _require_deploy_hook(request: Request, project_id: str) -> dict[str, Any]:
+        authorization = request.headers.get("authorization") or ""
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="invalid deploy hook token")
+        hook = review_auth_store.validate_deploy_hook_token(token=token.strip(), project_identifier=project_id)
+        if hook is None:
+            raise HTTPException(status_code=401, detail="invalid deploy hook token")
+        return hook
+
+    def _allowed_deploy_hosts(hook: dict[str, Any]) -> list[str]:
+        hosts: list[str] = []
+        for item in str(hook.get("allowed_host_suffixes") or "").split(","):
+            normalized = item.strip().lower().lstrip(".")
+            if normalized:
+                hosts.append(normalized)
+        return hosts
+
+    def _host_matches_allowed_suffix(hostname: str, suffix: str) -> bool:
+        return hostname == suffix or hostname.endswith(f".{suffix}")
+
+    def _origin_parts(origin: str) -> tuple[str, str]:
+        parsed = urlparse(origin)
+        if not parsed.scheme or not parsed.netloc or parsed.path not in ("", "/") or parsed.query or parsed.fragment:
+            raise HTTPException(status_code=422, detail="allowed_origin must be an origin, not a URL with path/query/fragment")
+        return parsed.scheme.lower(), parsed.netloc.lower()
+
+    def _subject_pattern_origin(subject_pattern: str) -> tuple[str, str]:
+        parsed = urlparse(subject_pattern.split("*", 1)[0])
+        if not parsed.scheme or not parsed.netloc:
+            raise HTTPException(status_code=422, detail="subject_pattern must include an absolute URL origin")
+        return parsed.scheme.lower(), parsed.netloc.lower()
+
+    def _validate_deploy_origin_policy(allowed_origin: str, subject_pattern: str, hook: dict[str, Any]) -> None:
+        scheme, host = _origin_parts(allowed_origin)
+        hostname = (urlparse(allowed_origin).hostname or "").lower()
+        if hostname in {"localhost", "127.0.0.1", "::1"}:
+            if scheme not in {"http", "https"}:
+                raise HTTPException(status_code=422, detail="local review origins must use http or https")
+        else:
+            if scheme != "https":
+                raise HTTPException(status_code=422, detail="review deploy origins must use https outside local development")
+            allowed_hosts = _allowed_deploy_hosts(hook)
+            if not allowed_hosts:
+                raise HTTPException(status_code=422, detail="review deploy hook has no allowed host suffixes")
+            if not any(_host_matches_allowed_suffix(hostname, item) for item in allowed_hosts):
+                raise HTTPException(status_code=422, detail="review deploy origin host is not allowed")
+        subject_scheme, subject_host = _subject_pattern_origin(subject_pattern)
+        if subject_scheme != scheme or subject_host != host:
+            raise HTTPException(status_code=422, detail="subject_pattern origin must match allowed_origin")
+
+    @app.post("/v1/review-auth/deployments/register", response_model=ReviewDeploymentRegisterOut)
+    async def register_review_deployment(payload: ReviewDeploymentRegisterIn, request: Request) -> JSONResponse:
+        hook = _require_deploy_hook(request, payload.project_id)
+        _validate_deploy_origin_policy(payload.allowed_origin, payload.subject_pattern, hook)
+        deployment = review_auth_store.register_deployment(
+            project_identifier=payload.project_id,
+            deployment_slug=payload.deployment_slug,
+            branch=payload.branch,
+            allowed_origin=payload.allowed_origin,
+            subject_pattern=payload.subject_pattern,
+            vercel_deployment_id=payload.vercel_deployment_id,
+            commit_sha=payload.commit_sha,
+        )
+        if deployment is None:
+            raise HTTPException(status_code=404, detail="review project not found")
+        return JSONResponse({"deployment": deployment, "secrets_printed": False})
+
+    def _bearer_token(request: Request) -> str:
+        authorization = request.headers.get("authorization") or ""
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="review authentication required")
+        return token.strip()
+
+    def _require_review_session(
+        request: Request,
+        *,
+        project_id: str | None = None,
+        deployment_id: str | None = None,
+        subject_id: str | None = None,
+    ) -> ReviewAuthSession:
+        origin = request.headers.get("origin") or ""
+        if not origin:
+            raise HTTPException(status_code=400, detail="Origin header required")
+        session = review_auth_store.validate_token(
+            token=_bearer_token(request),
+            origin=origin,
+            project_identifier=project_id,
+            deployment_identifier=deployment_id,
+            subject_id=subject_id,
+        )
+        if session is None:
+            raise HTTPException(status_code=401, detail="invalid review session")
+        return session
+
+    @app.get("/v1/review-auth/session")
+    async def get_review_auth_session(request: Request) -> JSONResponse:
+        session = _require_review_session(request)
+        return JSONResponse(
+            {
+                "authenticated": True,
+                "session_id": session.session_id,
+                "project_id": session.project_id,
+                "deployment_id": session.deployment_id,
+                "label": session.label,
+                "expires_at": session.expires_at,
+            }
+        )
+
     @app.post("/v1/reviews/assets", response_model=ReviewAssetUploadOut)
     async def upload_review_asset(
+        request: Request,
         file: UploadFile = File(...),
         asset_type: str = Form(...),
+        project_id: str = Form(...),
+        deployment_id: str = Form(...),
     ) -> ReviewAssetUploadOut:
+        session = _require_review_session(request, project_id=project_id, deployment_id=deployment_id)
         asset_id = str(uuid.uuid4())
         data = await file.read()
         (assets_dir / asset_id).write_bytes(data)
@@ -419,11 +890,27 @@ def create_app() -> FastAPI:
             size_bytes=len(data),
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        (assets_dir / f"{asset_id}.meta.json").write_text(meta.model_dump_json())
+        meta_record = {
+            **meta.model_dump(),
+            "client_id": session.client_id,
+            "project_id": session.project_id,
+            "deployment_id": session.deployment_id,
+            "auth_session_id": session.session_id,
+            "authenticated": True,
+            "origin": session.origin,
+            "submitted_by": session.label,
+        }
+        (assets_dir / f"{asset_id}.meta.json").write_text(json.dumps(meta_record))
         return meta
 
     @app.post("/v1/reviews", response_model=ReviewSubmitOut)
-    async def submit_review(payload: ReviewSubmitIn) -> ReviewSubmitOut:
+    async def submit_review(payload: ReviewSubmitIn, request: Request) -> ReviewSubmitOut:
+        session = _require_review_session(
+            request,
+            project_id=payload.project_id,
+            deployment_id=payload.deployment_id,
+            subject_id=payload.subject_id,
+        )
         requested_asset_ids = list(payload.asset_ids)
         for typed_id in (payload.events_asset_id, payload.audio_asset_id):
             if typed_id and typed_id not in requested_asset_ids:
@@ -433,14 +920,23 @@ def create_app() -> FastAPI:
             meta_path = assets_dir / f"{aid}.meta.json"
             if not meta_path.exists():
                 raise HTTPException(status_code=422, detail=f"asset {aid} not found")
-            asset_metas.append(json.loads(meta_path.read_text()))
+            meta = json.loads(meta_path.read_text())
+            if meta.get("project_id") != session.project_id or meta.get("deployment_id") != session.deployment_id:
+                raise HTTPException(status_code=422, detail=f"asset {aid} belongs to a different project/deployment")
+            if meta.get("auth_session_id") != session.session_id:
+                raise HTTPException(status_code=422, detail=f"asset {aid} belongs to a different review session")
+            if meta.get("authenticated") is not True:
+                raise HTTPException(status_code=422, detail=f"asset {aid} is not authenticated")
+            asset_metas.append(meta)
         meta_by_id = {str(meta.get("asset_id") or "").strip(): meta for meta in asset_metas}
         typed_assets = {str(meta.get("asset_type") or "").strip().lower(): meta for meta in asset_metas}
         events_asset_id = payload.events_asset_id or typed_assets.get("events", {}).get("asset_id")
         audio_asset_id = payload.audio_asset_id or typed_assets.get("audio", {}).get("asset_id")
-        if not events_asset_id or not audio_asset_id:
-            raise HTTPException(status_code=422, detail="review submission requires events_asset_id and audio_asset_id")
-        expected_typed_assets = {"events_asset_id": (events_asset_id, "events"), "audio_asset_id": (audio_asset_id, "audio")}
+        if not events_asset_id:
+            raise HTTPException(status_code=422, detail="review submission requires events_asset_id")
+        expected_typed_assets = {"events_asset_id": (events_asset_id, "events")}
+        if audio_asset_id:
+            expected_typed_assets["audio_asset_id"] = (audio_asset_id, "audio")
         for field, (asset_id, expected_type) in expected_typed_assets.items():
             actual_type = str((meta_by_id.get(str(asset_id)) or {}).get("asset_type") or "").strip().lower()
             if actual_type != expected_type:
@@ -448,6 +944,13 @@ def create_app() -> FastAPI:
         created_at = datetime.now(timezone.utc).isoformat()
         record = {
             **payload.model_dump(),
+            "client_id": session.client_id,
+            "project_id": session.project_id,
+            "deployment_id": session.deployment_id,
+            "auth_session_id": session.session_id,
+            "authenticated": True,
+            "submitted_by": session.label or payload.submitted_by,
+            "origin": session.origin,
             "asset_ids": requested_asset_ids,
             "events_asset_id": events_asset_id,
             "audio_asset_id": audio_asset_id,
@@ -457,20 +960,41 @@ def create_app() -> FastAPI:
         }
         (reviews_dir / f"{payload.review_id}.json").write_text(json.dumps(record))
 
-        # Enqueue directly — Frank now handles all queue work through the normal full loop
-        async with httpx.AsyncClient(timeout=10.0) as q:
-            enqueue_resp = await q.post(
-                f"{settings.queue_http_url}/queues/workspace/enqueue",
-                json={
-                    "event_type": "review_submitted",
-                    "source_type": "review_sdk",
-                    "sender": payload.submitted_by,
-                    "message_body": payload.review_id,
-                    "payload": record,
-                },
-            )
-            enqueue_resp.raise_for_status()
-            msg_id = enqueue_resp.json().get("id")
+        # Enqueue directly — Frank now handles all queue work through the normal full loop.
+        # Convert upstream queue failures into HTTPException responses instead of letting
+        # raw httpx exceptions escape as 500s. Raw exceptions bypass browser-visible CORS
+        # headers in production, so Safari reports an opaque CORS failure instead of the
+        # actual queue-side problem.
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as q:
+                enqueue_resp = await q.post(
+                    f"{settings.queue_http_url}/queues/workspace/enqueue",
+                    json={
+                        "event_type": "review_submitted",
+                        "source_type": "review_sdk",
+                        "sender": record["submitted_by"],
+                        "message_body": payload.review_id,
+                        "payload": record,
+                    },
+                )
+                enqueue_resp.raise_for_status()
+                try:
+                    msg_id = enqueue_resp.json().get("id")
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail="review saved but queue enqueue returned an invalid response",
+                    ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"review saved but queue enqueue failed: HTTP {exc.response.status_code}",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="review saved but queue enqueue failed",
+            ) from exc
 
         # Publish wakeup event to eventbus so Frank picks it up immediately
         async with httpx.AsyncClient(timeout=5.0) as eb:

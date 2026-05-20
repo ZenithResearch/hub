@@ -41,4 +41,3 @@ resource "aws_ecr_repository" "queue" {
 
   tags = local.tags
 }
-
