@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+- Added ZenithOS/Hermes-native model profile contracts and validation — records agent/persona → purpose profile → deployment profile bindings, the current Frank production Qwen llama-server default, safe secret-handle posture, fallback policy, and the future ZenithOS operator control-surface shape without introducing a single global model setting.
+
 - Added configurable external-root contracts and Terraform wrapper scripts — keeps large local caches, temp files, model artifacts, and tool state off the Mac internal disk without duplicating providers per module or treating the repo as an artifact warehouse.
 
 - Added deployment profile contracts and validation for local-dev, self-hosted-single-node, cloud-aws-staging, and cloud-aws-prod — makes data source-of-truth, Matrix/model posture, smoke commands, backup/reset policy, and CD authority explicit per environment.

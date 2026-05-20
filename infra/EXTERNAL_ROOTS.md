@@ -68,4 +68,6 @@ That prevents Terraform from writing hundreds of MB to each module's internal `.
 
 ## External disk caveat
 
-The current drive is mounted as exFAT. Basic writes and executable files work, but macOS may create AppleDouble `._*` sidecars, and exFAT does not support Unix domain sockets. This is acceptable for local caches, model files, and Terraform plugin/state directories, but not ideal for source repos, committed files, or tools that require socket-capable temp directories. If we want to use the drive as a full temp/build root, create an APFS volume or partition.
+The current drive is mounted as exFAT. Basic writes and executable files work, but macOS may create AppleDouble `._*` sidecars, and exFAT does not support Unix domain sockets. This is acceptable for local caches, model files, and Terraform plugin/state directories, but not ideal for source repos, committed files, or tools that require socket-capable temp directories.
+
+Deferred follow-up: do not repartition now. Revisit creating an APFS volume or partition only when we deliberately want the external drive to become a full temp/build/runtime root and have reviewed backup/destructive-format risk.
