@@ -83,6 +83,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - `httpx>=0.27.0` dependency for async HTTP client used by the enqueue call.
 
 ### Fixed
+- Fixed CI private-artifact scan range selection for first pushes to new branches — falls back to `origin/main...HEAD` when GitHub sends an all-zero `before` SHA so branch CI can validate deployment candidates.
 - Fixed Review Case packet failure state handling — non-ready review packets now transition through a Cases-scoped automaton to terminal failed status with explicit metadata instead of remaining in processing with a failure reason, while ready packets preserve the existing processed compatibility status.
 - Fixed browser-opaque Review SDK submission failures — `POST /v1/reviews` now converts queue enqueue `httpx` failures into CORS-visible `502` responses instead of leaking raw exceptions as Safari-reported CORS failures.
 - Fixed Matrix appservice startup rendering — tracked Synapse templates now stay stable while generated appservice registrations render under `/data/appservices`, and startup only registers appservices whose receivers are launched by the same path.

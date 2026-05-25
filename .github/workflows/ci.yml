@@ -43,10 +43,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          BEFORE="${{ github.event.before }}"
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             echo "range=origin/${{ github.base_ref }}...HEAD" >> "$GITHUB_OUTPUT"
-          elif git rev-parse --verify "${{ github.event.before }}" >/dev/null 2>&1; then
-            echo "range=${{ github.event.before }}...HEAD" >> "$GITHUB_OUTPUT"
+          elif [[ "$BEFORE" != "0000000000000000000000000000000000000000" ]] && git rev-parse --verify "$BEFORE" >/dev/null 2>&1; then
+            echo "range=$BEFORE...HEAD" >> "$GITHUB_OUTPUT"
+          elif git rev-parse --verify origin/main >/dev/null 2>&1; then
+            echo "range=origin/main...HEAD" >> "$GITHUB_OUTPUT"
           elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
             echo "range=HEAD^...HEAD" >> "$GITHUB_OUTPUT"
           else
