@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added Review Case Automaton operations documentation — records the finite state machine, public Gateway compatibility mapping, terminal failure semantics, and the decision to exclude Frank retry/rerun/fix-loop behavior from review or terminal states for now.
+- Added Review Access policy allowlists — lets a project-scoped access code be constrained to explicit deployment/origin/subject combinations so Gallery/SWRL review access can stay Hub-owned without frontend secrets.
 - Added Hub operator update boundary documentation and example operator-state manifest — clarifies that GitHub main is source of truth, not an automatic deployment trigger for any running node.
 - Added `scripts/hub_update.py plan` with unit coverage — gives operators a no-side-effect way to compare target refs/profiles against local operator state before updating a Hub node.
 - Added guarded `scripts/hub_update.py apply --dry-run` scaffolding — keeps apply explicit and prevents cloud-prod execution until Terraform backend access checks are implemented.
@@ -42,6 +44,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 
 ### Changed
+- Consolidated Review Case Automaton repository docs — fixed the Mermaid diagram as the canonical operations contract, cross-linked Frank/Gateway docs, and marked the 2026-05-24 operator-update plan as historical.
+- Updated Review Case Automaton metadata persistence — Gateway status writeback now persists packet/review outcome metadata without accepting Frank retry/rerun bookkeeping fields.
+- Updated Hub operator update docs with the actual local production rollout state — distinguishes the successful local operator deploy from the still-blocked optional GitHub Actions CD backend.
 - Deployed the Review Access production image tag for the Hub ECS baseline — records the `review-access-20260516013607-1994d2d` image tag used for the live admin-rotation rollout so future Terraform plans do not drift back to the previous review-auth image.
 - Documented the quick Matrix/Synapse-backed community setup path — shows the default feedback room bootstrap and how to create additional local Matrix rooms while warning that non-feedback bridge routing is still WIP.
 - Rewrote the README around the current WIP trust boundary — tells new readers to expect breaking changes and to rely primarily on queue/cases orchestration plus Synapse while experimental surfaces keep moving.
@@ -88,6 +93,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - `httpx>=0.27.0` dependency for async HTTP client used by the enqueue call.
 
 ### Fixed
+- Fixed admin queue/case list payload bloat — queue peek and case lists now omit heavy payload/process fields by default while preserving explicit full-response query parameters for legacy callers.
+- Fixed STT image dependency reproducibility — installs Whisper runtime dependencies explicitly before installing `openai-whisper` without dependency resolution churn.
 - Fixed CI private-artifact scan range selection for first pushes to new branches — falls back to `origin/main...HEAD` when GitHub sends an all-zero `before` SHA so branch CI can validate deployment candidates.
 - Fixed Review Case packet failure state handling — non-ready review packets now transition through a Cases-scoped automaton to terminal failed status with explicit metadata instead of remaining in processing with a failure reason, while ready packets preserve the existing processed compatibility status.
 - Fixed browser-opaque Review SDK submission failures — `POST /v1/reviews` now converts queue enqueue `httpx` failures into CORS-visible `502` responses instead of leaking raw exceptions as Safari-reported CORS failures.

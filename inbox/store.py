@@ -235,10 +235,23 @@ class QueueStore:
             for r in rows
         ]
 
-    def peek(self, queue_name: str, n: int = 10, status: str = "pending") -> list[Message]:
-        rows = self._conn().execute(
+    def peek(
+        self,
+        queue_name: str,
+        n: int = 10,
+        status: str = "pending",
+        include_payload: bool = True,
+    ) -> list[Message]:
+        columns = "*" if include_payload else """
+                id, queue_name, event_type, process_path, source_type, sender,
+                substr(message_body, 1, 240) AS message_body,
+                '{}' AS payload, status, priority, created_at, claimed_at,
+                done_at, worker_id, retry_count, max_retries, claim_timeout_s,
+                error, '{}' AS metadata
             """
-            SELECT * FROM messages
+        rows = self._conn().execute(
+            f"""
+            SELECT {columns} FROM messages
             WHERE queue_name = ? AND status = ?
             ORDER BY priority DESC, created_at ASC
             LIMIT ?

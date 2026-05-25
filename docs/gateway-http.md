@@ -96,6 +96,14 @@ data/reviews/
 
 Asset uploads are capped at 50 MB. All other routes use the global 256 KB body limit.
 
+### Review status writeback
+
+Frank Step 8 updates stored review status through Gateway using the Review Case Automaton documented in `docs/operations/review-case-automaton.md`.
+
+Gateway keeps the public status enum stable: `queued`, `processing`, `processed`, and `failed`. Internal automaton `succeeded` is written publicly as `processed`; public `succeeded` remains invalid.
+
+Gateway may persist additive status metadata (`automaton_status`, `automaton_event`, `review_outcome`, `review_scope`, `review_packet_path`, `review_packet_status`, and `status_reason`). It does not accept retry/rerun bookkeeping fields such as `fix_attempt_count`, `resume_step_index`, `effective_resume_parent_index`, or `rerun_step_indexes`.
+
 ---
 
 ## Environment variables

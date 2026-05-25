@@ -113,7 +113,7 @@ The initial native runner performs:
 - Step 3: perform deterministic component-name baseline resolution.
 - Steps 4-7: run the current structured analysis baseline behind the native
   runner boundary.
-- Step 8: update review status through the gateway.
+- Step 8: update review status through the gateway using the repository-owned Review Case Automaton contract in `docs/operations/review-case-automaton.md`. Ready packets become public `processed` with automaton status `succeeded`; degraded/non-ready packets become terminal public `failed` with automaton status `failed`. Step 8 does not retry, rerun, or enter a fix loop.
 - Step 9: write a daily-note compatibility artifact.
 
 Frank startup scans open or in-progress cases with

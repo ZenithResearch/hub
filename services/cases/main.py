@@ -2149,11 +2149,23 @@ async def stream_case(case_id: str):
     )
 
 
+CASE_LIST_LIGHT_COLUMNS = (
+    "id, queue_message_id, process_name, process_path, process_hash, title, objective, "
+    "sender, status, created_at, claimed_at, completed_at"
+)
+
+
 @app.get("/cases")
-def list_cases(status: str | None = None, sender: str | None = None, limit: int = 50):
+def list_cases(
+    status: str | None = None,
+    sender: str | None = None,
+    limit: int = 50,
+    include_heavy: bool = False,
+):
     request_start = time.perf_counter()
     with get_db() as conn:
-        q = "SELECT * FROM cases WHERE 1=1"
+        columns = "*" if include_heavy else CASE_LIST_LIGHT_COLUMNS
+        q = f"SELECT {columns} FROM cases WHERE 1=1"
         params: list[Any] = []
         if status:
             status = _normalize_case_status(status)
@@ -2173,6 +2185,7 @@ def list_cases(status: str | None = None, sender: str | None = None, limit: int 
             "status_filter": status,
             "sender_filter_present": bool(sender),
             "limit": limit,
+            "include_heavy": include_heavy,
             "case_count": len(cases),
             "elapsed_ms": _elapsed_ms(request_start),
             "response_size_bytes": _safe_json_size(payload),

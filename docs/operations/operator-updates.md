@@ -40,17 +40,15 @@ Use `deployments/operator-state.example.json` as the public shape. Real state fi
 
 Do not store secrets, tokens, tfvars, database paths with private data, or raw credentials in operator state.
 
-## Current Review Case Automaton status
+## Review Case Automaton contract
 
-The Review Case Automaton fix is merged into GitHub main at `ce56d0c`, but the live Hub should not be assumed to run it until an operator explicitly deploys that ref/image.
+The repository-owned Review Case Automaton contract is documented in `docs/operations/review-case-automaton.md` and cross-linked from `docs/frank-native-case-pipeline.md` and `docs/gateway-http.md`.
 
-The previous production CD attempt proved:
+Its current scope is deliberately narrow: ready packets succeed, non-ready packets fail terminally, and Frank retry/rerun/fix-loop semantics are not part of the review or terminal-state automaton. The 2026-05-24 planning notes are historical; the operations document is the current source contract.
 
-- the GitHub production tfvars secret was restored;
-- public smoke can pass;
-- Terraform plan currently fails because the GitHub OIDC deploy role cannot read the S3 backend state object.
+The previous first-slice automaton source was merged into GitHub main at `ce56d0c` and explicitly deployed to the live Hub by local operator-controlled Terraform apply. The live Gateway and Frank services were verified then on image tag `review-case-automaton-202605250235-a918d6d`; public, operator, and internal smoke checks passed after that rollout. New source changes still require the explicit plan/apply flow below before they are production facts.
 
-That is a deployment backend/IAM blocker, not an application-code blocker.
+The previous GitHub Actions Production CD path still has a backend/IAM blocker: the GitHub OIDC deploy role could not read the S3 Terraform backend state object. That is a deployment backend issue, not application-code proof that the live Hub is stale. Local operator deploy remains the proven production update path.
 
 ## Safe update flow
 
