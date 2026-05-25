@@ -1,22 +1,22 @@
-# GitHub OIDC production deploy role
+# GitHub OIDC for non-deploying automation
 
-Project E production CD uses GitHub Actions OIDC. Do not store long-lived AWS access keys in GitHub secrets.
+GitHub Actions may use OIDC for bounded automation such as building and pushing immutable images. Production Terraform deploys are intentionally local/operator-controlled and are not run from GitHub Actions.
+
+Do not store long-lived AWS access keys in GitHub secrets.
 
 ## GitHub configuration
 
-Repository/environment variables:
+Repository/environment variables used by image-building workflows:
 
 - `AWS_REGION=us-east-1`
 - `AWS_PROD_DEPLOY_ROLE_ARN=arn:aws:iam::<account-id>:role/<role-name>`
 
-Repository/environment secrets:
-
-- `PROD_TERRAFORM_TFVARS_B64` — base64-encoded production `infra/aws_baseline_80/terraform.tfvars`.
-
 GitHub environment:
 
 - `production`
-- require manual reviewers before allowing the workflow job to start.
+- may require manual reviewers before image-build jobs assume the role.
+
+No production tfvars secret is required for GitHub Actions. Production tfvars stay on the approved operator machine and are passed to `scripts/prod_terraform_cd.sh` during local plan/apply.
 
 ## Trust policy shape
 
@@ -47,27 +47,20 @@ If a separate staging environment is added, create a separate staging role and e
 
 ## Permission policy shape
 
-Start narrow and expand only when the workflow proves it needs more. The Project E workflow needs enough access to:
+The current GitHub role should be scoped to the non-deploying action it supports:
 
-- read/write the Terraform S3 backend object and lockfile for `aws_baseline_80/terraform.tfstate`;
-- describe and update Terraform-managed resources in the Hub production stack;
-- read/write ECR images only when later image-build deployment is enabled;
-- run `scripts/prod_smoke.py` public smoke without credentials, and later operator/internal smoke when intentionally enabled.
+- authenticate to ECR;
+- push images to the intended Hub ECR repository such as `zenith-hub-prod-gateway-http`;
+- read minimal account/region metadata needed by the workflow.
 
-Initial Terraform-management policy should be reviewed against the generated plan before first apply. Prefer resource ARNs scoped to:
+It should not need Terraform S3 backend, ECS service update, RDS, EFS, or broad production infrastructure mutation permissions while GitHub Actions CD is disabled.
 
-- state bucket: `zenith-hub-tf-state-044528206149-us-east-1`;
-- Hub prod cluster/resources named `zenith-hub-prod-*`;
-- ECR repositories managed by `infra/aws_baseline_80`;
-- S3 model bucket `zenith-hub-prod-llama-models-044528206149-us-east-1` only if model staging is moved into CD;
-- CloudWatch log groups `/ecs/zenith-hub-prod/*`.
+## Deploy discipline
 
-## Apply discipline
-
-Use the workflow in this order:
-
-1. Run `smoke`.
-2. Run `plan` and download/review the plan artifact.
-3. Run `apply` only after review, with exact confirmation `APPLY zenith-hub-prod` and GitHub environment approval.
-4. Check post-apply smoke output.
-5. If smoke fails, roll back to the prior image tag/task definition or revert/apply the prior Terraform commit.
+1. GitHub CI validates source.
+2. The manual `Gateway Image` workflow may build and push an immutable image tag.
+3. An operator inspects live service tags locally.
+4. An operator runs `scripts/prod_terraform_cd.sh plan` locally with explicit service image tags and production tfvars from the approved local path.
+5. The operator reviews the saved plan text.
+6. The operator runs `scripts/prod_terraform_cd.sh apply` locally only after confirming the change window.
+7. The operator waits for ECS stability and runs public/operator/internal smoke checks.
