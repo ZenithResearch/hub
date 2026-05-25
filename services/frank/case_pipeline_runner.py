@@ -12,6 +12,11 @@ from typing import Any
 
 import httpx
 
+from services.frank.review_case_automaton import (
+    AUTOMATON_TO_GATEWAY_STATUS,
+    REVIEW_SCOPE_FULL,
+    transition,
+)
 from services.frank.review_packet import (
     build_review_packet,
     build_source_bindings,
@@ -194,34 +199,44 @@ class CasePipelineRunner:
         step_run_id = str(step_run["id"])
         await self.emit_event(case_run_id, "step.started", f"{step_id} started", step_run_id=step_run_id, metadata={"step_id": step_id})
 
-        if step_id == "step_1":
-            outputs = await self.execute_step_1(case_run_id, step_run_id, dispatch_packet, case_dir)
-            await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native review setup completed"])
-        elif step_id == "step_2":
-            outputs = await self.execute_step_2(case_run_id, step_run_id, case_detail, case_dir)
-            await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native STT transcription completed"])
-        elif step_id == "step_3":
-            outputs = await self.execute_step_3(case_detail)
-            await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native component resolution baseline completed"])
-        elif step_id in {"step_4", "step_5", "step_6", "step_7"}:
-            outputs = await self.execute_structured_analysis_baseline(step_id, case_detail, case_dir)
-            await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native structured analysis baseline completed"])
-        elif step_id == "step_8":
-            outputs = await self.execute_step_8(case_detail)
-            await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Review status updated"])
-        elif step_id == "step_9":
-            await self.execute_step_9(case_run_id, step_run_id, case_detail, case_dir)
-            await self.complete_no_output_step(case_id, step, step_run_id, notes=["Daily-note compatibility entry written"])
-        else:
-            output_names = list(contract_step.get("output_variables") or [])
-            if output_names:
-                outputs = {name: None for name in output_names}
-                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native fallback completed"])
+        try:
+            if step_id == "step_1":
+                outputs = await self.execute_step_1(case_run_id, step_run_id, dispatch_packet, case_dir)
+                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native review setup completed"])
+            elif step_id == "step_2":
+                outputs = await self.execute_step_2(case_run_id, step_run_id, case_detail, case_dir)
+                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native STT transcription completed"])
+            elif step_id == "step_3":
+                outputs = await self.execute_step_3(case_detail)
+                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native component resolution baseline completed"])
+            elif step_id in {"step_4", "step_5", "step_6", "step_7"}:
+                outputs = await self.execute_structured_analysis_baseline(step_id, case_detail, case_dir)
+                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native structured analysis baseline completed"])
+            elif step_id == "step_8":
+                outputs = await self.execute_step_8(case_detail)
+                packet_status = str((outputs.get("review_status_updated") or {}).get("review_packet_status") or "")
+                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Review status updated"])
+                if packet_status != "review_packet_ready":
+                    reason = f"review packet not ready: {packet_status or 'unknown'}"
+                    await self.fail_step(case_id, step, step_run_id, reason=reason)
+                    raise RuntimeError(reason)
+            elif step_id == "step_9":
+                await self.execute_step_9(case_run_id, step_run_id, case_detail, case_dir)
+                await self.complete_no_output_step(case_id, step, step_run_id, notes=["Daily-note compatibility entry written"])
             else:
-                await self.complete_no_output_step(case_id, step, step_run_id, notes=["Native fallback completed"])
+                output_names = list(contract_step.get("output_variables") or [])
+                if output_names:
+                    outputs = {name: None for name in output_names}
+                    await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native fallback completed"])
+                else:
+                    await self.complete_no_output_step(case_id, step, step_run_id, notes=["Native fallback completed"])
 
-        await self.update_step_run(step_run_id, "completed")
-        await self.emit_event(case_run_id, "step.completed", f"{step_id} completed", step_run_id=step_run_id, metadata={"step_id": step_id})
+            await self.update_step_run(step_run_id, "completed")
+            await self.emit_event(case_run_id, "step.completed", f"{step_id} completed", step_run_id=step_run_id, metadata={"step_id": step_id})
+        except Exception as exc:
+            await self.update_step_run(step_run_id, "failed", metadata={"reason": str(exc), "error_type": type(exc).__name__, "step_id": step_id})
+            await self.emit_event(case_run_id, "step.failed", str(exc), step_run_id=step_run_id, severity="error", metadata={"step_id": step_id})
+            raise
 
     async def execute_step_1(self, case_run_id: str, step_run_id: str, dispatch_packet: dict[str, Any], case_dir: Path) -> dict[str, Any]:
         context = dispatch_packet.get("initial_context") or {}
@@ -462,14 +477,23 @@ class CasePipelineRunner:
         review_packet_path = str(packet_path) if packet_path else ""
         if not review_id:
             raise RuntimeError("native Step 8 requires review_id")
+        automaton_event = "review_passed" if packet_status == "review_packet_ready" else "packet_failed"
+        transition_result = transition(
+            "review" if automaton_event == "review_passed" else "processing",
+            automaton_event,
+        )
+        gateway_status = AUTOMATON_TO_GATEWAY_STATUS[transition_result.status]
         response = await self.client.patch(
             f"{self.gateway_url}/v1/reviews/{review_id}/status",
             json={
-                "status": "processed" if packet_status == "review_packet_ready" else "processing",
+                "status": gateway_status,
+                "automaton_status": transition_result.status,
+                "automaton_event": automaton_event,
                 "review_note_path": review_note_path or None,
                 "review_packet_path": review_packet_path or None,
                 "review_packet_status": packet_status,
-                "reason": packet_status,
+                "reason": transition_result.status_reason,
+                "review_scope": transition_result.review_scope or REVIEW_SCOPE_FULL,
             },
             timeout=20.0,
         )
@@ -478,7 +502,11 @@ class CasePipelineRunner:
         return {
             "review_status_updated": {
                 "review_id": str(payload.get("review_id") or review_id),
-                "status": str(payload.get("status") or "processed"),
+                "status": str(payload.get("status") or gateway_status),
+                "automaton_status": transition_result.status,
+                "automaton_event": automaton_event,
+                "reason": transition_result.status_reason,
+                "review_scope": transition_result.review_scope or REVIEW_SCOPE_FULL,
                 "review_packet_status": packet_status,
                 "review_packet_path": review_packet_path,
                 "review_note_path": review_note_path,
@@ -811,6 +839,15 @@ class CasePipelineRunner:
         response.raise_for_status()
         for note in notes:
             await self.append_log(case_id, "info", note, step_id=step["id"], metadata={"step_run_id": step_run_id})
+
+    async def fail_step(self, case_id: str, step: dict[str, Any], step_run_id: str, *, reason: str) -> None:
+        response = await self.client.put(
+            f"{self.cases_url}/cases/{case_id}/steps/{step['id']}",
+            json={"status": "FAILED", "agent_run_id": step_run_id},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        await self.append_log(case_id, "error", reason, step_id=step["id"], metadata={"step_run_id": step_run_id})
 
     async def append_log(
         self,

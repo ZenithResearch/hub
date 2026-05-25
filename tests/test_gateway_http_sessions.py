@@ -1178,7 +1178,21 @@ class GatewayHttpSessionTests(unittest.TestCase):
 
         response = self.client.patch(
             "/v1/reviews/review-123/status",
-            json={"status": "processed", "review_note_path": "local-private://vault/notes/review review-123.md"},
+            json={
+                "status": "processed",
+                "review_note_path": "local-private://vault/notes/review review-123.md",
+                "review_packet_path": "local-private://cases/case-123/artifacts/review_packet.json",
+                "review_packet_status": "review_packet_ready",
+                "reason": "review_packet_ready",
+                "automaton_status": "review",
+                "automaton_event": "processing_done",
+                "fix_attempt_count": 1,
+                "resume_step_index": 3,
+                "effective_resume_parent_index": 1,
+                "rerun_step_indexes": [2, 3, 4],
+                "review_outcome": "fix_required",
+                "review_scope": "full_output_against_objective_process_prompt_acceptance_criteria",
+            },
         )
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -1187,4 +1201,39 @@ class GatewayHttpSessionTests(unittest.TestCase):
         saved = json.loads(review_path.read_text())
         self.assertEqual(saved["status"], "processed")
         self.assertEqual(saved["review_note_path"], "local-private://vault/notes/review review-123.md")
+        self.assertEqual(saved["review_packet_path"], "local-private://cases/case-123/artifacts/review_packet.json")
+        self.assertEqual(saved["review_packet_status"], "review_packet_ready")
+        self.assertEqual(saved["status_reason"], "review_packet_ready")
+        self.assertEqual(saved["automaton_status"], "review")
+        self.assertEqual(saved["automaton_event"], "processing_done")
+        self.assertEqual(saved["fix_attempt_count"], 1)
+        self.assertEqual(saved["resume_step_index"], 3)
+        self.assertEqual(saved["effective_resume_parent_index"], 1)
+        self.assertEqual(saved["rerun_step_indexes"], [2, 3, 4])
+        self.assertEqual(saved["review_outcome"], "fix_required")
+        self.assertEqual(saved["review_scope"], "full_output_against_objective_process_prompt_acceptance_criteria")
         self.assertEqual(saved["subject_id"], "http://example")
+
+    def test_patch_review_status_accepts_old_shape_and_allowed_statuses(self) -> None:
+        reviews_dir = Path(os.environ["REVIEWS_DATA_DIR"])
+        allowed_statuses = {"queued", "processing", "processed", "failed"}
+        for status in sorted(allowed_statuses):
+            review_path = reviews_dir / f"review-{status}.json"
+            review_path.write_text(json.dumps({"review_id": f"review-{status}", "status": "queued"}))
+
+            response = self.client.patch(
+                f"/v1/reviews/review-{status}/status",
+                json={"status": status, "review_note_path": f"local-private://vault/notes/{status}.md"},
+            )
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["status"], status)
+            saved = json.loads(review_path.read_text())
+            self.assertEqual(saved["status"], status)
+            self.assertEqual(saved["review_note_path"], f"local-private://vault/notes/{status}.md")
+            self.assertNotIn("automaton_status", saved)
+
+        review_path = reviews_dir / "review-succeeded.json"
+        review_path.write_text(json.dumps({"review_id": "review-succeeded", "status": "queued"}))
+        response = self.client.patch("/v1/reviews/review-succeeded/status", json={"status": "succeeded"})
+        self.assertEqual(response.status_code, 422)
