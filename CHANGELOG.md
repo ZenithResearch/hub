@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Added
+- Added Hub operator update boundary documentation and example operator-state manifest — clarifies that GitHub main is source of truth, not an automatic deployment trigger for any running node.
+- Added `scripts/hub_update.py plan` with unit coverage — gives operators a no-side-effect way to compare target refs/profiles against local operator state before updating a Hub node.
+- Added guarded `scripts/hub_update.py apply --dry-run` scaffolding — keeps apply explicit and prevents cloud-prod execution until Terraform backend access checks are implemented.
+
 - Updated external-root docs/scripts for the post-reformat BJJ APFS layout: tooling caches now default to `/Volumes/BJJ-Cache/zenith-cache`, explicit runtime migrations use `/Volumes/BJJ-Runtime/zenith/data/cache`, and Docker Desktop's `Docker.raw` migration is recorded as external runtime state.
 
 - Added a manual Gateway image build workflow and threaded `gateway_image_tag` through production CD so Project H Gateway endpoint code can be built in CI and rolled without local Docker builds.
