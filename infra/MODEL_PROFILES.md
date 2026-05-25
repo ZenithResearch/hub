@@ -165,7 +165,7 @@ The Gateway production task definition is wired with these defaults:
 - `MODEL_PROFILE_OVERRIDES_PATH=/data/model-profile-overrides.yaml`
 - `MODEL_PROFILE_AUDIT_PATH=/data/model-profile-audit.jsonl`
 
-Project H endpoints require both the Gateway runtime env above and a Gateway image built from source that contains the endpoint code. Use the manual `Gateway Image` GitHub Actions workflow to push a `zenith-hub-prod-gateway-http` image tag, then run `Production CD` with that `gateway_image_tag` plus the current cases/Frank/STT hotfix tags to roll only the Gateway service.
+Project H endpoints require both the Gateway runtime env above and a Gateway image built from source that contains the endpoint code. Use the manual `Gateway Image` GitHub Actions workflow to push a `zenith-hub-prod-gateway-http` image tag, then run a local/operator-controlled `scripts/prod_terraform_cd.sh plan`/`apply` with that image tag plus the current cases/Frank/STT tags to roll only the intended service.
 
 ## Verification
 

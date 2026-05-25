@@ -3,18 +3,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_production_cd_accepts_gateway_image_tag_override():
-    workflow = (ROOT / ".github/workflows/production-cd.yml").read_text()
-    helper = (ROOT / "scripts/prod_terraform_cd.sh").read_text()
+def test_production_cd_workflow_is_removed_but_local_helper_keeps_image_overrides():
+    assert not (ROOT / ".github/workflows/production-cd.yml").exists()
 
-    assert "gateway_image_tag:" in workflow
-    assert "eventbus_image_tag:" in workflow
-    assert "GATEWAY_IMAGE_TAG: ${{ inputs.gateway_image_tag }}" in workflow
-    assert "EVENTBUS_IMAGE_TAG: ${{ inputs.eventbus_image_tag }}" in workflow
+    helper = (ROOT / "scripts/prod_terraform_cd.sh").read_text()
     assert "${GATEWAY_IMAGE_TAG" in helper
     assert "${EVENTBUS_IMAGE_TAG" in helper
+    assert "${CASES_IMAGE_TAG" in helper
+    assert "${FRANK_IMAGE_TAG" in helper
+    assert "${STT_IMAGE_TAG" in helper
     assert '-var="gateway_image_tag=$GATEWAY_IMAGE_TAG"' in helper
     assert '-var="eventbus_image_tag=$EVENTBUS_IMAGE_TAG"' in helper
+    assert '-var="cases_image_tag=$CASES_IMAGE_TAG"' in helper
+    assert '-var="frank_image_tag=$FRANK_IMAGE_TAG"' in helper
+    assert '-var="stt_image_tag=$STT_IMAGE_TAG"' in helper
 
 
 def test_manual_gateway_image_build_workflow_pushes_to_gateway_ecr_only():

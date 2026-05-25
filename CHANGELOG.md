@@ -46,13 +46,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ### Changed
 - Consolidated Review Case Automaton repository docs — fixed the Mermaid diagram as the canonical operations contract, cross-linked Frank/Gateway docs, and marked the 2026-05-24 operator-update plan as historical.
 - Updated Review Case Automaton metadata persistence — Gateway status writeback now persists packet/review outcome metadata without accepting Frank retry/rerun bookkeeping fields.
-- Updated Hub operator update docs with the actual local production rollout state — distinguishes the successful local operator deploy from the still-blocked optional GitHub Actions CD backend.
+- Updated Hub operator update docs with the actual local production rollout state — distinguishes the successful local operator deploy from the intentionally removed GitHub Actions production CD path.
 - Deployed the Review Access production image tag for the Hub ECS baseline — records the `review-access-20260516013607-1994d2d` image tag used for the live admin-rotation rollout so future Terraform plans do not drift back to the previous review-auth image.
 - Documented the quick Matrix/Synapse-backed community setup path — shows the default feedback room bootstrap and how to create additional local Matrix rooms while warning that non-feedback bridge routing is still WIP.
 - Rewrote the README around the current WIP trust boundary — tells new readers to expect breaking changes and to rely primarily on queue/cases orchestration plus Synapse while experimental surfaces keep moving.
 - Clarified the Frank/Sophia runtime boundary and Frank model provider config — keeps Frank on the Hermes Codex provider path while Sophia remains a comms/profile surface rather than an execution profile.
 
 ### Removed
+- Removed the GitHub Actions Production CD workflow — production deploys are intentionally local/operator-controlled, so leaving a known-nonfunctional CD workflow in Actions created misleading failure signals while CI and image-build workflows remain active.
 - Removed Sophia-local case/step execution-loop skills — keeps Sophia strictly comms-only and prevents future dispatch paths from mistaking Sophia for an internal case executor.
 
 ### Added

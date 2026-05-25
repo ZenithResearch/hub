@@ -8,7 +8,7 @@ Hub is source-available/community-facing infrastructure, but a running Hub node 
 - Release tags are recommended stable update points.
 - Operators choose when their node moves to a ref or image tag.
 - Production updates are explicit `plan` then `apply` actions.
-- GitHub Actions CD is one optional backend for cloud operators, not the default update path for every Hub.
+- GitHub Actions builds images and runs CI; production Terraform deploys are local/operator-controlled, not GitHub CD.
 - Secrets and real runtime state stay outside git.
 
 ## Terms
@@ -48,7 +48,7 @@ Its current scope is deliberately narrow: ready packets succeed, non-ready packe
 
 The previous first-slice automaton source was merged into GitHub main at `ce56d0c` and explicitly deployed to the live Hub by local operator-controlled Terraform apply. The live Gateway and Frank services were verified then on image tag `review-case-automaton-202605250235-a918d6d`; public, operator, and internal smoke checks passed after that rollout. New source changes still require the explicit plan/apply flow below before they are production facts.
 
-The previous GitHub Actions Production CD path still has a backend/IAM blocker: the GitHub OIDC deploy role could not read the S3 Terraform backend state object. That is a deployment backend issue, not application-code proof that the live Hub is stale. Local operator deploy remains the proven production update path.
+The previous GitHub Actions Production CD workflow has been removed from the repository because production deploys are intentionally local/operator-controlled. Its historical failures should not be read as product or deployment-health failures. Local operator deploy remains the proven production update path.
 
 ## Safe update flow
 
