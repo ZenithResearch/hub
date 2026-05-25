@@ -234,6 +234,18 @@ class ReviewAuthStore:
                     created_at TEXT NOT NULL,
                     expires_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS review_access_code_policies (
+                    id TEXT PRIMARY KEY,
+                    access_code_id TEXT NOT NULL REFERENCES review_access_codes(id),
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    deployment_id TEXT REFERENCES review_deployments(id),
+                    allowed_origin TEXT NOT NULL,
+                    subject_pattern TEXT,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT,
+                    UNIQUE(access_code_id, deployment_id, allowed_origin, subject_pattern)
+                );
                 CREATE TABLE IF NOT EXISTS review_sessions (
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL REFERENCES projects(id),
@@ -259,11 +271,13 @@ class ReviewAuthStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_review_sessions_token_hash ON review_sessions(token_hash);
                 CREATE INDEX IF NOT EXISTS idx_review_access_codes_project_deployment ON review_access_codes(project_id, deployment_id);
+                CREATE INDEX IF NOT EXISTS idx_review_access_code_policies_code_deployment ON review_access_code_policies(access_code_id, deployment_id);
                 """
             )
             if self.backend == "sqlite":
                 client_columns = {row[1] for row in conn.execute("PRAGMA table_info(clients)").fetchall()}
                 deployment_columns = {row[1] for row in conn.execute("PRAGMA table_info(review_deployments)").fetchall()}
+                access_code_columns = {row[1] for row in conn.execute("PRAGMA table_info(review_access_codes)").fetchall()}
             else:
                 client_columns = {
                     row["column_name"]
@@ -285,6 +299,16 @@ class ReviewAuthStore:
                         """
                     ).fetchall()
                 }
+                access_code_columns = {
+                    row["column_name"]
+                    for row in conn.execute(
+                        """
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name = 'review_access_codes'
+                        """
+                    ).fetchall()
+                }
             if "rolodex_entry_path" not in client_columns:
                 conn.execute("ALTER TABLE clients ADD COLUMN rolodex_entry_path TEXT")
             if "vercel_deployment_id" not in deployment_columns:
@@ -293,6 +317,10 @@ class ReviewAuthStore:
                 conn.execute("ALTER TABLE review_deployments ADD COLUMN commit_sha TEXT")
             if "updated_at" not in deployment_columns:
                 conn.execute("ALTER TABLE review_deployments ADD COLUMN updated_at TEXT")
+            if "email" not in access_code_columns:
+                conn.execute("ALTER TABLE review_access_codes ADD COLUMN email TEXT")
+            if "expires_at" not in access_code_columns:
+                conn.execute("ALTER TABLE review_access_codes ADD COLUMN expires_at TEXT")
 
     def validate_deploy_hook_token(self, *, token: str, project_identifier: str) -> dict[str, Any] | None:
         if not token.startswith(_DEPLOY_HOOK_TOKEN_PREFIX):
@@ -411,6 +439,34 @@ class ReviewAuthStore:
             (project_id, deployment_identifier, deployment_identifier, deployment_identifier),
         ).fetchone()
 
+    def _access_code_policy_allows(
+        self,
+        conn: Any,
+        *,
+        access_code_id: str,
+        deployment_id: str,
+        origin: str,
+        subject_id: str,
+    ) -> bool:
+        policies = conn.execute(
+            """
+            SELECT * FROM review_access_code_policies
+            WHERE access_code_id = ? AND active = 1
+            """,
+            (access_code_id,),
+        ).fetchall()
+        if not policies:
+            return True
+        for policy in policies:
+            policy_deployment_id = str(policy["deployment_id"] or "")
+            if policy_deployment_id and policy_deployment_id != deployment_id:
+                continue
+            if str(policy["allowed_origin"]) != origin:
+                continue
+            if subject_allowed(subject_id, origin, policy["subject_pattern"]):
+                return True
+        return False
+
     def rotate_access_code(
         self,
         *,
@@ -430,10 +486,29 @@ class ReviewAuthStore:
         access_code: str,
         access_email: str | None = None,
         deployment_scoped_access: bool = False,
+        policies: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         now = isoformat(utc_now())
         cleaned_deployment_id = (deployment_id or "").strip() or None
         cleaned_deployment_slug = (deployment_slug or cleaned_deployment_id or "").strip() or None
+        cleaned_policies = [
+            {
+                "deployment_id": str(policy.get("deployment_id") or "").strip(),
+                "deployment_slug": str(policy.get("deployment_slug") or policy.get("deployment_id") or "").strip(),
+                "allowed_origin": str(policy.get("allowed_origin") or "").strip(),
+                "subject_pattern": str(policy.get("subject_pattern") or "").strip(),
+            }
+            for policy in (policies or [])
+        ]
+        if not cleaned_policies and cleaned_deployment_id and allowed_origin and subject_pattern:
+            cleaned_policies = [
+                {
+                    "deployment_id": cleaned_deployment_id,
+                    "deployment_slug": cleaned_deployment_slug or cleaned_deployment_id,
+                    "allowed_origin": allowed_origin,
+                    "subject_pattern": subject_pattern,
+                }
+            ]
         with self.connect() as conn:
             conn.execute(
                 """
@@ -457,7 +532,7 @@ class ReviewAuthStore:
                 """,
                 (project_id, client_id, project_slug, project_name, now),
             )
-            if cleaned_deployment_id and allowed_origin and subject_pattern:
+            for policy in cleaned_policies:
                 conn.execute(
                     """
                     INSERT INTO review_deployments
@@ -473,12 +548,12 @@ class ReviewAuthStore:
                         updated_at = excluded.updated_at
                     """,
                     (
-                        cleaned_deployment_id,
+                        policy["deployment_id"],
                         project_id,
-                        cleaned_deployment_slug or cleaned_deployment_id,
+                        policy["deployment_slug"] or policy["deployment_id"],
                         "operator",
-                        allowed_origin,
-                        subject_pattern,
+                        policy["allowed_origin"],
+                        policy["subject_pattern"],
                         now,
                         now,
                     ),
@@ -508,6 +583,43 @@ class ReviewAuthStore:
                     now,
                 ),
             )
+            conn.execute("UPDATE review_access_code_policies SET active = 0, updated_at = ? WHERE access_code_id = ?", (now, access_code_id))
+            for policy in cleaned_policies:
+                policy_fingerprint = hashlib.sha256(
+                    "\x1f".join(
+                        [
+                            access_code_id,
+                            policy["deployment_id"],
+                            policy["allowed_origin"],
+                            policy["subject_pattern"],
+                        ]
+                    ).encode("utf-8")
+                ).hexdigest()[:16]
+                policy_id = f"{access_code_id}-{policy_fingerprint}"
+                conn.execute(
+                    """
+                    INSERT INTO review_access_code_policies
+                        (id, access_code_id, project_id, deployment_id, allowed_origin, subject_pattern, active, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        project_id = excluded.project_id,
+                        deployment_id = excluded.deployment_id,
+                        allowed_origin = excluded.allowed_origin,
+                        subject_pattern = excluded.subject_pattern,
+                        active = 1,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        policy_id,
+                        access_code_id,
+                        project_id,
+                        policy["deployment_id"],
+                        policy["allowed_origin"],
+                        policy["subject_pattern"],
+                        now,
+                        now,
+                    ),
+                )
         return {
             "client_id": client_id,
             "project_id": project_id,
@@ -516,6 +628,7 @@ class ReviewAuthStore:
             "access_label": access_label,
             "project_scoped_access": access_deployment_id is None,
             "email_configured": bool((access_email or "").strip()),
+            "policy_count": len(cleaned_policies),
             "active": True,
             "last_rotated_at": now,
         }
@@ -598,14 +711,25 @@ class ReviewAuthStore:
             matched: Any | None = None
             requested_email = (email or "").strip().lower()
             skipped_email_mismatch = 0
+            skipped_policy_mismatch = 0
             for row in rows:
                 row_email = str(row["email"] or "").strip().lower()
                 if row_email and row_email != requested_email:
                     skipped_email_mismatch += 1
                     continue
-                if verify_access_code(access_code, row["code_hash"]):
-                    matched = row
-                    break
+                if not verify_access_code(access_code, row["code_hash"]):
+                    continue
+                if not self._access_code_policy_allows(
+                    conn,
+                    access_code_id=str(row["id"]),
+                    deployment_id=str(deployment["id"]),
+                    origin=origin,
+                    subject_id=subject_id,
+                ):
+                    skipped_policy_mismatch += 1
+                    continue
+                matched = row
+                break
             if matched is None:
                 log.warning(
                     "review_auth_session_rejected",
@@ -618,6 +742,7 @@ class ReviewAuthStore:
                     email_present=bool(requested_email),
                     eligible_access_code_rows=len(rows),
                     email_mismatch_rows=skipped_email_mismatch,
+                    policy_mismatch_rows=skipped_policy_mismatch,
                     candidate_access_code_ids=[str(row["id"]) for row in rows],
                     candidate_deployment_scopes=[str(row["deployment_id"] or "") for row in rows],
                     candidate_email_bound=[bool(str(row["email"] or "").strip()) for row in rows],

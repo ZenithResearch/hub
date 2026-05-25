@@ -446,6 +446,79 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertEqual(auth_response.status_code, 200, auth_response.text)
         self.assertTrue(auth_response.json().get("token"))
 
+    def test_admin_review_access_rotate_accepts_multiple_access_code_policies(self) -> None:
+        response = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "samantha-pinheiro",
+                "client_slug": "samantha-pinheiro",
+                "client_name": "Samantha Pinheiro",
+                "project_id": "gallery",
+                "project_slug": "gallery",
+                "project_name": "Gallery",
+                "access_code_id": "samantha-pinheiro-gallery-review",
+                "access_label": "Samantha Pinheiro",
+                "mode": "provided",
+                "access_code": "gallery-review-code-for-samantha",
+                "policies": [
+                    {
+                        "deployment_id": "gallery-production",
+                        "deployment_slug": "gallery-production",
+                        "allowed_origin": "https://gal-ler-y.com",
+                        "subject_pattern": "https://gal-ler-y.com/*",
+                    },
+                    {
+                        "deployment_id": "gallery-local",
+                        "deployment_slug": "gallery-local",
+                        "allowed_origin": "http://localhost:3000",
+                        "subject_pattern": "http://localhost:3000/*",
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertFalse(body.get("raw_code_present"))
+        self.assertEqual(body.get("policy_count"), 2)
+
+        prod_auth = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://gal-ler-y.com"},
+            json={
+                "project_id": "gallery",
+                "deployment_id": "gallery-production",
+                "access_code": "gallery-review-code-for-samantha",
+                "subject_id": "https://gal-ler-y.com/admin/events",
+            },
+        )
+        self.assertEqual(prod_auth.status_code, 200, prod_auth.text)
+
+        local_auth = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "http://localhost:3000"},
+            json={
+                "project_id": "gallery",
+                "deployment_id": "gallery-local",
+                "access_code": "gallery-review-code-for-samantha",
+                "subject_id": "http://localhost:3000/admin/events",
+            },
+        )
+        self.assertEqual(local_auth.status_code, 200, local_auth.text)
+
+        rejected_origin = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://evil.example"},
+            json={
+                "project_id": "gallery",
+                "deployment_id": "gallery-production",
+                "access_code": "gallery-review-code-for-samantha",
+                "subject_id": "https://evil.example/admin/events",
+            },
+        )
+        self.assertEqual(rejected_origin.status_code, 401)
+
     def test_admin_review_access_rotate_provided_code_does_not_echo_raw_code(self) -> None:
         response = self.client.post(
             "/v1/admin/review-auth/access-codes/rotate",
@@ -1186,11 +1259,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
                 "reason": "review_packet_ready",
                 "automaton_status": "review",
                 "automaton_event": "processing_done",
-                "fix_attempt_count": 1,
-                "resume_step_index": 3,
-                "effective_resume_parent_index": 1,
-                "rerun_step_indexes": [2, 3, 4],
-                "review_outcome": "fix_required",
+                "review_outcome": "review_packet_ready",
                 "review_scope": "full_output_against_objective_process_prompt_acceptance_criteria",
             },
         )
@@ -1206,11 +1275,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertEqual(saved["status_reason"], "review_packet_ready")
         self.assertEqual(saved["automaton_status"], "review")
         self.assertEqual(saved["automaton_event"], "processing_done")
-        self.assertEqual(saved["fix_attempt_count"], 1)
-        self.assertEqual(saved["resume_step_index"], 3)
-        self.assertEqual(saved["effective_resume_parent_index"], 1)
-        self.assertEqual(saved["rerun_step_indexes"], [2, 3, 4])
-        self.assertEqual(saved["review_outcome"], "fix_required")
+        self.assertEqual(saved["review_outcome"], "review_packet_ready")
         self.assertEqual(saved["review_scope"], "full_output_against_objective_process_prompt_acceptance_criteria")
         self.assertEqual(saved["subject_id"], "http://example")
 

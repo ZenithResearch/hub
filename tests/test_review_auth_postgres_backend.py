@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from services.gateway_http.review_auth import ReviewAuthStore, create_review_auth_store
@@ -48,6 +51,81 @@ class ReviewAuthPostgresBackendTests(unittest.TestCase):
             calls,
             [("SELECT * FROM projects WHERE id = %s AND slug = %s", ("p1", "slug"))],
         )
+    def test_init_db_backfills_review_access_code_rotation_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = str(Path(tmpdir) / "clients.db")
+            with sqlite3.connect(db_path) as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE clients (
+                        id TEXT PRIMARY KEY,
+                        slug TEXT UNIQUE NOT NULL,
+                        name TEXT NOT NULL,
+                        rolodex_entry_path TEXT,
+                        created_at TEXT NOT NULL
+                    );
+                    CREATE TABLE projects (
+                        id TEXT PRIMARY KEY,
+                        client_id TEXT NOT NULL REFERENCES clients(id),
+                        slug TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        UNIQUE(client_id, slug)
+                    );
+                    CREATE TABLE review_deployments (
+                        id TEXT PRIMARY KEY,
+                        project_id TEXT NOT NULL REFERENCES projects(id),
+                        slug TEXT NOT NULL,
+                        branch TEXT NOT NULL,
+                        allowed_origin TEXT NOT NULL,
+                        subject_pattern TEXT,
+                        active INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT,
+                        UNIQUE(project_id, slug)
+                    );
+                    CREATE TABLE review_access_codes (
+                        id TEXT PRIMARY KEY,
+                        project_id TEXT NOT NULL REFERENCES projects(id),
+                        deployment_id TEXT REFERENCES review_deployments(id),
+                        label TEXT NOT NULL,
+                        code_hash TEXT NOT NULL,
+                        active INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL
+                    );
+                    """
+                )
+
+            store = ReviewAuthStore(
+                backend="sqlite",
+                dsn="",
+                db_path=db_path,
+                session_ttl_seconds=3600,
+            )
+
+            with sqlite3.connect(db_path) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(review_access_codes)")}
+            self.assertIn("email", columns)
+            self.assertIn("expires_at", columns)
+
+            result = store.rotate_access_code(
+                client_id="samantha-pinheiro",
+                client_slug="samantha-pinheiro",
+                client_name="Samantha Pinheiro",
+                rolodex_entry_path=None,
+                project_id="gallery",
+                project_slug="gallery",
+                project_name="Gallery",
+                deployment_id=None,
+                deployment_slug=None,
+                allowed_origin=None,
+                subject_pattern=None,
+                access_code_id="samantha-pinheiro-gallery-review",
+                access_label="Samantha Pinheiro",
+                access_code="generated-test-access-code",
+            )
+            self.assertEqual(result["access_code_id"], "samantha-pinheiro-gallery-review")
+            self.assertTrue(result["project_scoped_access"])
 
 
 if __name__ == "__main__":

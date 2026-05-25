@@ -41,6 +41,49 @@ class QueueHttpTests(unittest.TestCase):
         self.assertEqual(message["process_path"], "process-queued-review")
         self.assertEqual(message["event_type"], "review_submitted")
 
+    def test_peek_omits_payload_and_metadata_by_default(self) -> None:
+        response = self.client.post(
+            "/queues/workspace/enqueue",
+            json={
+                "event_type": "review_submitted",
+                "process_path": "process-queued-review",
+                "sender": "tester",
+                "message_body": "review-123",
+                "payload": {"large": "x" * 1000},
+                "metadata": {"large": "y" * 1000},
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+        peeked = self.client.get("/queues/workspace/peek")
+
+        self.assertEqual(peeked.status_code, 200)
+        message = peeked.json()["messages"][0]
+        self.assertNotIn("payload", message)
+        self.assertNotIn("metadata", message)
+        self.assertEqual(message["message_body_preview"], "review-123")
+
+    def test_peek_can_include_payload_and_metadata_for_legacy_callers(self) -> None:
+        response = self.client.post(
+            "/queues/workspace/enqueue",
+            json={
+                "event_type": "review_submitted",
+                "process_path": "process-queued-review",
+                "sender": "tester",
+                "message_body": "review-123",
+                "payload": {"review_id": "review-123"},
+                "metadata": {"client": "gallery"},
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+        peeked = self.client.get("/queues/workspace/peek?include_payload=true")
+
+        self.assertEqual(peeked.status_code, 200)
+        message = peeked.json()["messages"][0]
+        self.assertEqual(message["payload"], {"review_id": "review-123"})
+        self.assertEqual(message["metadata"], {"client": "gallery"})
+
 
 if __name__ == "__main__":
     unittest.main()

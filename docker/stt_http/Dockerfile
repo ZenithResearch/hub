@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg git && r
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch && \
-    pip install --no-cache-dir fastapi uvicorn[standard] openai-whisper
+    pip install --no-cache-dir fastapi uvicorn[standard] numpy numba tiktoken more-itertools tqdm && \
+    pip install --no-cache-dir --no-deps openai-whisper
 
 COPY services/__init__.py /app/services/__init__.py
 COPY services/stt_http/ /app/services/stt_http/

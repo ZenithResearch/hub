@@ -64,6 +64,13 @@ class ReviewDeploymentRegisterOut(BaseModel):
     secrets_printed: bool = False
 
 
+class ReviewAccessPolicyIn(BaseModel):
+    deployment_id: str
+    deployment_slug: str | None = None
+    allowed_origin: str
+    subject_pattern: str
+
+
 class ReviewAccessRotateIn(BaseModel):
     client_id: str
     client_slug: str
@@ -76,6 +83,7 @@ class ReviewAccessRotateIn(BaseModel):
     deployment_slug: str | None = None
     allowed_origin: str | None = None
     subject_pattern: str | None = None
+    policies: list[ReviewAccessPolicyIn] = []
     access_code_id: str
     access_label: str
     access_email: str | None = None
@@ -94,6 +102,7 @@ class ReviewAccessRotateOut(BaseModel):
     raw_code_present: bool = False
     project_scoped_access: bool
     email_configured: bool
+    policy_count: int = 0
     active: bool
     last_rotated_at: str
     secrets_printed: bool = False
@@ -143,10 +152,6 @@ class ReviewStatusUpdateIn(BaseModel):
     reason: str | None = None
     automaton_status: str | None = None
     automaton_event: str | None = None
-    fix_attempt_count: int | None = None
-    resume_step_index: int | None = None
-    effective_resume_parent_index: int | None = None
-    rerun_step_indexes: list[int] | None = None
     review_outcome: str | None = None
     review_scope: str | None = None
 
@@ -639,7 +644,7 @@ def create_app() -> FastAPI:
         params = {
             key: value
             for key, value in request.query_params.items()
-            if key in {"n", "limit", "status", "visibility_timeout"}
+            if key in {"n", "limit", "status", "visibility_timeout", "include_payload"}
         }
         return await _admin_proxy_get(f"{settings.queue_http_url}/queues/workspace/peek", request, params)
 
@@ -648,13 +653,47 @@ def create_app() -> FastAPI:
         params = {
             key: value
             for key, value in request.query_params.items()
-            if key in {"status", "limit"}
+            if key in {"status", "limit", "include_heavy"}
         }
         return await _admin_proxy_get(f"{settings.cases_http_url}/cases", request, params)
 
     @app.get("/v1/admin/cases/{case_id}")
     async def admin_case_detail(case_id: str, request: Request) -> JSONResponse:
         return await _admin_proxy_get(f"{settings.cases_http_url}/cases/{case_id}", request)
+
+    def _validate_review_policy_metadata(
+        *,
+        deployment_id: str | None,
+        allowed_origin: str | None,
+        subject_pattern: str | None,
+        context: str = "deployment metadata",
+    ) -> None:
+        missing = [
+            name
+            for name, value in {
+                "deployment_id": deployment_id,
+                "allowed_origin": allowed_origin,
+                "subject_pattern": subject_pattern,
+            }.items()
+            if not (value or "").strip()
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=f"incomplete {context}: missing {', '.join(missing)}",
+            )
+        parsed_origin = urlparse(allowed_origin or "")
+        parsed_subject = urlparse((subject_pattern or "").split("*", 1)[0])
+        if not parsed_origin.scheme or not parsed_origin.netloc or parsed_origin.path not in ("", "/"):
+            raise HTTPException(status_code=422, detail="allowed_origin must be an origin")
+        hostname = (parsed_origin.hostname or "").lower()
+        if hostname in {"localhost", "127.0.0.1", "::1"}:
+            if parsed_origin.scheme.lower() not in {"http", "https"}:
+                raise HTTPException(status_code=422, detail="local review origins must use http or https")
+        elif parsed_origin.scheme.lower() != "https":
+            raise HTTPException(status_code=422, detail="review origins must use https outside local development")
+        if parsed_subject.scheme.lower() != parsed_origin.scheme.lower() or parsed_subject.netloc.lower() != parsed_origin.netloc.lower():
+            raise HTTPException(status_code=422, detail="subject_pattern origin must match allowed_origin")
 
     def _validate_review_access_rotation(payload: ReviewAccessRotateIn) -> str:
         has_deployment_metadata = any(
@@ -666,33 +705,24 @@ def create_app() -> FastAPI:
                 status_code=422,
                 detail="deployment_id is required for deployment-scoped access",
             )
+        if payload.deployment_scoped_access and payload.policies:
+            raise HTTPException(
+                status_code=422,
+                detail="deployment_scoped_access cannot be combined with policy allowlists",
+            )
         if has_deployment_metadata:
-            missing = [
-                name
-                for name, value in {
-                    "deployment_id": payload.deployment_id,
-                    "allowed_origin": payload.allowed_origin,
-                    "subject_pattern": payload.subject_pattern,
-                }.items()
-                if not (value or "").strip()
-            ]
-            if missing:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"incomplete deployment metadata: missing {', '.join(missing)}",
-                )
-            parsed_origin = urlparse(payload.allowed_origin or "")
-            parsed_subject = urlparse((payload.subject_pattern or "").split("*", 1)[0])
-            if not parsed_origin.scheme or not parsed_origin.netloc or parsed_origin.path not in ("", "/"):
-                raise HTTPException(status_code=422, detail="allowed_origin must be an origin")
-            hostname = (parsed_origin.hostname or "").lower()
-            if hostname in {"localhost", "127.0.0.1", "::1"}:
-                if parsed_origin.scheme.lower() not in {"http", "https"}:
-                    raise HTTPException(status_code=422, detail="local review origins must use http or https")
-            elif parsed_origin.scheme.lower() != "https":
-                raise HTTPException(status_code=422, detail="review origins must use https outside local development")
-            if parsed_subject.scheme.lower() != parsed_origin.scheme.lower() or parsed_subject.netloc.lower() != parsed_origin.netloc.lower():
-                raise HTTPException(status_code=422, detail="subject_pattern origin must match allowed_origin")
+            _validate_review_policy_metadata(
+                deployment_id=payload.deployment_id,
+                allowed_origin=payload.allowed_origin,
+                subject_pattern=payload.subject_pattern,
+            )
+        for index, policy in enumerate(payload.policies):
+            _validate_review_policy_metadata(
+                deployment_id=policy.deployment_id,
+                allowed_origin=policy.allowed_origin,
+                subject_pattern=policy.subject_pattern,
+                context=f"policy[{index}]",
+            )
         if payload.mode == "provided":
             code = (payload.access_code or "").strip()
             if len(code) < 16:
@@ -716,6 +746,15 @@ def create_app() -> FastAPI:
             deployment_slug=(payload.deployment_slug or "").strip() or None,
             allowed_origin=(payload.allowed_origin or "").strip() or None,
             subject_pattern=(payload.subject_pattern or "").strip() or None,
+            policies=[
+                {
+                    "deployment_id": policy.deployment_id.strip(),
+                    "deployment_slug": (policy.deployment_slug or policy.deployment_id).strip(),
+                    "allowed_origin": policy.allowed_origin.strip(),
+                    "subject_pattern": policy.subject_pattern.strip(),
+                }
+                for policy in payload.policies
+            ],
             access_code_id=payload.access_code_id.strip(),
             access_label=payload.access_label.strip(),
             access_code=raw_code,
@@ -1079,10 +1118,6 @@ def create_app() -> FastAPI:
         for field_name in (
             "automaton_status",
             "automaton_event",
-            "fix_attempt_count",
-            "resume_step_index",
-            "effective_resume_parent_index",
-            "rerun_step_indexes",
             "review_outcome",
             "review_scope",
         ):

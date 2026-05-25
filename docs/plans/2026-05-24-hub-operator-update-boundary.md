@@ -1,6 +1,8 @@
 # Hub Operator Update Boundary Implementation Plan
 
-> **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task after the boundary decisions are accepted.
+> **Status:** Historical plan. The operator-update boundary now lives in `docs/operations/operator-updates.md`; the repository-owned automaton contract and fixed Mermaid diagram live in `docs/operations/review-case-automaton.md`.
+>
+> **For Hermes:** Use subagent-driven-development skill to implement future plan task-by-task after boundary decisions are accepted.
 
 **Goal:** Make Hub updates explicit, operator-controlled, and fork/community-safe instead of treating GitHub `main` as an automatic deployment trigger for Gabriel's live Hub.
 
@@ -123,12 +125,9 @@ python scripts/hub_update.py plan \
 
 ## Immediate live-Hub posture
 
-Because the automaton fix is now merged but not deployed, there are two safe paths:
+This section is superseded by the operator-controlled rollout doctrine in `docs/operations/operator-updates.md`. At the time of this plan, `ce56d0c` had been merged but was not yet deployed. That first-slice automaton deployment was later completed through a local operator-controlled Terraform apply.
 
-1. **Hold production unchanged** until the operator-update boundary exists.
-2. **Perform a one-off explicit operator deploy** of `ce56d0c` if the automaton fix is urgently needed in live review flow.
-
-Recommendation: hold production unchanged unless the live review flow is blocking work today. The waiting-assignment case should be debugged separately as a Frank/execution assignment blocker.
+For new source changes, do not infer production state from merge state. Land the source change, build immutable image tags, run a local operator Terraform plan preserving unaffected service tags, review scope, apply explicitly, then verify ECS stability and smoke results.
 
 ## Verification commands
 

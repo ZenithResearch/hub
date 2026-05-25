@@ -100,9 +100,9 @@ def create_app(store: QueueStore, default_max_retries: int = 3, default_claim_ti
         return DequeueOut(found=True, message=_message_to_dict(msg))
 
     @app.get("/queues/{queue_name}/peek")
-    def peek(queue_name: str, n: int = 10, status: str = "pending") -> dict:
-        messages = store.peek(queue_name, n=n, status=status)
-        return {"messages": [_message_to_dict(m) for m in messages]}
+    def peek(queue_name: str, n: int = 10, status: str = "pending", include_payload: bool = False) -> dict:
+        messages = store.peek(queue_name, n=n, status=status, include_payload=include_payload)
+        return {"messages": [_message_to_dict(m, include_payload=include_payload) for m in messages]}
 
     @app.get("/queues")
     def list_queues() -> dict:
@@ -164,8 +164,14 @@ def create_app(store: QueueStore, default_max_retries: int = 3, default_claim_ti
     return app
 
 
-def _message_to_dict(msg: Message) -> dict:
-    return {
+def _preview(text: str, limit: int = 240) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def _message_to_dict(msg: Message, *, include_payload: bool = True) -> dict:
+    payload = {
         "id": msg.id,
         "queue_name": msg.queue_name,
         "event_type": msg.event_type,
@@ -173,7 +179,6 @@ def _message_to_dict(msg: Message) -> dict:
         "source_type": msg.source_type,
         "sender": msg.sender,
         "message_body": msg.message_body,
-        "payload": msg.payload,
         "status": msg.status,
         "priority": msg.priority,
         "created_at": msg.created_at,
@@ -184,5 +189,12 @@ def _message_to_dict(msg: Message) -> dict:
         "max_retries": msg.max_retries,
         "claim_timeout_s": msg.claim_timeout_s,
         "error": msg.error,
-        "metadata": msg.metadata,
     }
+    if include_payload:
+        payload["payload"] = msg.payload
+        payload["metadata"] = msg.metadata
+    else:
+        payload["message_body_preview"] = _preview(msg.message_body or "")
+        payload["payload_keys"] = sorted(msg.payload.keys()) if isinstance(msg.payload, dict) else []
+        payload["metadata_keys"] = sorted(msg.metadata.keys()) if isinstance(msg.metadata, dict) else []
+    return payload

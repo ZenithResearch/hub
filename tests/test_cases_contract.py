@@ -228,6 +228,28 @@ class CasesContractTests(unittest.TestCase):
         matching = [case for case in cases if case["queue_message_id"] == "msg_1"]
         self.assertEqual(len(matching), 1)
 
+    def test_case_list_omits_heavy_process_fields_by_default(self) -> None:
+        self.create_case_with_dispatch_packet()
+
+        listed = self.client.get("/cases?limit=20")
+
+        self.assertEqual(listed.status_code, 200)
+        case = next(case for case in listed.json()["cases"] if case["queue_message_id"] == "msg_with_packet")
+        self.assertNotIn("process_source", case)
+        self.assertNotIn("contract_json", case)
+        self.assertNotIn("dispatch_packet_json", case)
+
+    def test_case_list_can_include_heavy_process_fields_for_legacy_callers(self) -> None:
+        self.create_case_with_dispatch_packet()
+
+        listed = self.client.get("/cases?limit=20&include_heavy=true")
+
+        self.assertEqual(listed.status_code, 200)
+        case = next(case for case in listed.json()["cases"] if case["queue_message_id"] == "msg_with_packet")
+        self.assertIn("process_source", case)
+        self.assertIn("contract_json", case)
+        self.assertIn("dispatch_packet_json", case)
+
     def test_unknown_slot_write_is_rejected_and_logged(self) -> None:
         created = self.create_case()
         response = self.client.post(
