@@ -583,7 +583,13 @@ class ReviewAuthStore:
                     now,
                 ),
             )
-            conn.execute("UPDATE review_access_code_policies SET active = 0, updated_at = ? WHERE access_code_id = ?", (now, access_code_id))
+            # Replacement rotation should make the submitted policy set authoritative.
+            # Do not leave inactive duplicate policy rows behind: the table has a
+            # unique constraint on (access_code_id, deployment_id, allowed_origin,
+            # subject_pattern), so re-rotating a canonical policy that already exists
+            # under an older row id must clear the previous rows before inserting the
+            # new final set.
+            conn.execute("DELETE FROM review_access_code_policies WHERE access_code_id = ?", (access_code_id,))
             for policy in cleaned_policies:
                 policy_fingerprint = hashlib.sha256(
                     "\x1f".join(

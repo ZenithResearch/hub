@@ -451,16 +451,16 @@ class GatewayHttpSessionTests(unittest.TestCase):
             "/v1/admin/review-auth/access-codes/rotate",
             headers=self._admin_headers(),
             json={
-                "client_id": "samantha-pinheiro",
-                "client_slug": "samantha-pinheiro",
-                "client_name": "Samantha Pinheiro",
+                "client_id": "luna-lovegood",
+                "client_slug": "luna-lovegood",
+                "client_name": "Luna Lovegood",
                 "project_id": "gallery",
                 "project_slug": "gallery",
                 "project_name": "Gallery",
-                "access_code_id": "samantha-pinheiro-gallery-review",
-                "access_label": "Samantha Pinheiro",
+                "access_code_id": "luna-lovegood-gallery-review",
+                "access_label": "Luna Lovegood",
                 "mode": "provided",
-                "access_code": "gallery-review-code-for-samantha",
+                "access_code": "gallery-review-code-for-luna",
                 "policies": [
                     {
                         "deployment_id": "gallery-production",
@@ -489,7 +489,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
             json={
                 "project_id": "gallery",
                 "deployment_id": "gallery-production",
-                "access_code": "gallery-review-code-for-samantha",
+                "access_code": "gallery-review-code-for-luna",
                 "subject_id": "https://gal-ler-y.com/admin/events",
             },
         )
@@ -501,7 +501,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
             json={
                 "project_id": "gallery",
                 "deployment_id": "gallery-local",
-                "access_code": "gallery-review-code-for-samantha",
+                "access_code": "gallery-review-code-for-luna",
                 "subject_id": "http://localhost:3000/admin/events",
             },
         )
@@ -513,11 +513,152 @@ class GatewayHttpSessionTests(unittest.TestCase):
             json={
                 "project_id": "gallery",
                 "deployment_id": "gallery-production",
-                "access_code": "gallery-review-code-for-samantha",
+                "access_code": "gallery-review-code-for-luna",
                 "subject_id": "https://evil.example/admin/events",
             },
         )
         self.assertEqual(rejected_origin.status_code, 401)
+
+    def test_admin_review_access_rotate_reconciles_glass_bead_policy_sequence(self) -> None:
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            conn.execute(
+                "INSERT INTO clients (id, slug, name, created_at) VALUES (?, ?, ?, ?)",
+                ("hermione-granger", "hermione-granger", "Hermione Granger", "2026-05-25T00:00:00Z"),
+            )
+            conn.execute(
+                "INSERT INTO projects (id, client_id, slug, name, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("gallery", "hermione-granger", "gallery", "Gallery", "2026-05-25T00:00:00Z"),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_access_codes
+                    (id, project_id, deployment_id, label, email, code_hash, active, created_at, expires_at)
+                VALUES (?, ?, NULL, ?, NULL, ?, 1, ?, NULL)
+                """,
+                (
+                    "hermione-granger-gallery-review",
+                    "gallery",
+                    "Hermione Granger",
+                    "prior-glass-bead-hash-placeholder",
+                    "2026-05-25T00:00:00Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_access_code_policies
+                    (id, access_code_id, project_id, deployment_id, allowed_origin, subject_pattern, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (
+                    "old-bead-sequence-row",
+                    "hermione-granger-gallery-review",
+                    "gallery",
+                    "gallery-production",
+                    "https://gal-ler-y.com",
+                    "https://gal-ler-y.com/*",
+                    "2026-05-25T00:00:00Z",
+                    "2026-05-25T00:00:00Z",
+                ),
+            )
+
+        response = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "hermione-granger",
+                "client_slug": "hermione-granger",
+                "client_name": "Hermione Granger",
+                "project_id": "gallery",
+                "project_slug": "gallery",
+                "project_name": "Gallery",
+                "access_code_id": "hermione-granger-gallery-review",
+                "access_label": "Hermione Granger",
+                "mode": "generate",
+                "policies": [
+                    {
+                        "deployment_id": "gallery-production",
+                        "deployment_slug": "gallery-production",
+                        "allowed_origin": "https://gal-ler-y.com",
+                        "subject_pattern": "https://gal-ler-y.com/*",
+                    },
+                    {
+                        "deployment_id": "gallery-local",
+                        "deployment_slug": "gallery-local",
+                        "allowed_origin": "http://localhost:3000",
+                        "subject_pattern": "http://localhost:3000/*",
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json().get("policy_count"), 2)
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            rows = conn.execute(
+                "SELECT id, active FROM review_access_code_policies WHERE access_code_id = ? ORDER BY deployment_id",
+                ("hermione-granger-gallery-review",),
+            ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertNotIn("old-bead-sequence-row", {row[0] for row in rows})
+        self.assertTrue(all(row[1] == 1 for row in rows))
+
+    def test_admin_review_access_rotate_rejects_gallery_legacy_policy_ids(self) -> None:
+        response = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "neville-longbottom",
+                "client_slug": "neville-longbottom",
+                "client_name": "Neville Longbottom",
+                "project_id": "gallery",
+                "project_slug": "gallery",
+                "project_name": "Gallery",
+                "deployment_id": "gallery-dev",
+                "deployment_slug": "gallery-dev",
+                "allowed_origin": "http://localhost:3000",
+                "subject_pattern": "http://localhost:3000*",
+                "access_code_id": "neville-longbottom-gallery-review",
+                "access_label": "Neville Longbottom",
+                "mode": "generate",
+                "policies": [
+                    {
+                        "deployment_id": "gallery-dev",
+                        "deployment_slug": "gallery-dev",
+                        "allowed_origin": "http://localhost:3000",
+                        "subject_pattern": "http://localhost:3000*",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("cannot rotate legacy deployment IDs", response.text)
+
+    def test_admin_review_access_rotate_requires_canonical_gallery_policy_pair(self) -> None:
+        response = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "neville-longbottom",
+                "client_slug": "neville-longbottom",
+                "client_name": "Neville Longbottom",
+                "project_id": "gallery",
+                "project_slug": "gallery",
+                "project_name": "Gallery",
+                "access_code_id": "neville-longbottom-gallery-review",
+                "access_label": "Neville Longbottom",
+                "mode": "generate",
+                "policies": [
+                    {
+                        "deployment_id": "gallery-local",
+                        "deployment_slug": "gallery-local",
+                        "allowed_origin": "http://localhost:3000",
+                        "subject_pattern": "http://localhost:3000/*",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("requires exactly the canonical", response.text)
 
     def test_admin_review_access_rotate_provided_code_does_not_echo_raw_code(self) -> None:
         response = self.client.post(

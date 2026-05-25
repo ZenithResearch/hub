@@ -695,6 +695,51 @@ def create_app() -> FastAPI:
         if parsed_subject.scheme.lower() != parsed_origin.scheme.lower() or parsed_subject.netloc.lower() != parsed_origin.netloc.lower():
             raise HTTPException(status_code=422, detail="subject_pattern origin must match allowed_origin")
 
+    def _gallery_policy_tuple(policy: ReviewAccessPolicyIn) -> tuple[str, str, str, str]:
+        deployment_id = policy.deployment_id.strip()
+        return (
+            deployment_id,
+            (policy.deployment_slug or deployment_id).strip(),
+            policy.allowed_origin.strip(),
+            policy.subject_pattern.strip(),
+        )
+
+    def _validate_gallery_review_access_policies(payload: ReviewAccessRotateIn) -> None:
+        if payload.project_id.strip() != "gallery":
+            return
+        if payload.deployment_scoped_access:
+            raise HTTPException(status_code=422, detail="Gallery review access must be project-scoped with explicit policies")
+        legacy_ids = {"gallery-dev", "gallery-prod"}
+        submitted_policy_ids = {policy.deployment_id.strip() for policy in payload.policies}
+        top_level_id = (payload.deployment_id or "").strip()
+        if submitted_policy_ids & legacy_ids or top_level_id in legacy_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Gallery review access cannot rotate legacy deployment IDs; use gallery-local and gallery-production",
+            )
+        expected = {
+            ("gallery-production", "gallery-production", "https://gal-ler-y.com", "https://gal-ler-y.com/*"),
+            ("gallery-local", "gallery-local", "http://localhost:3000", "http://localhost:3000/*"),
+        }
+        actual = {_gallery_policy_tuple(policy) for policy in payload.policies}
+        if actual != expected:
+            raise HTTPException(
+                status_code=422,
+                detail="Gallery review access requires exactly the canonical gallery-production and gallery-local policies",
+            )
+        if top_level_id:
+            top_level_tuple = (
+                top_level_id,
+                (payload.deployment_slug or top_level_id).strip(),
+                (payload.allowed_origin or "").strip(),
+                (payload.subject_pattern or "").strip(),
+            )
+            if top_level_tuple not in expected:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Gallery compatibility deployment metadata must mirror a canonical Gallery policy",
+                )
+
     def _validate_review_access_rotation(payload: ReviewAccessRotateIn) -> str:
         has_deployment_metadata = any(
             bool((value or "").strip())
@@ -723,6 +768,7 @@ def create_app() -> FastAPI:
                 subject_pattern=policy.subject_pattern,
                 context=f"policy[{index}]",
             )
+        _validate_gallery_review_access_policies(payload)
         if payload.mode == "provided":
             code = (payload.access_code or "").strip()
             if len(code) < 16:
