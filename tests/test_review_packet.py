@@ -186,6 +186,61 @@ class ReviewPacketTests(unittest.TestCase):
         self.assertIn("number", items[0]["normalized_claim"].lower())
         self.assertEqual(items[0]["type"], "missing_state")
 
+    def test_extract_feedback_items_detects_deictic_rejection_with_stroke_evidence(self) -> None:
+        segments = [
+            {
+                "id": "seg_001",
+                "text": "Okay, see, like we don't want that or these little blur is here.",
+                "nearby_target_refs": ["canvas"],
+                "nearby_event_ids": [157, 158, 160],
+                "nearby_stroke_ids": ["stroke_1"],
+            }
+        ]
+
+        items = extract_feedback_items(segments, [])
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["type"], "visual_artifact")
+        self.assertEqual(items[0]["target_refs"], ["canvas"])
+        self.assertEqual(items[0]["evidence"]["stroke_ids"], ["stroke_1"])
+        self.assertIn("don't want", items[0]["reviewer_quote"])
+
+    def test_normalized_events_preserve_page_scroll_and_stroke_timeline(self) -> None:
+        normalized = normalize_review_events(
+            [
+                {
+                    "id": 1,
+                    "type": "session-start",
+                    "elapsedMs": 0,
+                    "url": "https://swrl-ui.vercel.app/",
+                    "title": "swirl-ui",
+                    "scrollX": 0,
+                    "scrollY": 10,
+                    "viewportWidth": 1512,
+                    "viewportHeight": 801,
+                },
+                {
+                    "id": 2,
+                    "type": "navigation",
+                    "elapsedMs": 1200,
+                    "trigger": "pushstate",
+                    "fromUrl": "https://swrl-ui.vercel.app/",
+                    "fromTitle": "swirl-ui",
+                    "toUrl": "https://swrl-ui.vercel.app/grading",
+                    "toTitle": "grading",
+                    "scrollX": 0,
+                    "scrollY": 0,
+                },
+                {"id": 3, "type": "scroll", "elapsedMs": 1800, "scrollX": 0, "scrollY": 320, "url": "https://swrl-ui.vercel.app/grading"},
+                {"id": 4, "type": "stroke-point", "strokeId": "s1", "elapsedMs": 2000, "x": 10, "y": 20},
+            ]
+        )
+
+        self.assertEqual(normalized["page_events"][0]["url"], "https://swrl-ui.vercel.app/")
+        self.assertEqual(normalized["page_events"][1]["to_url"], "https://swrl-ui.vercel.app/grading")
+        self.assertEqual(normalized["scroll_events"][0]["scroll_y"], 320)
+        self.assertEqual(normalized["stroke_groups"][0]["event_ids"], [4])
+
     def test_extract_feedback_items_returns_empty_without_feedback_language(self) -> None:
         items = extract_feedback_items(
             [{"id": "seg_001", "text": "I am looking at the page.", "nearby_target_refs": [], "nearby_event_ids": []}],

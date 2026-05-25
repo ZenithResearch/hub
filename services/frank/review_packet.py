@@ -80,6 +80,8 @@ def normalize_review_events(events: list[dict[str, Any]] | Any) -> dict[str, Any
     stroke_points: dict[str, list[dict[str, Any]]] = defaultdict(list)
     stroke_bounds: dict[str, dict[str, int | None]] = {}
     pointer_events: list[dict[str, Any]] = []
+    page_events: list[dict[str, Any]] = []
+    scroll_events: list[dict[str, Any]] = []
 
     for event in events:
         if not isinstance(event, dict):
@@ -91,6 +93,56 @@ def normalize_review_events(events: list[dict[str, Any]] | Any) -> dict[str, Any
         target_ref, source = _target_from_event(event)
         x = event.get("x")
         y = event.get("y")
+
+        if event_type == "session-start":
+            page_events.append(
+                {
+                    "event_id": event_id,
+                    "elapsed_ms": elapsed_ms,
+                    "type": event_type,
+                    "url": event.get("url"),
+                    "title": event.get("title"),
+                    "scroll_x": _safe_int(event.get("scrollX")),
+                    "scroll_y": _safe_int(event.get("scrollY")),
+                    "viewport_width": _safe_int(event.get("viewportWidth")),
+                    "viewport_height": _safe_int(event.get("viewportHeight")),
+                }
+            )
+        elif event_type == "navigation":
+            page_events.append(
+                {
+                    "event_id": event_id,
+                    "elapsed_ms": elapsed_ms,
+                    "type": event_type,
+                    "trigger": event.get("trigger"),
+                    "from_url": event.get("fromUrl"),
+                    "from_title": event.get("fromTitle"),
+                    "to_url": event.get("toUrl"),
+                    "to_title": event.get("toTitle"),
+                    "scroll_x": _safe_int(event.get("scrollX")),
+                    "scroll_y": _safe_int(event.get("scrollY")),
+                }
+            )
+        elif event_type == "visibility-change":
+            page_events.append(
+                {
+                    "event_id": event_id,
+                    "elapsed_ms": elapsed_ms,
+                    "type": event_type,
+                    "state": event.get("state"),
+                }
+            )
+
+        if event_type == "scroll":
+            scroll_events.append(
+                {
+                    "event_id": event_id,
+                    "elapsed_ms": elapsed_ms,
+                    "url": event.get("url"),
+                    "scroll_x": _safe_int(event.get("scrollX")),
+                    "scroll_y": _safe_int(event.get("scrollY")),
+                }
+            )
 
         if target_ref:
             candidate = target_acc.setdefault(
@@ -163,6 +215,7 @@ def normalize_review_events(events: list[dict[str, Any]] | Any) -> dict[str, Any
         stroke_groups.append(
             {
                 "stroke_id": stroke_id,
+                "event_ids": [point["event_id"] for point in points if point.get("event_id") is not None],
                 "point_count": len(points),
                 "start_ms": bounds["start_ms"],
                 "end_ms": bounds["end_ms"],
@@ -196,6 +249,8 @@ def normalize_review_events(events: list[dict[str, Any]] | Any) -> dict[str, Any
         "target_events": target_events,
         "stroke_groups": stroke_groups,
         "pointer_windows": pointer_windows,
+        "page_events": page_events,
+        "scroll_events": scroll_events,
     }
 
 
@@ -240,6 +295,7 @@ def build_transcript_segments(
         text = " ".join(_word_text(word) for word in current).strip()
         nearby_events: list[Any] = []
         nearby_targets: list[str] = []
+        nearby_strokes: list[str] = []
         for target_event in normalized_events.get("target_events") or []:
             elapsed_ms = _safe_int(target_event.get("elapsed_ms"))
             if not (start_ms - window_ms <= elapsed_ms <= end_ms + window_ms):
@@ -250,6 +306,14 @@ def build_transcript_segments(
             event_id = target_event.get("event_id")
             if event_id is not None and event_id not in nearby_events:
                 nearby_events.append(event_id)
+        for stroke_group in normalized_events.get("stroke_groups") or []:
+            stroke_id = str(stroke_group.get("stroke_id") or "").strip()
+            if not stroke_id:
+                continue
+            stroke_start = _safe_int(stroke_group.get("start_ms"))
+            stroke_end = _safe_int(stroke_group.get("end_ms"), stroke_start)
+            if start_ms - window_ms <= stroke_end and stroke_start <= end_ms + window_ms and stroke_id not in nearby_strokes:
+                nearby_strokes.append(stroke_id)
         segments.append(
             {
                 "id": f"seg_{idx:03d}",
@@ -259,6 +323,7 @@ def build_transcript_segments(
                 "word_count": len(current),
                 "nearby_target_refs": nearby_targets[:8],
                 "nearby_event_ids": nearby_events[:20],
+                "nearby_stroke_ids": nearby_strokes[:12],
             }
         )
         current.clear()
@@ -276,7 +341,10 @@ def build_transcript_segments(
     return segments
 
 
-_FEEDBACK_RE = re.compile(r"\b(not centered|needs? to|problem|issue|move|should|wrong|does(?:n't| not)|only shows?|show a number)\b", re.I)
+_FEEDBACK_RE = re.compile(
+    r"\b(not centered|needs? to|problem|issue|move|should|wrong|does(?:n't| not)|do(?:n't| not) want|don't want|we don't want|only shows?|show a number|blur|artifact|glitch|jank)\b",
+    re.I,
+)
 
 
 def _classify_feedback(text: str) -> str:
@@ -287,6 +355,8 @@ def _classify_feedback(text: str) -> str:
         return "layout"
     if "click" in lower or "doesn't" in lower or "does not" in lower:
         return "interaction"
+    if "don't want" in lower or "do not want" in lower or "blur" in lower or "artifact" in lower or "glitch" in lower:
+        return "visual_artifact"
     return "unknown"
 
 
@@ -299,6 +369,10 @@ def _normalize_claim(text: str) -> str:
         return "The notification tray/badge state should show the number/count when the tray is full instead of only after exiting."
     if "not centered" in lower:
         return "The referenced UI element is not centered."
+    if "don't want" in lower or "do not want" in lower:
+        return "The referenced UI state or visual artifact is unwanted and should be corrected."
+    if "blur" in lower or "artifact" in lower or "glitch" in lower:
+        return "The referenced UI area contains an unwanted visual artifact."
     return cleaned
 
 
@@ -311,6 +385,7 @@ def extract_feedback_items(segments: list[dict[str, Any]], target_candidates: li
             continue
         idx = len(items) + 1
         target_refs = list(dict.fromkeys(str(ref) for ref in (segment.get("nearby_target_refs") or []) if ref))
+        stroke_ids = list(dict.fromkeys(str(ref) for ref in (segment.get("nearby_stroke_ids") or []) if ref))
         items.append(
             {
                 "id": f"fb_{idx:03d}",
@@ -321,10 +396,10 @@ def extract_feedback_items(segments: list[dict[str, Any]], target_candidates: li
                 "evidence": {
                     "transcript_segment_ids": [segment.get("id")],
                     "event_ids": list(segment.get("nearby_event_ids") or []),
-                    "stroke_ids": [],
+                    "stroke_ids": stroke_ids,
                 },
                 "severity": "medium",
-                "confidence": 0.72 if target_refs else 0.55,
+                "confidence": 0.74 if target_refs and stroke_ids else 0.72 if target_refs else 0.6 if stroke_ids else 0.55,
             }
         )
     return items
