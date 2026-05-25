@@ -138,7 +138,17 @@ class ReviewSubmitOut(BaseModel):
 class ReviewStatusUpdateIn(BaseModel):
     status: str
     review_note_path: str | None = None
+    review_packet_path: str | None = None
+    review_packet_status: str | None = None
     reason: str | None = None
+    automaton_status: str | None = None
+    automaton_event: str | None = None
+    fix_attempt_count: int | None = None
+    resume_step_index: int | None = None
+    effective_resume_parent_index: int | None = None
+    rerun_step_indexes: list[int] | None = None
+    review_outcome: str | None = None
+    review_scope: str | None = None
 
 
 class CaseFollowUpIn(BaseModel):
@@ -1060,8 +1070,25 @@ def create_app() -> FastAPI:
         record["status_updated_at"] = datetime.now(timezone.utc).isoformat()
         if payload.review_note_path is not None:
             record["review_note_path"] = payload.review_note_path
+        if payload.review_packet_path is not None:
+            record["review_packet_path"] = payload.review_packet_path
+        if payload.review_packet_status is not None:
+            record["review_packet_status"] = payload.review_packet_status
         if payload.reason is not None:
             record["status_reason"] = payload.reason
+        for field_name in (
+            "automaton_status",
+            "automaton_event",
+            "fix_attempt_count",
+            "resume_step_index",
+            "effective_resume_parent_index",
+            "rerun_step_indexes",
+            "review_outcome",
+            "review_scope",
+        ):
+            value = getattr(payload, field_name)
+            if value is not None:
+                record[field_name] = value
         tmp_path = path.with_suffix(path.suffix + ".tmp")
         tmp_path.write_text(json.dumps(record), encoding="utf-8")
         tmp_path.replace(path)
