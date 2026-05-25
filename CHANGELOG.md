@@ -45,6 +45,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 
 ### Changed
+- Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 - Consolidated Review Case Automaton repository docs — fixed the Mermaid diagram as the canonical operations contract, cross-linked Frank/Gateway docs, and marked the 2026-05-24 operator-update plan as historical.
 - Updated Review Case Automaton metadata persistence — Gateway status writeback now persists packet/review outcome metadata without accepting Frank retry/rerun bookkeeping fields.
 - Updated Hub operator update docs with the actual local production rollout state — distinguishes the successful local operator deploy from the intentionally removed GitHub Actions production CD path.

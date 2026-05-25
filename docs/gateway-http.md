@@ -112,7 +112,7 @@ Gateway may persist additive status metadata (`automaton_status`, `automaton_eve
 |----------|---------|-------------|
 | `HTTP_PORT` | `8080` | Port uvicorn binds to |
 | `RUNTIME_GRPC_TARGET` | `runtime-grpc:50051` | Address of the gRPC runtime service |
-| `CORS_ALLOW_ORIGINS` | `http://localhost:3000` | Comma-separated list of allowed origins |
+| `CORS_ALLOW_ORIGINS` | `http://localhost:3000` | Comma-separated list of browser origins allowed to call Gateway directly. Keep local review origins such as `http://localhost:3000` and `http://localhost:5173` in operator tfvars when local Review SDK/admin clients upload assets to production Hub. |
 | `MAX_BODY_BYTES` | `262144` (256 KB) | Global request body size limit |
 | `GATEWAY_GRPC_TIMEOUT_S` | `5.0` | Timeout for gRPC calls to the runtime |
 | `REVIEWS_DATA_DIR` | `data/reviews` | Root directory for review records and assets |
