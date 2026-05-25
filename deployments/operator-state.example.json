@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "node_id": "example-node",
+  "profile": "local-dev",
+  "source": {
+    "repo": "https://github.com/ZenithResearch/hub.git",
+    "ref": "ce56d0ca63ba2556f9586cae2185c1709971bcc7",
+    "ref_type": "commit"
+  },
+  "images": {
+    "gateway_http": "review-case-automaton-202605250235-a918d6d",
+    "frank": "review-case-automaton-202605250235-a918d6d",
+    "eventbus": "gateway-admin-queue-case-20260518003135-5ae0998",
+    "cases": "native-timeout-hotfix-20260519004401",
+    "stt_http": "stt-cache-hotfix-20260519013103"
+  },
+  "last_plan": {
+    "planned_at": "2026-05-25T00:00:00Z",
+    "planned_by": "operator",
+    "summary": "Example state only; do not treat as live deployment proof."
+  },
+  "last_apply": null,
+  "notes": [
+    "This file is an example shape and contains no secrets.",
+    "Real operator state should be local/private and updated only after smoke passes."
+  ]
+}
