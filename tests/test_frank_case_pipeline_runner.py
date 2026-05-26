@@ -482,20 +482,20 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
         outputs = await runner.execute_step_8(case_detail)
 
         patch_payload = next(payload for method, url, payload in client.operations if method == "PATCH" and url.endswith("/v1/reviews/review_12345678/status"))
-        self.assertEqual(patch_payload["status"], "failed")
-        self.assertEqual(patch_payload["automaton_status"], "failed")
-        self.assertEqual(patch_payload["automaton_event"], "packet_failed")
-        self.assertEqual(patch_payload["reason"], "packet_failed")
+        self.assertEqual(patch_payload["status"], "processed")
+        self.assertEqual(patch_payload["automaton_status"], "succeeded")
+        self.assertEqual(patch_payload["automaton_event"], "review_passed")
+        self.assertEqual(patch_payload["reason"], "review_passed")
         self.assertEqual(patch_payload["review_scope"], REVIEW_SCOPE_FULL)
         self.assertEqual(patch_payload["review_packet_status"], "needs_human_review")
-        self.assertEqual(outputs["review_status_updated"]["status"], "failed")
-        self.assertEqual(outputs["review_status_updated"]["automaton_status"], "failed")
-        self.assertEqual(outputs["review_status_updated"]["automaton_event"], "packet_failed")
-        self.assertEqual(outputs["review_status_updated"]["reason"], "packet_failed")
+        self.assertEqual(outputs["review_status_updated"]["status"], "processed")
+        self.assertEqual(outputs["review_status_updated"]["automaton_status"], "succeeded")
+        self.assertEqual(outputs["review_status_updated"]["automaton_event"], "review_passed")
+        self.assertEqual(outputs["review_status_updated"]["reason"], "review_passed")
         self.assertEqual(outputs["review_status_updated"]["review_scope"], REVIEW_SCOPE_FULL)
         self.assertEqual(outputs["review_status_updated"]["review_packet_status"], "needs_human_review")
 
-    async def test_step_8_degraded_packet_fails_case_step_after_status_writeback(self) -> None:
+    async def test_step_8_degraded_packet_completes_case_step_after_status_writeback(self) -> None:
         client = _RunnerClient()
         runner = CasePipelineRunner(
             client=client,
@@ -522,22 +522,20 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             "contract": {"steps": [{"step_id": "step_8", "output_variables": ["review_status_updated"]}]},
         }
 
-        with self.assertRaisesRegex(RuntimeError, "review packet not ready: needs_human_review"):
-            await runner.run_step("case_run_1", "case_review_1", {}, case_detail, step, Path("/tmp"))
+        await runner.run_step("case_run_1", "case_review_1", {}, case_detail, step, Path("/tmp"))
 
         patch_payload = next(payload for method, url, payload in client.operations if method == "PATCH" and url.endswith("/v1/reviews/review_12345678/status"))
-        self.assertEqual(patch_payload["status"], "failed")
-        self.assertEqual(patch_payload["automaton_status"], "failed")
-        self.assertEqual(patch_payload["automaton_event"], "packet_failed")
-        self.assertEqual(patch_payload["reason"], "packet_failed")
+        self.assertEqual(patch_payload["status"], "processed")
+        self.assertEqual(patch_payload["automaton_status"], "succeeded")
+        self.assertEqual(patch_payload["automaton_event"], "review_passed")
+        self.assertEqual(patch_payload["reason"], "review_passed")
         self.assertEqual(patch_payload["review_packet_status"], "needs_human_review")
         complete_output_index = next(index for index, (_, url, _) in enumerate(client.operations) if "/steps/step_db_8/complete-outputs" in url)
-        failed_step_index, failed_step_update = next((index, payload) for index, (method, url, payload) in enumerate(client.operations) if method == "PUT" and url.endswith("/cases/case_review_1/steps/step_db_8"))
-        self.assertLess(complete_output_index, failed_step_index)
-        self.assertEqual(failed_step_update["status"], "FAILED")
-        failed_step_run_update = next(payload for method, url, payload in client.operations if method == "PUT" and url.endswith("/step-runs/step_run_step_db_8"))
-        self.assertEqual(failed_step_run_update["status"], "failed")
-        self.assertTrue(any(event["type"] == "step.failed" for event in client.events))
+        step_run_index, step_run_update = next((index, payload) for index, (method, url, payload) in enumerate(client.operations) if method == "PUT" and url.endswith("/step-runs/step_run_step_db_8"))
+        self.assertLess(complete_output_index, step_run_index)
+        self.assertEqual(step_run_update["status"], "completed")
+        self.assertFalse(any(method == "PUT" and url.endswith("/cases/case_review_1/steps/step_db_8") for method, url, _ in client.operations))
+        self.assertFalse(any(event["type"] == "step.failed" for event in client.events))
 
     async def test_step_8_records_transcript_only_status_reason(self) -> None:
         client = _RunnerClient()
@@ -561,10 +559,10 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
         outputs = await runner.execute_step_8(case_detail)
 
         patch_payload = next(payload for method, url, payload in client.operations if method == "PATCH" and url.endswith("/v1/reviews/review_12345678/status"))
-        self.assertEqual(patch_payload["status"], "failed")
-        self.assertEqual(patch_payload["automaton_status"], "failed")
-        self.assertEqual(patch_payload["automaton_event"], "packet_failed")
-        self.assertEqual(patch_payload["reason"], "packet_failed")
+        self.assertEqual(patch_payload["status"], "processed")
+        self.assertEqual(patch_payload["automaton_status"], "succeeded")
+        self.assertEqual(patch_payload["automaton_event"], "review_passed")
+        self.assertEqual(patch_payload["reason"], "review_passed")
         self.assertEqual(outputs["review_status_updated"]["review_packet_status"], "transcript_only")
 
     async def test_step_8_ready_packet_records_successful_automaton_metadata(self) -> None:
@@ -753,10 +751,10 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             outputs = await runner.execute_step_8(case_detail)
 
         patch_payload = next(payload for method, url, payload in client.operations if method == "PATCH" and url.endswith("/v1/reviews/review_12345678/status"))
-        self.assertEqual(patch_payload["status"], "failed")
-        self.assertEqual(patch_payload["automaton_status"], "failed")
-        self.assertEqual(patch_payload["automaton_event"], "packet_failed")
-        self.assertEqual(patch_payload["reason"], "packet_failed")
+        self.assertEqual(patch_payload["status"], "processed")
+        self.assertEqual(patch_payload["automaton_status"], "succeeded")
+        self.assertEqual(patch_payload["automaton_event"], "review_passed")
+        self.assertEqual(patch_payload["reason"], "review_passed")
         self.assertEqual(outputs["review_status_updated"]["review_packet_path"].endswith("review_packet.json"), True)
 
 

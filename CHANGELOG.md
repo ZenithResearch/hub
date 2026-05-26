@@ -48,6 +48,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Fixed Frank review status writeback so degraded packet statuses are relayed as review metadata instead of failing the case mechanically; only deterministic Step 8 errors now fail the step.
 - Fixed Review Access rotation to replace stale policy rows before inserting the submitted policy set — prevents existing inactive Gallery policy rows from causing Postgres unique-constraint 500s during reviewer-key generation or repair.
 - Consolidated Review Case Automaton repository docs — fixed the Mermaid diagram as the canonical operations contract, cross-linked Frank/Gateway docs, and marked the 2026-05-24 operator-update plan as historical.
 - Updated Review Case Automaton metadata persistence — Gateway status writeback now persists packet/review outcome metadata without accepting Frank retry/rerun bookkeeping fields.

@@ -214,12 +214,7 @@ class CasePipelineRunner:
                 await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native structured analysis baseline completed"])
             elif step_id == "step_8":
                 outputs = await self.execute_step_8(case_detail)
-                packet_status = str((outputs.get("review_status_updated") or {}).get("review_packet_status") or "")
                 await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Review status updated"])
-                if packet_status != "review_packet_ready":
-                    reason = f"review packet not ready: {packet_status or 'unknown'}"
-                    await self.fail_step(case_id, step, step_run_id, reason=reason)
-                    raise RuntimeError(reason)
             elif step_id == "step_9":
                 await self.execute_step_9(case_run_id, step_run_id, case_detail, case_dir)
                 await self.complete_no_output_step(case_id, step, step_run_id, notes=["Daily-note compatibility entry written"])
@@ -477,11 +472,8 @@ class CasePipelineRunner:
         review_packet_path = str(packet_path) if packet_path else ""
         if not review_id:
             raise RuntimeError("native Step 8 requires review_id")
-        automaton_event = "review_passed" if packet_status == "review_packet_ready" else "packet_failed"
-        transition_result = transition(
-            "review" if automaton_event == "review_passed" else "processing",
-            automaton_event,
-        )
+        automaton_event = "review_passed"
+        transition_result = transition("review", automaton_event)
         gateway_status = AUTOMATON_TO_GATEWAY_STATUS[transition_result.status]
         response = await self.client.patch(
             f"{self.gateway_url}/v1/reviews/{review_id}/status",
