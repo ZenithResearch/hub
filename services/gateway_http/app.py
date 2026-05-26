@@ -683,6 +683,11 @@ def create_app() -> FastAPI:
         return await _admin_proxy_get(f"{settings.cases_http_url}/cases/{case_id}", request)
 
 
+    @app.get("/v1/admin/mirror/files/{encoded_path}/content")
+    async def admin_mirror_file_content(encoded_path: str, request: Request) -> Response:
+        return await _admin_proxy_content(f"{settings.cases_http_url}/mirror/files/{encoded_path}/content", request)
+
+
     @app.get("/v1/admin/case-runs/{run_id}/artifacts")
     async def admin_case_run_artifacts(run_id: str, request: Request) -> JSONResponse:
         return await _admin_proxy_get(f"{settings.cases_http_url}/case-runs/{run_id}/artifacts", request)

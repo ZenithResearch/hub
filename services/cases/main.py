@@ -15,6 +15,7 @@ Environment variables:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -302,6 +303,50 @@ def _artifact_allowed_roots() -> list[Path]:
                 seen.add(key)
                 roots.append(resolved)
     return roots
+
+
+def _mirror_allowed_roots() -> list[Path]:
+    raw = os.environ.get("CASES_MIRROR_ALLOWED_ROOTS", "/data")
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for part in str(raw or "").split(os.pathsep):
+        value = part.strip()
+        if not value:
+            continue
+        try:
+            resolved = Path(value).expanduser().resolve(strict=False)
+        except OSError:
+            continue
+        key = str(resolved)
+        if key not in seen:
+            seen.add(key)
+            roots.append(resolved)
+    return roots
+
+
+def _decode_mirror_path(encoded_path: str) -> str:
+    try:
+        padded = encoded_path + "=" * (-len(encoded_path) % 4)
+        return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+    except Exception as exc:
+        raise HTTPException(422, "mirror path is not valid base64url") from exc
+
+
+def _mirror_filesystem_path(raw_path: str) -> Path:
+    if not raw_path or not raw_path.startswith("/"):
+        raise HTTPException(422, "mirror path must be absolute")
+    try:
+        resolved = Path(raw_path).expanduser().resolve(strict=False)
+    except OSError as exc:
+        raise HTTPException(422, f"mirror path is invalid: {exc}") from None
+    roots = _mirror_allowed_roots()
+    if not roots:
+        raise HTTPException(503, "mirror roots are not configured")
+    if not any(resolved == root or root in resolved.parents for root in roots):
+        raise HTTPException(403, "mirror path is outside configured mirror roots")
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(404, "mirror backing file not found")
+    return resolved
 
 
 def _artifact_filesystem_path(row: sqlite3.Row) -> Path:
@@ -1669,6 +1714,21 @@ def list_step_run_artifacts(step_run_id: str):
         _step_run_row(conn, step_run_id)
         rows = conn.execute("SELECT * FROM execution_artifacts WHERE step_run_id = ? ORDER BY created_at", (step_run_id,)).fetchall()
     return {"artifacts": [_row_with_json(row, "metadata_json") for row in rows]}
+
+
+@app.get("/mirror/files/{encoded_path}/content")
+def get_mirror_file_content(encoded_path: str):
+    path = _mirror_filesystem_path(_decode_mirror_path(encoded_path))
+    guessed, _ = mimetypes.guess_type(str(path))
+    return FileResponse(
+        path,
+        media_type=guessed or "application/octet-stream",
+        filename=path.name,
+        headers={
+            "X-Hub-Mirror-Path": str(path),
+            "Cache-Control": "private, max-age=60",
+        },
+    )
 
 
 @app.get("/case-runs/{run_id}/artifacts")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import base64
 import os
 import sys
 import tempfile
@@ -19,6 +20,7 @@ class CasesObservabilityTests(unittest.TestCase):
         self.artifact_root.mkdir()
         os.environ["CASES_DB_PATH"] = os.path.join(self.tmpdir.name, "cases.db")
         os.environ["FRANK_EXECUTION_ROOT"] = str(self.artifact_root)
+        os.environ["CASES_MIRROR_ALLOWED_ROOTS"] = str(self.artifact_root)
         sys.modules.pop("services.cases.main", None)
         module = importlib.import_module("services.cases.main")
         self.module = importlib.reload(module)
@@ -28,6 +30,7 @@ class CasesObservabilityTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.client_context.__exit__(None, None, None)
         os.environ.pop("FRANK_EXECUTION_ROOT", None)
+        os.environ.pop("CASES_MIRROR_ALLOWED_ROOTS", None)
         self.tmpdir.cleanup()
 
     def create_case(self) -> dict:
@@ -196,6 +199,11 @@ class CasesObservabilityTests(unittest.TestCase):
         self.assertEqual(scoped_content_response.status_code, 200)
         self.assertIn("Artifact preview works", scoped_content_response.text)
 
+        encoded_path = base64.urlsafe_b64encode(str(markdown_path).encode("utf-8")).decode("ascii").rstrip("=")
+        mirror_content_response = self.client.get(f"/mirror/files/{encoded_path}/content")
+        self.assertEqual(mirror_content_response.status_code, 200)
+        self.assertIn("Artifact preview works", mirror_content_response.text)
+
         outside_path = Path(self.tmpdir.name) / "outside.md"
         outside_path.write_text("# Outside\n", encoding="utf-8")
         outside_artifact_response = self.client.post(
@@ -212,6 +220,9 @@ class CasesObservabilityTests(unittest.TestCase):
         outside_artifact = outside_artifact_response.json()
         denied_response = self.client.get(f"/execution-artifacts/{outside_artifact['id']}/content")
         self.assertEqual(denied_response.status_code, 403)
+        outside_encoded_path = base64.urlsafe_b64encode(str(outside_path).encode("utf-8")).decode("ascii").rstrip("=")
+        mirror_denied_response = self.client.get(f"/mirror/files/{outside_encoded_path}/content")
+        self.assertEqual(mirror_denied_response.status_code, 403)
 
     def test_board_projection_is_derived_from_cases_step_runs(self) -> None:
         created = self.create_case()
