@@ -7,11 +7,15 @@ def test_production_cd_workflow_is_removed_but_local_helper_keeps_image_override
     assert not (ROOT / ".github/workflows/production-cd.yml").exists()
 
     helper = (ROOT / "scripts/prod_terraform_cd.sh").read_text()
-    assert "${GATEWAY_IMAGE_TAG" in helper
-    assert "${EVENTBUS_IMAGE_TAG" in helper
-    assert "${CASES_IMAGE_TAG" in helper
-    assert "${FRANK_IMAGE_TAG" in helper
-    assert "${STT_IMAGE_TAG" in helper
+    assert "${GATEWAY_IMAGE_TAG:?" in helper
+    assert "${EVENTBUS_IMAGE_TAG:?" in helper
+    assert "${CASES_IMAGE_TAG:?" in helper
+    assert "${FRANK_IMAGE_TAG:?" in helper
+    assert "${STT_IMAGE_TAG:?" in helper
+    assert "gateway-admin-queue-case-20260518003135-5ae0998" not in helper
+    assert "native-timeout-hotfix-20260519004401" not in helper
+    assert "frank-stt-backoff-hotfix-20260519190823" not in helper
+    assert "stt-cache-hotfix-20260519013103" not in helper
     assert '-var="gateway_image_tag=$GATEWAY_IMAGE_TAG"' in helper
     assert '-var="eventbus_image_tag=$EVENTBUS_IMAGE_TAG"' in helper
     assert '-var="cases_image_tag=$CASES_IMAGE_TAG"' in helper

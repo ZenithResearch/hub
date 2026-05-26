@@ -81,6 +81,9 @@ def update_domains(profile: str, current: dict[str, Any] | None, resolved_ref: s
     if current is None:
         domains.insert(0, "bootstrap_operator_state")
         return domains
+    if current.get("profile") != profile:
+        domains.insert(0, "profile_change")
+        return domains
     if current.get("source_ref") == resolved_ref:
         return ["no_source_change", "smoke"]
     return domains

@@ -56,9 +56,10 @@ The previous GitHub Actions Production CD workflow has been removed from the rep
 2. Run update plan.
 3. Review changed domains: source, images, migrations, services, smoke.
 4. For cloud-prod, verify Terraform backend access before plan/apply.
-5. Apply only with explicit confirmation.
-6. Run smoke checks.
-7. Write operator state after smoke passes.
+5. Export the current live image tags for every service that is not intentionally rolling; the local Terraform helper intentionally has no stale production image-tag defaults.
+6. Apply only with explicit confirmation.
+7. Run smoke checks.
+8. Write operator state after smoke passes.
 
 ## Dry-run planner
 
@@ -101,6 +102,21 @@ Rules:
 - dry-run apply has no side effects and wraps the same plan payload;
 - `cloud-prod apply` is disabled until Terraform backend access checks exist and pass;
 - future real apply adapters must run smoke checks before writing operator state.
+
+## Local production Terraform helper
+
+Use `scripts/prod_terraform_cd.sh plan` / `apply` only from an authenticated operator shell after inspecting live ECS image tags. The helper requires explicit image-tag environment variables for every service:
+
+```bash
+export GATEWAY_IMAGE_TAG=<intended gateway-http tag>
+export EVENTBUS_IMAGE_TAG=<current live eventbus tag unless rolling eventbus>
+export CASES_IMAGE_TAG=<current live cases tag unless rolling cases>
+export FRANK_IMAGE_TAG=<intended/current Frank tag>
+export STT_IMAGE_TAG=<current live STT tag unless rolling STT>
+scripts/prod_terraform_cd.sh plan
+```
+
+The absence of default production tags is intentional: stale defaults can silently roll a service backward after hotfixes. Preserve unaffected services from live ECS inspection rather than from memory or old docs.
 
 ## Non-goals
 

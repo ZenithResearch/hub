@@ -60,6 +60,29 @@ class HubUpdatePlanTests(unittest.TestCase):
         self.assertIn("source_checkout", plan["domains"])
         self.assertIn("smoke", plan["domains"])
 
+    def test_plan_with_profile_change_keeps_profile_specific_domains_even_without_source_change(self):
+        state_path = self.repo / "operator-state.json"
+        state_path.write_text(json.dumps({
+            "schema_version": 1,
+            "profile": "local-dev",
+            "source": {"ref": self.head},
+            "images": {"gateway_http": "old-image"},
+        }))
+
+        plan = hub_update.build_plan(
+            repo_dir=self.repo,
+            target_ref="HEAD",
+            profile="cloud-prod",
+            state_path=state_path,
+        )
+
+        self.assertEqual(plan["current"]["profile"], "local-dev")
+        self.assertEqual(plan["target"]["resolved_ref"], self.head)
+        self.assertIn("profile_change", plan["domains"])
+        self.assertIn("terraform_plan", plan["domains"])
+        self.assertIn("service_rollout", plan["domains"])
+        self.assertNotIn("no_source_change", plan["domains"])
+
     def test_unknown_profile_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "unknown profile"):
             hub_update.build_plan(
