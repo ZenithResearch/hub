@@ -16,7 +16,7 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from starlette.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from libs.common.config import GatewaySettings
 from libs.common.logging import configure_logging
@@ -639,6 +639,27 @@ def create_app() -> FastAPI:
             payload = {"detail": "upstream admin service returned non-json response"}
         return JSONResponse(payload, status_code=response.status_code)
 
+
+    async def _admin_proxy_content(upstream_url: str, request: Request) -> Response:
+        _require_review_access_admin(request)
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(upstream_url, timeout=30.0)
+        except httpx.RequestError:
+            raise HTTPException(status_code=502, detail="upstream admin service unavailable") from None
+        headers = {
+            key: value
+            for key, value in response.headers.items()
+            if key.lower() in {
+                "content-type",
+                "content-length",
+                "content-disposition",
+                "x-zenith-artifact-id",
+                "x-zenith-artifact-role",
+            }
+        }
+        return Response(content=response.content, status_code=response.status_code, headers=headers, media_type=response.headers.get("content-type"))
+
     @app.get("/v1/admin/queues/workspace/peek")
     async def admin_queue_workspace_peek(request: Request) -> JSONResponse:
         params = {
@@ -660,6 +681,27 @@ def create_app() -> FastAPI:
     @app.get("/v1/admin/cases/{case_id}")
     async def admin_case_detail(case_id: str, request: Request) -> JSONResponse:
         return await _admin_proxy_get(f"{settings.cases_http_url}/cases/{case_id}", request)
+
+
+    @app.get("/v1/admin/case-runs/{run_id}/artifacts")
+    async def admin_case_run_artifacts(run_id: str, request: Request) -> JSONResponse:
+        return await _admin_proxy_get(f"{settings.cases_http_url}/case-runs/{run_id}/artifacts", request)
+
+    @app.get("/v1/admin/case-runs/{run_id}/artifacts/{artifact_id}")
+    async def admin_case_run_artifact(run_id: str, artifact_id: str, request: Request) -> JSONResponse:
+        return await _admin_proxy_get(f"{settings.cases_http_url}/case-runs/{run_id}/artifacts/{artifact_id}", request)
+
+    @app.get("/v1/admin/case-runs/{run_id}/artifacts/{artifact_id}/content")
+    async def admin_case_run_artifact_content(run_id: str, artifact_id: str, request: Request) -> Response:
+        return await _admin_proxy_content(f"{settings.cases_http_url}/case-runs/{run_id}/artifacts/{artifact_id}/content", request)
+
+    @app.get("/v1/admin/execution-artifacts/{artifact_id}")
+    async def admin_execution_artifact(artifact_id: str, request: Request) -> JSONResponse:
+        return await _admin_proxy_get(f"{settings.cases_http_url}/execution-artifacts/{artifact_id}", request)
+
+    @app.get("/v1/admin/execution-artifacts/{artifact_id}/content")
+    async def admin_execution_artifact_content(artifact_id: str, request: Request) -> Response:
+        return await _admin_proxy_content(f"{settings.cases_http_url}/execution-artifacts/{artifact_id}/content", request)
 
     def _validate_review_policy_metadata(
         *,

@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added registered artifact content serving for case execution artifacts — lets ZenithOS preview Hub-resident Markdown/file slots through authenticated Gateway admin routes when the operator has not mounted the backing Hub data directory.
 - Added review extraction page/scroll/stroke evidence capture — preserves navigation, scroll position, stroke event IDs, and deictic visual-artifact feedback in Frank review packets so implementation handoffs retain the UI context reviewers point at.
 - Added Review Case Automaton operations documentation — records the finite state machine, public Gateway compatibility mapping, terminal failure semantics, and the decision to exclude Frank retry/rerun/fix-loop behavior from review or terminal states for now.
 - Added Review Access policy allowlists — lets a project-scoped access code be constrained to explicit deployment/origin/subject combinations so Gallery/SWRL review access can stay Hub-owned without frontend secrets.

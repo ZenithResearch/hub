@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -14,7 +15,10 @@ from tests.test_cases_contract import VALID_PROCESS
 class CasesObservabilityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
+        self.artifact_root = Path(self.tmpdir.name) / "frank_execution"
+        self.artifact_root.mkdir()
         os.environ["CASES_DB_PATH"] = os.path.join(self.tmpdir.name, "cases.db")
+        os.environ["FRANK_EXECUTION_ROOT"] = str(self.artifact_root)
         sys.modules.pop("services.cases.main", None)
         module = importlib.import_module("services.cases.main")
         self.module = importlib.reload(module)
@@ -23,6 +27,7 @@ class CasesObservabilityTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.client_context.__exit__(None, None, None)
+        os.environ.pop("FRANK_EXECUTION_ROOT", None)
         self.tmpdir.cleanup()
 
     def create_case(self) -> dict:
@@ -157,6 +162,56 @@ class CasesObservabilityTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in artifacts], [artifact["id"]])
         case_run_artifacts = self.client.get(f"/case-runs/{case_run['id']}/artifacts").json()["artifacts"]
         self.assertEqual([item["id"] for item in case_run_artifacts], [artifact["id"]])
+        detail_artifacts = self.client.get(f"/cases/{case_id}").json()["artifacts"]
+        self.assertEqual([item["id"] for item in detail_artifacts], [artifact["id"]])
+
+        markdown_path = self.artifact_root / "case_demo" / "artifacts" / "review.md"
+        markdown_path.parent.mkdir(parents=True)
+        markdown_path.write_text("# Review\n\nArtifact preview works.\n", encoding="utf-8")
+        markdown_artifact_response = self.client.post(
+            f"/case-runs/{case_run['id']}/artifacts",
+            json={
+                "case_run_id": case_run["id"],
+                "step_run_id": step_run["id"],
+                "span_id": span["id"],
+                "role": "review_note",
+                "uri": f"dir:{markdown_path}",
+                "size_bytes": markdown_path.stat().st_size,
+                "content_type": "text/markdown",
+                "redaction_status": "not_applicable",
+            },
+        )
+        self.assertEqual(markdown_artifact_response.status_code, 201)
+        markdown_artifact = markdown_artifact_response.json()
+        metadata_response = self.client.get(f"/execution-artifacts/{markdown_artifact['id']}")
+        self.assertEqual(metadata_response.status_code, 200)
+        self.assertEqual(metadata_response.json()["role"], "review_note")
+        content_response = self.client.get(f"/execution-artifacts/{markdown_artifact['id']}/content")
+        self.assertEqual(content_response.status_code, 200)
+        self.assertIn("# Review", content_response.text)
+        self.assertEqual(content_response.headers["content-type"].split(";")[0], "text/markdown")
+        scoped_content_response = self.client.get(
+            f"/case-runs/{case_run['id']}/artifacts/{markdown_artifact['id']}/content"
+        )
+        self.assertEqual(scoped_content_response.status_code, 200)
+        self.assertIn("Artifact preview works", scoped_content_response.text)
+
+        outside_path = Path(self.tmpdir.name) / "outside.md"
+        outside_path.write_text("# Outside\n", encoding="utf-8")
+        outside_artifact_response = self.client.post(
+            f"/case-runs/{case_run['id']}/artifacts",
+            json={
+                "case_run_id": case_run["id"],
+                "role": "outside_note",
+                "uri": f"dir:{outside_path}",
+                "content_type": "text/markdown",
+                "redaction_status": "not_applicable",
+            },
+        )
+        self.assertEqual(outside_artifact_response.status_code, 201)
+        outside_artifact = outside_artifact_response.json()
+        denied_response = self.client.get(f"/execution-artifacts/{outside_artifact['id']}/content")
+        self.assertEqual(denied_response.status_code, 403)
 
     def test_board_projection_is_derived_from_cases_step_runs(self) -> None:
         created = self.create_case()
