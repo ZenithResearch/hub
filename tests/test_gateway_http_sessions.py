@@ -517,10 +517,16 @@ class GatewayHttpSessionTests(unittest.TestCase):
                 "access_code": "gallery-review-code-for-luna",
                 "policies": [
                     {
-                        "deployment_id": "gallery-production",
-                        "deployment_slug": "gallery-production",
+                        "deployment_id": "gallery-production-apex",
+                        "deployment_slug": "gallery-production-apex",
                         "allowed_origin": "https://gal-ler-y.com",
-                        "subject_pattern": "https://gal-ler-y.com/*",
+                        "subject_pattern": "https://gal-ler-y.com*",
+                    },
+                    {
+                        "deployment_id": "gallery-production-www",
+                        "deployment_slug": "gallery-production-www",
+                        "allowed_origin": "https://www.gal-ler-y.com",
+                        "subject_pattern": "https://www.gal-ler-y.com*",
                     },
                     {
                         "deployment_id": "gallery-local",
@@ -535,19 +541,31 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertFalse(body.get("raw_code_present"))
-        self.assertEqual(body.get("policy_count"), 2)
+        self.assertEqual(body.get("policy_count"), 3)
 
         prod_auth = self.client.post(
             "/v1/review-auth/session",
             headers={"Origin": "https://gal-ler-y.com"},
             json={
                 "project_id": "gallery",
-                "deployment_id": "gallery-production",
+                "deployment_id": "gallery-production-apex",
                 "access_code": "gallery-review-code-for-luna",
                 "subject_id": "https://gal-ler-y.com/admin/events",
             },
         )
         self.assertEqual(prod_auth.status_code, 200, prod_auth.text)
+
+        www_auth = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://www.gal-ler-y.com"},
+            json={
+                "project_id": "gallery",
+                "deployment_id": "gallery-production-www",
+                "access_code": "gallery-review-code-for-luna",
+                "subject_id": "https://www.gal-ler-y.com/admin/events",
+            },
+        )
+        self.assertEqual(www_auth.status_code, 200, www_auth.text)
 
         local_auth = self.client.post(
             "/v1/review-auth/session",
@@ -566,7 +584,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
             headers={"Origin": "https://evil.example"},
             json={
                 "project_id": "gallery",
-                "deployment_id": "gallery-production",
+                "deployment_id": "gallery-production-www",
                 "access_code": "gallery-review-code-for-luna",
                 "subject_id": "https://evil.example/admin/events",
             },
@@ -607,9 +625,9 @@ class GatewayHttpSessionTests(unittest.TestCase):
                     "old-bead-sequence-row",
                     "hermione-granger-gallery-review",
                     "gallery",
-                    "gallery-production",
+                    "gallery-production-apex",
                     "https://gal-ler-y.com",
-                    "https://gal-ler-y.com/*",
+                    "https://gal-ler-y.com*",
                     "2026-05-25T00:00:00Z",
                     "2026-05-25T00:00:00Z",
                 ),
@@ -630,10 +648,16 @@ class GatewayHttpSessionTests(unittest.TestCase):
                 "mode": "generate",
                 "policies": [
                     {
-                        "deployment_id": "gallery-production",
-                        "deployment_slug": "gallery-production",
+                        "deployment_id": "gallery-production-apex",
+                        "deployment_slug": "gallery-production-apex",
                         "allowed_origin": "https://gal-ler-y.com",
-                        "subject_pattern": "https://gal-ler-y.com/*",
+                        "subject_pattern": "https://gal-ler-y.com*",
+                    },
+                    {
+                        "deployment_id": "gallery-production-www",
+                        "deployment_slug": "gallery-production-www",
+                        "allowed_origin": "https://www.gal-ler-y.com",
+                        "subject_pattern": "https://www.gal-ler-y.com*",
                     },
                     {
                         "deployment_id": "gallery-local",
@@ -646,13 +670,13 @@ class GatewayHttpSessionTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json().get("policy_count"), 2)
+        self.assertEqual(response.json().get("policy_count"), 3)
         with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
             rows = conn.execute(
                 "SELECT id, active FROM review_access_code_policies WHERE access_code_id = ? ORDER BY deployment_id",
                 ("hermione-granger-gallery-review",),
             ).fetchall()
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(rows), 3)
         self.assertNotIn("old-bead-sequence-row", {row[0] for row in rows})
         self.assertTrue(all(row[1] == 1 for row in rows))
 

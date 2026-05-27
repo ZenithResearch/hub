@@ -941,17 +941,18 @@ def create_app() -> FastAPI:
         if submitted_policy_ids & legacy_ids or top_level_id in legacy_ids:
             raise HTTPException(
                 status_code=422,
-                detail="Gallery review access cannot rotate legacy deployment IDs; use gallery-local and gallery-production",
+                detail="Gallery review access cannot rotate legacy deployment IDs; use gallery-local, gallery-production-apex, and gallery-production-www",
             )
         expected = {
-            ("gallery-production", "gallery-production", "https://gal-ler-y.com", "https://gal-ler-y.com/*"),
+            ("gallery-production-apex", "gallery-production-apex", "https://gal-ler-y.com", "https://gal-ler-y.com*"),
+            ("gallery-production-www", "gallery-production-www", "https://www.gal-ler-y.com", "https://www.gal-ler-y.com*"),
             ("gallery-local", "gallery-local", "http://localhost:3000", "http://localhost:3000/*"),
         }
         actual = {_gallery_policy_tuple(policy) for policy in payload.policies}
         if actual != expected:
             raise HTTPException(
                 status_code=422,
-                detail="Gallery review access requires exactly the canonical gallery-production and gallery-local policies",
+                detail="Gallery review access requires exactly the canonical gallery-production-apex, gallery-production-www, and gallery-local policies",
             )
         if top_level_id:
             top_level_tuple = (
