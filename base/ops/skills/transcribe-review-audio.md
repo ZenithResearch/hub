@@ -23,9 +23,31 @@ File path: `data/reviews/assets/{asset_id}` or the case runtime materialized
 asset path. Confirm the file is readable and is an audio/webm, mp3, wav, or m4a
 asset.
 
-### 2. Call local Whisper STT
+### 2. Call the STT provider boundary
 
-Preferred contract surface:
+Production review cases should use Frank's STT provider boundary. The current production default is ElevenLabs Scribe v2 batch:
+
+```text
+STT_PROVIDER=elevenlabs
+STT_MODEL=scribe_v2
+STT_AUDIO_PREPROCESSOR=none
+ELEVENLABS_API_KEY=<secret-backed value>
+```
+
+`STT_AUDIO_PREPROCESSOR=elevenlabs_audio_isolation` may be enabled later for noisy review audio. Treat it as an extra pre-STT vendor call: it requires the same secret-backed ElevenLabs key to include audio isolation/audio processing permission, and the transcript artifact should record `audio_preprocessor`, `source_audio_artifact`, and `processed_audio_artifact` when applicable.
+
+The provider boundary returns the same normalized payload shape for managed and local STT: `transcript`, `words`, `language_code`, `model`, and `provider`.
+
+Preferred native Frank surface:
+
+```python
+from services.frank import stt_client
+result = await stt_client.transcribe_audio(http_client, audio_path)
+```
+
+### 2a. Local fallback
+
+If the provider boundary is unavailable or `STT_PROVIDER=local_whisper`, use the local Whisper registry tool:
 
 ```
 tool: local_whisper
@@ -100,7 +122,9 @@ and end:
 
 If local Whisper STT returns an error or empty transcript: fail the step explicitly
 with the provider error and do not fabricate transcript output. Empty outputs are
-only valid when the audio is verifiably silent.
+only valid when the audio is verifiably silent. If ElevenLabs fails and
+`STT_FALLBACK_PROVIDER=local_whisper`, record the fallback provider in diagnostic
+metadata and continue only with the real fallback transcript.
 
 ---
 

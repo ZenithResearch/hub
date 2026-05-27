@@ -28,7 +28,8 @@ data "aws_iam_policy_document" "execution_secrets" {
         aws_secretsmanager_secret.qdrant_api_key.arn,
         aws_secretsmanager_secret.review_access_admin_token.arn,
       ],
-      var.enable_clients_postgres ? [aws_db_instance.clients[0].master_user_secret[0].secret_arn] : []
+      var.enable_clients_postgres ? [aws_db_instance.clients[0].master_user_secret[0].secret_arn] : [],
+      var.elevenlabs_api_key_secret_arn != "" ? [var.elevenlabs_api_key_secret_arn] : []
     )
   }
 }

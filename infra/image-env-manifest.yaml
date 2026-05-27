@@ -121,6 +121,7 @@ services:
       STT_PROVIDER: terraform:stt_provider
       STT_MODEL: terraform:stt_model
       STT_FALLBACK_PROVIDER: terraform:stt_fallback_provider
+      STT_AUDIO_PREPROCESSOR: terraform:stt_audio_preprocessor
       FRANK_MODEL: terraform:frank_model
       OPENAI_BASE_URL: terraform:frank_openai_base_url
       OPENAI_API_KEY:

@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from services.frank import stt_client
 from services.frank.review_case_automaton import (
     AUTOMATON_TO_GATEWAY_STATUS,
     REVIEW_SCOPE_FULL,
@@ -299,13 +300,7 @@ class CasePipelineRunner:
         }
         for attempt in range(1, attempts + 1):
             try:
-                response = await self.client.post(
-                    f"{self.stt_url}/transcribe",
-                    json={"audio_path": audio_path},
-                    timeout=180.0,
-                )
-                response.raise_for_status()
-                return response.json()
+                return await stt_client.transcribe_audio(self.client, audio_path)
             except (httpx.RemoteProtocolError, httpx.TransportError) as exc:
                 last_exc = exc
                 next_delay_s = retry_delay_s * attempt
@@ -343,6 +338,11 @@ class CasePipelineRunner:
             "words": words,
             "language_code": payload.get("language_code"),
             "model": payload.get("model"),
+            "provider": payload.get("provider"),
+            "fallback_from_provider": payload.get("fallback_from_provider"),
+            "audio_preprocessor": payload.get("audio_preprocessor"),
+            "source_audio_artifact": payload.get("source_audio_artifact"),
+            "processed_audio_artifact": payload.get("processed_audio_artifact"),
         }
         transcript_path = case_dir / "artifacts" / "transcript.json"
         write_json(transcript_path, transcript_payload)

@@ -73,6 +73,14 @@ observation, no feedback point is written for it.
 - `local_whisper`
 - `update_review_status`
 
+### Environment
+- `STT_PROVIDER`
+- `STT_MODEL`
+- `STT_FALLBACK_PROVIDER`
+- `STT_AUDIO_PREPROCESSOR` (default `none`; optional `elevenlabs_audio_isolation` for noisy audio)
+- `ELEVENLABS_API_KEY` (required when `STT_PROVIDER=elevenlabs` or `STT_AUDIO_PREPROCESSOR=elevenlabs_audio_isolation`)
+- `STT_HTTP_URL` (required for local fallback)
+
 ### Toolsets
 - `file`
 - `browser`
@@ -131,7 +139,7 @@ observation, no feedback point is written for it.
 **Required Resources:** `review audio asset`
 `review assets workspace`
 
-**Processing:** Transcribe `audio_asset_path` into a verbatim transcript with local Whisper STT. Use the interaction timeline in `events` only to align the transcript with the review session and preserve the correct `audio_offset_ms` for downstream annotation.
+**Processing:** Transcribe `audio_asset_path` into a verbatim transcript through Frank's STT provider boundary. Production uses ElevenLabs Scribe v2 batch (`STT_PROVIDER=elevenlabs`, `STT_MODEL=scribe_v2`) with local Whisper/STT HTTP available as fallback. Use the interaction timeline in `events` only to align the transcript with the review session and preserve the correct `audio_offset_ms` for downstream annotation.
 
 **Output (process state):**
 ```json
@@ -197,7 +205,7 @@ observation, no feedback point is written for it.
 **Output (process state):**
 ```json
 {
-  "transcript_note_path": "~/claude-hub/notes/transcript {review_id_short}.md",
+  "transcript_note_path": "vault notes workspace transcript path for {review_id_short}",
   "resolved_transcript": "...(Pass 4 annotated text with component names)..."
 }
 ```
@@ -324,7 +332,7 @@ reviewer-voice handoff artifact for the downstream planning LLM. This step must 
 **Output (process state):**
 ```json
 {
-  "review_note_path": "~/claude-hub/notes/review {review_id_short}.md"
+  "review_note_path": "vault notes workspace review path for {review_id_short}"
 }
 ```
 
@@ -407,7 +415,7 @@ This is the only review-status writeback in the process. Emit `review_status_upd
   "review_status_updated": {
     "review_id": "bd1844d0-5555-4ad9-9441-cc4712a47a44",
     "status": "processed",
-    "review_note_path": "~/claude-hub/notes/review {review_id_short}.md"
+    "review_note_path": "vault notes workspace review path for {review_id_short}"
   }
 }
 ```
@@ -424,7 +432,7 @@ This is the only review-status writeback in the process. Emit `review_status_upd
 **Required Resources:** `vault daily note`
 `review status record`
 
-**Processing:** Append the following entry to `~/claude-hub/notes/YYYY-MM-DD.md` only after the review status update has succeeded:
+**Processing:** Append the following entry to the operator vault daily note (`notes/YYYY-MM-DD.md`) only after the review status update has succeeded:
 
 ```
 - HH:MM [Zenith] [create] [[Claude Code]] processed review {review_id_short}, updated review status, and created [[review {review_id_short}]] and [[transcript {review_id_short}]] — {N} issues identified from review of {subject_domain}
@@ -472,8 +480,8 @@ This is the only review-status writeback in the process. Emit `review_status_upd
 | Artifact | Location | Description |
 |---|---|---|
 | Review packet | case runtime artifacts: `review_packet.json` | Canonical machine-readable packet with normalized events, target timeline, segments, feedback items, packet quality/status, and artifact pointers |
-| Processed review doc | `~/claude-hub/notes/review {review_id_short}.md` | Reviewer-voice document rendered from `review_packet.json`; issues identified, component names resolved |
-| Transcript note | `~/claude-hub/notes/transcript {review_id_short}.md` | Verbatim transcript with all annotation passes |
+| Processed review doc | operator vault note: `review {review_id_short}.md` | Reviewer-voice document rendered from `review_packet.json`; issues identified, component names resolved |
+| Transcript note | operator vault note: `transcript {review_id_short}.md` | Verbatim transcript with all annotation passes |
 | Review status update | review status record | `status: processed`, preserving metadata and recording `review_note_path` |
 
 All other intermediate data remains process state. The review packet is the durable

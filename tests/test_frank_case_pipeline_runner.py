@@ -219,6 +219,45 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.transcribe_attempts, 3)
         self.assertEqual(sleep.await_count, 2)
 
+    async def test_step_2_transcript_artifact_records_audio_preprocessor_metadata(self) -> None:
+        client = _RunnerClient()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = Path(tmpdir) / "audio.webm"
+            audio_path.write_bytes(b"fake audio")
+            case_dir = Path(tmpdir) / "case"
+            case_dir.mkdir()
+            (case_dir / "artifacts").mkdir()
+            runner = CasePipelineRunner(
+                client=client,
+                cases_url="http://cases:8083",
+                gateway_url="http://gateway-http:8080",
+                stt_url="http://stt-http:8765",
+                execution_root=Path(tmpdir),
+            )
+            case_detail = {
+                **client.case_detail,
+                "slots": [{"name": "audio_asset_path", "value": json.dumps(str(audio_path))}],
+            }
+            stt_payload = {
+                "transcript": "isolated ok",
+                "words": [],
+                "language_code": "en",
+                "model": "scribe_v2",
+                "provider": "elevenlabs",
+                "audio_preprocessor": "elevenlabs_audio_isolation",
+                "source_audio_artifact": str(audio_path),
+                "processed_audio_artifact": str(audio_path.with_name("audio.isolated.wav")),
+            }
+
+            with patch("services.frank.case_pipeline_runner.stt_client.transcribe_audio", new_callable=AsyncMock, return_value=stt_payload):
+                result = await runner.execute_step_2("case_run_1", "step_run_2", case_detail, case_dir)
+            transcript_payload = json.loads((case_dir / "artifacts" / "transcript.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(result["transcript"], "isolated ok")
+        self.assertEqual(transcript_payload["audio_preprocessor"], "elevenlabs_audio_isolation")
+        self.assertEqual(transcript_payload["source_audio_artifact"], str(audio_path))
+        self.assertEqual(transcript_payload["processed_audio_artifact"], str(audio_path.with_name("audio.isolated.wav")))
+
     async def test_native_runner_executes_step_1_and_step_2_with_observability(self) -> None:
         client = _RunnerClient()
         with tempfile.TemporaryDirectory() as tmpdir:

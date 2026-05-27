@@ -599,10 +599,17 @@ PY
         { name = "HERMES_PROFILE_ROOT", value = "/data/hermes/profiles" },
         { name = "FRANK_EXECUTION_ROOT", value = "/data/frank_execution" },
         { name = "FRANK_RUNTIME", value = "native_case_pipeline" },
+        { name = "STT_PROVIDER", value = var.stt_provider },
+        { name = "STT_MODEL", value = var.stt_model },
+        { name = "STT_FALLBACK_PROVIDER", value = var.stt_fallback_provider },
+        { name = "STT_AUDIO_PREPROCESSOR", value = var.stt_audio_preprocessor },
         { name = "FRANK_MODEL", value = var.frank_model },
         { name = "OPENAI_BASE_URL", value = var.frank_openai_base_url },
         { name = "OPENAI_API_KEY", value = "none" }
       ]
+      secrets = var.elevenlabs_api_key_secret_arn != "" ? [
+        { name = "ELEVENLABS_API_KEY", valueFrom = var.elevenlabs_api_key_secret_arn }
+      ] : []
       mountPoints = [
         {
           sourceVolume  = "frank-data"

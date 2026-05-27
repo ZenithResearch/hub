@@ -381,9 +381,39 @@ variable "frank_openai_base_url" {
 }
 
 variable "stt_http_desired_count" {
-  description = "Desired task count for STT HTTP."
+  description = "Desired task count for the STT HTTP service. Keep at 1 while managed STT fallback is needed."
   type        = number
   default     = 1
+}
+
+variable "stt_provider" {
+  description = "Frank STT provider: local_whisper or elevenlabs."
+  type        = string
+  default     = "local_whisper"
+}
+
+variable "stt_model" {
+  description = "Selected STT model for the provider. For ElevenLabs use scribe_v2."
+  type        = string
+  default     = "scribe_v2"
+}
+
+variable "stt_fallback_provider" {
+  description = "Optional fallback STT provider after primary provider failures."
+  type        = string
+  default     = "local_whisper"
+}
+
+variable "stt_audio_preprocessor" {
+  description = "Optional pre-STT audio processor: none or elevenlabs_audio_isolation. Keep none for the baseline rollout."
+  type        = string
+  default     = "none"
+}
+
+variable "elevenlabs_api_key_secret_arn" {
+  description = "AWS Secrets Manager or SSM secret ARN containing ELEVENLABS_API_KEY. Empty disables secret injection."
+  type        = string
+  default     = ""
 }
 
 variable "llama_server_desired_count" {
