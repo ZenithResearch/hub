@@ -35,7 +35,7 @@ import httpx
 import yaml
 
 from services.cases.contract import collect_process_capabilities
-from services.frank.case_pipeline_runner import CasePipelineRunner
+from services.frank.case_pipeline_runner import CasePipelineRunner, case_has_runnable_steps
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "info").upper(),
@@ -1114,7 +1114,7 @@ async def recover_native_case_pipelines(client: httpx.AsyncClient, *, limit: int
     """
     recovered: list[str] = []
     inspected: set[str] = set()
-    for status in ("IN_PROGRESS", "OPEN"):
+    for status in ("IN_PROGRESS", "BLOCKED", "OPEN"):
         response = await client.get(f"{CASES_URL}/cases", params={"status": status, "limit": limit}, timeout=10.0)
         response.raise_for_status()
         for summary in response.json().get("cases") or []:
@@ -1126,13 +1126,16 @@ async def recover_native_case_pipelines(client: httpx.AsyncClient, *, limit: int
             inspected.add(case_id)
             dispatch_packet = _dispatch_packet_from_case_payload(summary)
             detail: dict[str, Any] | None = None
-            if not dispatch_packet or status == "IN_PROGRESS":
+            if not dispatch_packet or status in {"IN_PROGRESS", "BLOCKED"}:
                 detail = await get_case_detail(client, case_id)
                 dispatch_packet = dispatch_packet or _dispatch_packet_from_case_payload(detail.get("case") or detail)
             if not _is_native_case_pipeline_packet(dispatch_packet):
                 continue
-            if detail is not None and _case_has_durable_active_steps(detail):
-                continue
+            if detail is not None:
+                if _case_has_durable_active_steps(detail):
+                    continue
+                if status == "BLOCKED" and not case_has_runnable_steps(detail):
+                    continue
             case_dir = ensure_case_runtime_dir(case_id)
             if await schedule_native_case_pipeline_task(client, case_id, dispatch_packet, case_dir, reason=reason):
                 recovered.append(case_id)

@@ -329,7 +329,7 @@ Process a review.
 
             async def get(self, url: str, params: dict | None = None, timeout: float | None = None):
                 self.get_calls.append((url, params))
-                if url.endswith("/cases") and params and params.get("status") == "IN_PROGRESS":
+                if url.endswith("/cases") and params and params.get("status") in {"IN_PROGRESS", "BLOCKED"}:
                     return _FakeResponse({"cases": []})
                 if url.endswith("/cases") and params and params.get("status") == "OPEN":
                     return _FakeResponse(
@@ -392,6 +392,8 @@ Process a review.
                             ]
                         }
                     )
+                if url.endswith("/cases") and params and params.get("status") == "BLOCKED":
+                    return _FakeResponse({"cases": []})
                 if url.endswith("/cases") and params and params.get("status") == "OPEN":
                     return _FakeResponse({"cases": []})
                 if url.endswith("/cases/case_stale"):
@@ -431,6 +433,42 @@ Process a review.
         assert schedule_native.await_args is not None
         self.assertEqual(schedule_native.await_args.args[1], "case_stale")
         self.assertEqual(result, {"recovered_case_ids": ["case_stale"], "recovered_count": 1})
+
+    async def test_recover_native_case_pipelines_retries_blocked_case_with_ready_steps(self) -> None:
+        native_packet = {
+            "case_id": "case_blocked",
+            "runtime": {"mode": "native_case_pipeline", "source_of_truth": "cases/Zenith"},
+        }
+
+        class RecoveryClient:
+            async def get(self, url: str, params: dict | None = None, timeout: float | None = None):
+                if url.endswith("/cases") and params and params.get("status") == "IN_PROGRESS":
+                    return _FakeResponse({"cases": []})
+                if url.endswith("/cases") and params and params.get("status") == "BLOCKED":
+                    return _FakeResponse({"cases": [{"id": "case_blocked", "dispatch_packet_json": json.dumps(native_packet)}]})
+                if url.endswith("/cases") and params and params.get("status") == "OPEN":
+                    return _FakeResponse({"cases": []})
+                if url.endswith("/cases/case_blocked"):
+                    return _FakeResponse(
+                        {
+                            "case": {"id": "case_blocked", "status": "BLOCKED", "dispatch_packet_json": json.dumps(native_packet)},
+                            "steps": [
+                                {"id": "step_db_1", "step_id": "step_1", "status": "COMPLETED", "runtime_state_json": None},
+                                {"id": "step_db_2", "step_id": "step_2", "status": "READY", "runtime_state_json": None},
+                            ],
+                        }
+                    )
+                return _FakeResponse({}, 404)
+
+        client = RecoveryClient()
+        with patch.object(self.module, "ensure_case_runtime_dir", return_value=Path(self.tmpdir.name)) as ensure_dir, patch.object(
+            self.module, "schedule_native_case_pipeline_task", AsyncMock(return_value=True)
+        ) as schedule_native:
+            result = await self.module.recover_native_case_pipelines(client, limit=10)
+
+        ensure_dir.assert_called_once_with("case_blocked")
+        schedule_native.assert_awaited_once()
+        self.assertEqual(result, {"recovered_case_ids": ["case_blocked"], "recovered_count": 1})
 
     async def test_run_native_case_recovery_tick_uses_watchdog_reason(self) -> None:
         client = object()

@@ -27,9 +27,9 @@ from services.frank.review_packet import (
     write_review_packet,
 )
 
-
 TERMINAL_STEP_STATUSES = {"COMPLETED", "FAILED", "SKIPPED"}
 TERMINAL_CASE_STATUSES = {"COMPLETED", "FAILED", "BLOCKED"}
+RUNNABLE_STEP_STATUSES = {"READY", "RUNNING", "IN_PROGRESS"}
 log = logging.getLogger("frank.case_pipeline")
 
 
@@ -109,6 +109,14 @@ def step_is_terminal(step: dict[str, Any] | None) -> bool:
     return str((step or {}).get("status") or "").upper() in TERMINAL_STEP_STATUSES
 
 
+def case_has_runnable_steps(case_detail: dict[str, Any]) -> bool:
+    return any(
+        str((step or {}).get("status") or "").upper() in RUNNABLE_STEP_STATUSES
+        for step in case_detail.get("steps") or []
+        if isinstance(step, dict)
+    )
+
+
 @dataclass(frozen=True)
 class PipelineResult:
     case_id: str
@@ -156,7 +164,10 @@ class CasePipelineRunner:
                 case_detail = await self.get_case(case_id)
                 case_status = str((case_detail.get("case") or {}).get("status") or "").upper()
                 if case_status in TERMINAL_CASE_STATUSES:
-                    break
+                    if case_status == "BLOCKED" and case_has_runnable_steps(case_detail):
+                        await self.update_case_status(case_id, "IN_PROGRESS")
+                    else:
+                        break
                 step = step_by_id(case_detail, step_id)
                 if not step or step_is_terminal(step):
                     continue

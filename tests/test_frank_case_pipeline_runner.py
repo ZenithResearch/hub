@@ -256,6 +256,38 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertLess(step1_complete_index, step1_run_complete_index)
 
+    async def test_native_runner_resumes_blocked_case_when_steps_are_runnable(self) -> None:
+        client = _RunnerClient()
+        client.case_detail["case"]["status"] = "BLOCKED"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = CasePipelineRunner(
+                client=client,
+                cases_url="http://cases:8083",
+                gateway_url="http://gateway-http:8080",
+                stt_url="http://stt-http:8765",
+                execution_root=Path(tmpdir),
+            )
+            result = await runner.run(
+                "case_review_1",
+                {
+                    "event_type": "review_submitted",
+                    "initial_context": {
+                        "review_id": "review_12345678",
+                        "audio_asset_id": "audio_1",
+                        "events_asset_id": "events_1",
+                    },
+                },
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.completed_step_ids, ("step_1", "step_2"))
+        in_progress_updates = [
+            payload
+            for method, url, payload in client.operations
+            if method == "PUT" and url.endswith("/cases/case_review_1/status") and payload and payload.get("status") == "IN_PROGRESS"
+        ]
+        self.assertGreaterEqual(len(in_progress_updates), 1)
+
     async def test_create_case_run_reuses_idempotent_run_after_read_timeout(self) -> None:
         class TimeoutThenExistingRunClient(_RunnerClient):
             async def post(self, url, json=None, timeout=None):
