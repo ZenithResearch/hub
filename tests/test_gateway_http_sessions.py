@@ -1413,37 +1413,34 @@ class GatewayHttpSessionTests(unittest.TestCase):
         response = self.client.get("/v1/hermes/sessions/bad%3Cscript%3E")
         self.assertEqual(response.status_code, 422)
 
-    def test_admin_config_masks_allowlisted_stt_secret(self) -> None:
-        put_response = self.client.put(
-            "/v1/admin/config/secrets/ELEVENLABS_API_KEY",
-            json={"value": "sk_tes...cdef"},
-        )
-        self.assertEqual(put_response.status_code, 200)
-        self.assertTrue(put_response.json()["configured"])
-        self.assertNotIn("sk_test", json.dumps(put_response.json()))
-
-        get_response = self.client.get("/v1/admin/config")
+    def test_admin_config_reports_stt_secret_status_without_raw_value(self) -> None:
+        with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "sk_tes...cdef"}):
+            get_response = self.client.get("/v1/admin/config", headers=self._admin_headers())
         self.assertEqual(get_response.status_code, 200)
         payload = get_response.json()
         secret = payload["secrets"]["ELEVENLABS_API_KEY"]
         self.assertTrue(secret["configured"])
-        self.assertEqual(secret["preview"], "sk_t...cdef")
+        self.assertEqual(secret["source"], "aws_secrets_manager")
         self.assertNotIn("sk_tes...cdef", json.dumps(payload))
+        self.assertFalse(Path(os.environ["HUB_CONFIG_SECRETS_PATH"]).exists())
 
     def test_admin_config_rejects_unallowlisted_secret(self) -> None:
         response = self.client.put(
             "/v1/admin/config/secrets/OPENROUTER_API_KEY",
             json={"value": "secret"},
+            headers=self._admin_headers(),
         )
         self.assertEqual(response.status_code, 404)
 
-    def test_admin_config_rejects_secret_value_newline_injection(self) -> None:
-        for value in ("sk_allowed\nNOT_ALLOWLISTED=VALUE", "sk_allowed\n", "\rsk_allowed"):
+    def test_admin_config_rejects_local_provider_secret_writes(self) -> None:
+        for value in ("sk_allowed", "sk_allowed\nNOT_ALLOWLISTED=VALUE"):
             response = self.client.put(
                 "/v1/admin/config/secrets/ELEVENLABS_API_KEY",
                 json={"value": value},
+                headers=self._admin_headers(),
             )
-            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.status_code, 410)
+            self.assertIn("AWS Secrets Manager", response.json()["detail"])
         self.assertFalse(Path(os.environ["HUB_CONFIG_SECRETS_PATH"]).exists())
 
     def test_clients_db_is_canonical_and_clients_have_rolodex_path(self) -> None:
