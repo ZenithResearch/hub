@@ -1,0 +1,160 @@
+schema_version: 1
+status: image-env-contract
+principles:
+  - Each deployable ECS task/image has an explicit environment contract.
+  - New ECS task definitions must add an entry here before CI accepts them.
+  - Runtime secrets are AWS Secrets Manager handles injected by ECS, never local override files or raw values.
+  - ZenithOS may edit safe configuration/secret handles through Hub APIs, but raw secrets stay behind Hub/AWS secret-manager boundaries.
+
+services:
+  - service: gateway
+    image: aws_ecr_repository.gateway.repository_url:local.gateway_image_tag
+    command: services.gateway_http.app:app
+    environment:
+      LOG_LEVEL: literal
+      HTTP_PORT: literal
+      RUNTIME_GRPC_TARGET: cloudmap:runtime
+      CLIENTS_DB_BACKEND: terraform:enable_clients_postgres
+      CLIENTS_DB_PATH: terraform:gateway_clients_db_path
+      CLIENTS_PG_HOST: terraform:clients_postgres_host
+      CLIENTS_PG_PORT: terraform:clients_postgres_port
+      CLIENTS_PG_DATABASE: terraform:clients_postgres_database_name
+      CLIENTS_PG_USER: terraform:clients_postgres_username
+      REVIEWS_DATA_DIR: terraform:gateway_reviews_data_dir
+      MODEL_PROFILES_PATH: terraform:gateway_model_profiles_path
+      MODEL_PROFILE_OVERRIDES_PATH: terraform:gateway_model_profile_overrides_path
+      MODEL_PROFILE_AUDIT_PATH: terraform:gateway_model_profile_audit_path
+      QUEUE_HTTP_URL: cloudmap:queue
+      CASES_HTTP_URL: cloudmap:cases
+      EVENTBUS_URL: cloudmap:eventbus
+      HUBFS_ALLOWED_ROOTS: literal
+      CORS_ALLOW_ORIGINS: terraform:cors_allow_origins
+      MAX_BODY_BYTES: terraform:max_body_bytes
+      GATEWAY_GRPC_TIMEOUT_S: literal
+    secrets:
+      CLIENTS_PG_PASSWORD:
+        source: aws_secrets_manager
+        secret_ref: aws_db_instance.clients.master_user_secret.password
+        optional_when: enable_clients_postgres=false
+      REVIEW_ACCESS_ADMIN_TOKEN:
+        source: aws_secrets_manager
+        secret_ref: aws_secretsmanager_secret.review_access_admin_token.arn
+
+  - service: runtime
+    image: aws_ecr_repository.runtime.repository_url:var.image_tag
+    command: services.runtime_grpc.main
+    environment:
+      LOG_LEVEL: literal
+      RUNTIME_GRPC_BIND: literal
+      TOOL_SANDBOX_GRPC_TARGET: cloudmap:sandbox
+      QDRANT_URL: terraform:qdrant_url
+      QDRANT_COLLECTION: terraform:qdrant_collection
+      KB_VECTOR_DIM: terraform:kb_vector_dim
+      TOOL_DIR: terraform:tool_dir
+      TOOL_DEFAULT_TIMEOUT_MS: terraform:tool_default_timeout_ms
+      TOOL_DEFAULT_MAX_MEMORY_MB: terraform:tool_default_max_memory_mb
+    secrets:
+      QDRANT_API_KEY:
+        source: aws_secrets_manager
+        secret_ref: aws_secretsmanager_secret.qdrant_api_key.arn
+
+  - service: sandbox
+    image: aws_ecr_repository.sandbox.repository_url:var.image_tag
+    command: services.tool_sandbox.main
+    environment:
+      LOG_LEVEL: literal
+      TOOL_SANDBOX_GRPC_BIND: literal
+      TOOL_DIR: terraform:tool_dir
+      TOOL_DEFAULT_TIMEOUT_MS: terraform:tool_default_timeout_ms
+      TOOL_DEFAULT_MAX_MEMORY_MB: terraform:tool_default_max_memory_mb
+      ALLOW_TOOLS_WITH_NETWORK: literal
+    secrets: {}
+
+  - service: queue
+    image: aws_ecr_repository.queue.repository_url:var.image_tag
+    command: inbox.main
+    environment:
+      LOG_LEVEL: literal
+      QUEUE_GRPC_BIND: literal
+      QUEUE_HTTP_PORT: literal
+      QUEUE_DB_PATH: literal
+      QUEUE_REAPER_INTERVAL_S: literal
+      QUEUE_DEFAULT_MAX_RETRIES: literal
+      QUEUE_DEFAULT_CLAIM_TIMEOUT_S: literal
+    secrets: {}
+
+  - service: cases
+    image: aws_ecr_repository.gateway.repository_url:local.cases_image_tag
+    command: services.cases.main:app
+    environment:
+      LOG_LEVEL: literal
+      CASES_HTTP_PORT: literal
+      CASES_DB_PATH: literal
+    secrets: {}
+
+  - service: eventbus
+    image: aws_ecr_repository.gateway.repository_url:local.eventbus_image_tag
+    command: services.eventbus.main
+    environment:
+      LOG_LEVEL: literal
+      PYTHONPATH: literal
+    secrets: {}
+
+  - service: frank
+    image: aws_ecr_repository.gateway.repository_url:local.frank_image_tag
+    command: services.frank.main boot wrapper
+    environment:
+      LOG_LEVEL: literal
+      PYTHONPATH: literal
+      QUEUE_HTTP_URL: cloudmap:queue
+      EVENTBUS_URL: cloudmap:eventbus
+      CASES_HTTP_URL: cloudmap:cases
+      GATEWAY_HTTP_URL: terraform:public_hub_domain_or_alb
+      STT_HTTP_URL: cloudmap:stt_http
+      QUEUE_NAME: literal
+      TERMINAL_CWD: literal
+      PROCESS_HUBFS_ROOT: literal
+      HERMES_HOME: literal
+      HERMES_PROFILE_ROOT: literal
+      FRANK_EXECUTION_ROOT: literal
+      FRANK_RUNTIME: literal
+      STT_PROVIDER: terraform:stt_provider
+      STT_MODEL: terraform:stt_model
+      STT_FALLBACK_PROVIDER: terraform:stt_fallback_provider
+      FRANK_MODEL: terraform:frank_model
+      OPENAI_BASE_URL: terraform:frank_openai_base_url
+      OPENAI_API_KEY:
+        source: literal
+        value_description: disabled sentinel string; no provider secret is injected here
+    secrets:
+      ELEVENLABS_API_KEY:
+        source: aws_secrets_manager
+        secret_ref: var.elevenlabs_api_key_secret_arn
+        optional_when: elevenlabs_api_key_secret_arn=""
+
+  - service: stt_http
+    image: aws_ecr_repository.gateway.repository_url:local.stt_image_tag
+    command: services.stt_http.main image default
+    environment:
+      LOG_LEVEL: literal
+      PYTHONPATH: literal
+      STT_ALLOWED_AUDIO_ROOTS: literal
+      STT_WHISPER_MODEL: literal
+      STT_ALLOWED_WHISPER_MODELS: literal
+    secrets: {}
+
+  - service: llama_server
+    image: var.llama_server_image
+    command: llama.cpp server
+    environment: {}
+    secrets: {}
+
+  - service: llama_model_preload
+    image: var.llama_model_preload_image
+    command: aws s3 model preload
+    environment:
+      MODEL_BUCKET: terraform:llama_server_model_bucket_name
+      MODEL_KEY: terraform:llama_server_model_s3_key
+      MODEL_NAME: terraform:llama_server_model_name
+      EXPECTED_SHA256: terraform:llama_server_model_expected_sha256
+    secrets: {}

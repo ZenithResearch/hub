@@ -26,6 +26,7 @@ fi
 
 if [[ "${SKIP_STATIC_CONTRACT_CHECKS:-0}" != "1" ]]; then
   "$PYTHON_BIN" scripts/model_profile_check.py >/dev/null
+  "$PYTHON_BIN" scripts/image_env_manifest_check.py >/dev/null
   "$PYTHON_BIN" scripts/matrix_deployment_check.py >/dev/null
   "$PYTHON_BIN" scripts/deployment_profile_check.py >/dev/null
   if [[ -n "${HUB_REMOTE_ROOT:-}" || -d "/Volumes/BJJ-Cache/zenith-cache" || -d "/Volumes/BJJ/zenith-cache" ]]; then
