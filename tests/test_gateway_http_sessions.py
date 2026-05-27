@@ -50,6 +50,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
         os.environ["RUNTIME_GRPC_TARGET"] = "runtime-grpc:50051"
         os.environ["HERMES_SESSION_ROOTS"] = str(hermes_dir)
         os.environ["HUB_CONFIG_SECRETS_PATH"] = str(root / "config-secrets.env")
+        os.environ["HUBFS_ALLOWED_ROOTS"] = str(root)
 
         async def _close() -> None:
             return None
@@ -212,6 +213,11 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertFalse(Path(os.environ["HUB_CONFIG_SECRETS_PATH"]).exists())
 
+    def test_admin_fs_routes_require_review_access_admin_token(self) -> None:
+        response = self.client.get("/v1/admin/fs/stat?path=/data")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "invalid review access admin token")
+
     def test_admin_queue_peek_requires_review_access_admin_token(self) -> None:
         response = self.client.get("/v1/admin/queues/workspace/peek?n=1")
         self.assertEqual(response.status_code, 401)
@@ -255,6 +261,54 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["messages"][0]["id"], "msg-1")
         self.assertEqual(calls, [("http://queue:8081/queues/workspace/peek", {"n": "25", "status": "pending"})])
+
+    def test_admin_fs_reads_gateway_owned_filesystem_directly(self) -> None:
+        root = Path(self.tmpdir.name)
+        doc = root / "kb" / "review.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text("# Gateway HubFS\n", encoding="utf-8")
+
+        stat = self.client.get(
+            f"/v1/admin/fs/stat?path={doc}",
+            headers=self._admin_headers(),
+        )
+        listing = self.client.get(
+            f"/v1/admin/fs/list?path={doc.parent}&recursive=false",
+            headers=self._admin_headers(),
+        )
+        content = self.client.get(
+            f"/v1/admin/fs/content?path={doc}",
+            headers=self._admin_headers(),
+        )
+        encoded = self.module.base64.urlsafe_b64encode(str(doc).encode("utf-8")).decode("ascii").rstrip("=")
+        by_path = self.client.get(
+            f"/v1/admin/fs/by-path/{encoded}/content",
+            headers=self._admin_headers(),
+        )
+
+        self.assertEqual(stat.status_code, 200, stat.text)
+        self.assertEqual(stat.json()["kind"], "file")
+        self.assertEqual(stat.json()["path"], str(doc.resolve()))
+        self.assertEqual(listing.status_code, 200, listing.text)
+        self.assertEqual({entry["name"] for entry in listing.json()["entries"]}, {"review.md"})
+        self.assertEqual(content.status_code, 200, content.text)
+        self.assertEqual(content.text, "# Gateway HubFS\n")
+        self.assertEqual(content.headers["x-hubfs-path"], str(doc.resolve()))
+        self.assertEqual(by_path.status_code, 200, by_path.text)
+        self.assertEqual(by_path.text, "# Gateway HubFS\n")
+
+    def test_admin_fs_rejects_paths_outside_gateway_hubfs_roots(self) -> None:
+        outside = Path(self.tmpdir.name).parent / "outside-hubfs.md"
+        outside.write_text("outside", encoding="utf-8")
+        try:
+            response = self.client.get(
+                f"/v1/admin/fs/stat?path={outside}",
+                headers=self._admin_headers(),
+            )
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.json()["detail"]["code"], "outside_namespace")
+        finally:
+            outside.unlink(missing_ok=True)
 
     def test_admin_cases_proxies_to_cases_service(self) -> None:
         calls: list[tuple[str, dict | None]] = []

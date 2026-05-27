@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added authenticated Gateway-owned HubFS `stat`, `content`, `list`, `manifest`, and `by-path` routes — gives ZenithOS direct POSIX-style access to the main Hub Gateway `/data` volume through the temporary admin-token bridge while keeping service-level filesystems as separate future volumes.
+- Added Hub mirror file content serving for configured filesystem roots — lets ZenithOS fetch process documents and runtime `/data/...` files through authenticated Gateway admin routes when the operator has not mounted the backing Hub data directory.
+- Added registered artifact content serving for case execution artifacts — lets ZenithOS preview Hub-resident Markdown/file slots through authenticated Gateway admin routes when the operator has not mounted the backing Hub data directory.
 - Added review extraction page/scroll/stroke evidence capture — preserves navigation, scroll position, stroke event IDs, and deictic visual-artifact feedback in Frank review packets so implementation handoffs retain the UI context reviewers point at.
 - Added Review Case Automaton operations documentation — records the finite state machine, public Gateway compatibility mapping, terminal failure semantics, and the decision to exclude Frank retry/rerun/fix-loop behavior from review or terminal states for now.
 - Added Review Access policy allowlists — lets a project-scoped access code be constrained to explicit deployment/origin/subject combinations so Gallery/SWRL review access can stay Hub-owned without frontend secrets.
@@ -49,6 +52,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ### Fixed
 - Hardened operator-controlled IaC planning — profile changes now keep profile-specific plan domains even when the source ref is unchanged, and the local production Terraform helper requires explicit live image tags instead of carrying stale hotfix defaults that could roll services backward.
+- Mounted Frank execution artifacts read-only into the Gateway HubFS namespace — lets `/v1/admin/fs/by-path/...` resolve live `/data/frank_execution/...` review Markdown artifacts instead of 404ing on the Gateway-only EFS volume.
 - Fixed Frank review status writeback so degraded packet statuses are relayed as review metadata instead of failing the case mechanically; only deterministic Step 8 errors now fail the step.
 - Fixed Review Access rotation to replace stale policy rows before inserting the submitted policy set — prevents existing inactive Gallery policy rows from causing Postgres unique-constraint 500s during reviewer-key generation or repair.
 - Consolidated Review Case Automaton repository docs — fixed the Mermaid diagram as the canonical operations contract, cross-linked Frank/Gateway docs, and marked the 2026-05-24 operator-update plan as historical.

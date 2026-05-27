@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
 import json
+import mimetypes
+import os
 import re
 import secrets
 import uuid
@@ -16,7 +20,7 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from starlette.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from libs.common.config import GatewaySettings
 from libs.common.logging import configure_logging
@@ -235,6 +239,108 @@ def _safe_session_summary(session_payload: dict[str, Any], fallback_session_id: 
         "message_count": len(message_list),
         "messages": [_safe_session_message(message, index) for index, message in enumerate(message_list)],
     }
+
+
+def _hubfs_error(status_code: int, code: str, path: str, detail: str) -> HTTPException:
+    return HTTPException(status_code=status_code, detail={"code": code, "path": path, "detail": detail})
+
+
+def _decode_hubfs_path(encoded_path: str) -> str:
+    try:
+        padded = encoded_path + "=" * (-len(encoded_path) % 4)
+        return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_encoded_path", "detail": "HubFS path is not valid base64url"},
+        ) from exc
+
+
+def _hubfs_roots(settings: GatewaySettings) -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for raw in str(settings.hubfs_allowed_roots or "/data").split(os.pathsep):
+        value = raw.strip()
+        if not value:
+            continue
+        try:
+            resolved = Path(value).expanduser().resolve(strict=False)
+        except OSError:
+            continue
+        key = str(resolved)
+        if key not in seen:
+            seen.add(key)
+            roots.append(resolved)
+    return roots
+
+
+def _hubfs_path(settings: GatewaySettings, raw_path: str) -> tuple[str, Path, Path]:
+    value = str(raw_path or "").strip()
+    if not value or not value.startswith("/") or "\x00" in value:
+        raise _hubfs_error(422, "invalid_path", value, "HubFS path must be absolute")
+    try:
+        resolved = Path(value).expanduser().resolve(strict=False)
+    except OSError as exc:
+        raise _hubfs_error(422, "invalid_path", value, f"HubFS path is invalid: {exc}") from None
+    roots = _hubfs_roots(settings)
+    if not roots:
+        raise _hubfs_error(503, "roots_not_configured", str(resolved), "HubFS roots are not configured")
+    matches = [root for root in roots if resolved == root or root in resolved.parents]
+    if not matches:
+        raise _hubfs_error(403, "outside_namespace", str(resolved), "HubFS path is outside configured namespaces")
+    namespace = max(matches, key=lambda root: len(str(root)))
+    return str(resolved), resolved, namespace
+
+
+def _hubfs_ref(path: str) -> str:
+    return "hubfs_" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:32]
+
+
+def _hubfs_mime_type(path: Path) -> str:
+    guessed, _ = mimetypes.guess_type(str(path))
+    return guessed or "application/octet-stream"
+
+
+def _hubfs_entry(path: Path, namespace: Path) -> dict[str, Any]:
+    stat = path.stat()
+    kind = "directory" if path.is_dir() else "file"
+    normalized = str(path)
+    return {
+        "path": normalized,
+        "name": path.name or normalized,
+        "kind": kind,
+        "exists": True,
+        "size": None if kind == "directory" else stat.st_size,
+        "mime_type": None if kind == "directory" else _hubfs_mime_type(path),
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "digest": None,
+        "readable": True,
+        "ref": _hubfs_ref(normalized),
+        "namespace": str(namespace),
+    }
+
+
+def _hubfs_existing_path(settings: GatewaySettings, raw_path: str, *, require_file: bool = False, require_directory: bool = False) -> tuple[str, Path, Path]:
+    normalized, resolved, namespace = _hubfs_path(settings, raw_path)
+    if not resolved.exists():
+        raise _hubfs_error(404, "not_found", normalized, "HubFS path not found")
+    if require_file and resolved.is_dir():
+        raise _hubfs_error(409, "is_directory", normalized, "HubFS path is a directory")
+    if require_directory and not resolved.is_dir():
+        raise _hubfs_error(409, "not_directory", normalized, "HubFS path is not a directory")
+    return normalized, resolved, namespace
+
+
+def _hubfs_list_entries(path: Path, namespace: Path, *, recursive: bool, limit: int) -> tuple[list[dict[str, Any]], bool]:
+    entries: list[dict[str, Any]] = []
+    iterator = path.rglob("*") if recursive else path.iterdir()
+    truncated = False
+    for child in sorted(iterator, key=lambda item: str(item)):
+        if len(entries) >= limit:
+            truncated = True
+            break
+        entries.append(_hubfs_entry(child, namespace))
+    return entries, truncated
 
 
 def create_app() -> FastAPI:
@@ -639,6 +745,29 @@ def create_app() -> FastAPI:
             payload = {"detail": "upstream admin service returned non-json response"}
         return JSONResponse(payload, status_code=response.status_code)
 
+
+    async def _admin_proxy_content(upstream_url: str, request: Request, params: dict[str, str] | None = None) -> Response:
+        _require_review_access_admin(request)
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(upstream_url, params=params or None, timeout=30.0)
+        except httpx.RequestError:
+            raise HTTPException(status_code=502, detail="upstream admin service unavailable") from None
+        headers = {
+            key: value
+            for key, value in response.headers.items()
+            if key.lower() in {
+                "content-type",
+                "content-length",
+                "content-disposition",
+                "x-zenith-artifact-id",
+                "x-zenith-artifact-role",
+                "x-hubfs-path",
+                "x-hubfs-ref",
+            }
+        }
+        return Response(content=response.content, status_code=response.status_code, headers=headers, media_type=response.headers.get("content-type"))
+
     @app.get("/v1/admin/queues/workspace/peek")
     async def admin_queue_workspace_peek(request: Request) -> JSONResponse:
         params = {
@@ -660,6 +789,103 @@ def create_app() -> FastAPI:
     @app.get("/v1/admin/cases/{case_id}")
     async def admin_case_detail(case_id: str, request: Request) -> JSONResponse:
         return await _admin_proxy_get(f"{settings.cases_http_url}/cases/{case_id}", request)
+
+
+    @app.get("/v1/admin/fs/stat")
+    async def admin_hubfs_stat(request: Request, path: str) -> JSONResponse:
+        _require_review_access_admin(request)
+        _normalized, resolved, namespace = _hubfs_existing_path(settings, path)
+        return JSONResponse(_hubfs_entry(resolved, namespace))
+
+    @app.get("/v1/admin/fs/content")
+    async def admin_hubfs_content(request: Request, path: str) -> FileResponse:
+        _require_review_access_admin(request)
+        normalized, resolved, _namespace = _hubfs_existing_path(settings, path, require_file=True)
+        return FileResponse(
+            resolved,
+            media_type=_hubfs_mime_type(resolved),
+            filename=resolved.name,
+            headers={
+                "X-HubFS-Path": normalized,
+                "X-HubFS-Ref": _hubfs_ref(normalized),
+                "Cache-Control": "private, max-age=60",
+            },
+        )
+
+    @app.get("/v1/admin/fs/list")
+    async def admin_hubfs_list(request: Request, path: str, recursive: bool = False, limit: int = 1000) -> JSONResponse:
+        _require_review_access_admin(request)
+        normalized, resolved, namespace = _hubfs_existing_path(settings, path, require_directory=True)
+        bounded_limit = max(1, min(limit, 1000))
+        entries, truncated = _hubfs_list_entries(resolved, namespace, recursive=recursive, limit=bounded_limit)
+        return JSONResponse(
+            {
+                "root": normalized,
+                "recursive": recursive,
+                "truncated": truncated,
+                "limit": bounded_limit,
+                "entries": entries,
+            }
+        )
+
+    @app.get("/v1/admin/fs/manifest")
+    async def admin_hubfs_manifest(request: Request, path: str, recursive: bool = True, limit: int = 1000) -> JSONResponse:
+        _require_review_access_admin(request)
+        normalized, resolved, namespace = _hubfs_existing_path(settings, path, require_directory=True)
+        if recursive and resolved == namespace:
+            raise _hubfs_error(403, "manifest_root_too_broad", normalized, "HubFS manifest must be scoped below a namespace root")
+        bounded_limit = max(1, min(limit, 1000))
+        entries, truncated = _hubfs_list_entries(resolved, namespace, recursive=recursive, limit=bounded_limit)
+        return JSONResponse(
+            {
+                "root": normalized,
+                "recursive": recursive,
+                "truncated": truncated,
+                "limit": bounded_limit,
+                "entries": entries,
+            }
+        )
+
+    @app.get("/v1/admin/fs/by-path/{encoded_path}/content")
+    async def admin_hubfs_by_path_content(encoded_path: str, request: Request) -> FileResponse:
+        _require_review_access_admin(request)
+        path = _decode_hubfs_path(encoded_path)
+        normalized, resolved, _namespace = _hubfs_existing_path(settings, path, require_file=True)
+        return FileResponse(
+            resolved,
+            media_type=_hubfs_mime_type(resolved),
+            filename=resolved.name,
+            headers={
+                "X-HubFS-Path": normalized,
+                "X-HubFS-Ref": _hubfs_ref(normalized),
+                "Cache-Control": "private, max-age=60",
+            },
+        )
+
+    @app.get("/v1/admin/mirror/files/{encoded_path}/content")
+    async def admin_mirror_file_content(encoded_path: str, request: Request) -> Response:
+        return await _admin_proxy_content(f"{settings.cases_http_url}/mirror/files/{encoded_path}/content", request)
+
+
+    @app.get("/v1/admin/case-runs/{run_id}/artifacts")
+    async def admin_case_run_artifacts(run_id: str, request: Request) -> JSONResponse:
+        return await _admin_proxy_get(f"{settings.cases_http_url}/case-runs/{run_id}/artifacts", request)
+
+    @app.get("/v1/admin/case-runs/{run_id}/artifacts/{artifact_id}")
+    async def admin_case_run_artifact(run_id: str, artifact_id: str, request: Request) -> JSONResponse:
+        return await _admin_proxy_get(f"{settings.cases_http_url}/case-runs/{run_id}/artifacts/{artifact_id}", request)
+
+    @app.get("/v1/admin/case-runs/{run_id}/artifacts/{artifact_id}/content")
+    async def admin_case_run_artifact_content(run_id: str, artifact_id: str, request: Request) -> Response:
+        return await _admin_proxy_content(f"{settings.cases_http_url}/case-runs/{run_id}/artifacts/{artifact_id}/content", request)
+
+    @app.get("/v1/admin/execution-artifacts/{artifact_id}")
+    async def admin_execution_artifact(artifact_id: str, request: Request) -> JSONResponse:
+        return await _admin_proxy_get(f"{settings.cases_http_url}/execution-artifacts/{artifact_id}", request)
+
+    @app.get("/v1/admin/execution-artifacts/{artifact_id}/content")
+    async def admin_execution_artifact_content(artifact_id: str, request: Request) -> Response:
+        return await _admin_proxy_content(f"{settings.cases_http_url}/execution-artifacts/{artifact_id}/content", request)
 
     def _validate_review_policy_metadata(
         *,

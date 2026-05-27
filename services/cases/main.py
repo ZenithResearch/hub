@@ -15,22 +15,25 @@ Environment variables:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
+import mimetypes
 import os
 import sqlite3
 import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import asyncio
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .contract import ProcessContractError, compile_process_contract
@@ -269,6 +272,113 @@ def init_db() -> None:
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _artifact_row(conn: sqlite3.Connection, artifact_id: str) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM execution_artifacts WHERE id = ?", (artifact_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "artifact not found")
+    return row
+
+
+def _artifact_allowed_roots() -> list[Path]:
+    raw_values = [
+        os.environ.get("FRANK_EXECUTION_ROOT", ""),
+        os.environ.get("STT_ALLOWED_AUDIO_ROOTS", ""),
+        os.environ.get("CASES_ARTIFACT_ALLOWED_ROOTS", ""),
+    ]
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        for part in str(raw or "").split(os.pathsep):
+            value = part.strip()
+            if not value:
+                continue
+            try:
+                resolved = Path(value).expanduser().resolve(strict=False)
+            except OSError:
+                continue
+            key = str(resolved)
+            if key not in seen:
+                seen.add(key)
+                roots.append(resolved)
+    return roots
+
+
+def _mirror_allowed_roots() -> list[Path]:
+    raw = os.environ.get("CASES_MIRROR_ALLOWED_ROOTS", "/data")
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for part in str(raw or "").split(os.pathsep):
+        value = part.strip()
+        if not value:
+            continue
+        try:
+            resolved = Path(value).expanduser().resolve(strict=False)
+        except OSError:
+            continue
+        key = str(resolved)
+        if key not in seen:
+            seen.add(key)
+            roots.append(resolved)
+    return roots
+
+
+def _decode_mirror_path(encoded_path: str) -> str:
+    try:
+        padded = encoded_path + "=" * (-len(encoded_path) % 4)
+        return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+    except Exception as exc:
+        raise HTTPException(422, "mirror path is not valid base64url") from exc
+
+
+def _mirror_filesystem_path(raw_path: str) -> Path:
+    if not raw_path or not raw_path.startswith("/"):
+        raise HTTPException(422, "mirror path must be absolute")
+    try:
+        resolved = Path(raw_path).expanduser().resolve(strict=False)
+    except OSError as exc:
+        raise HTTPException(422, f"mirror path is invalid: {exc}") from None
+    roots = _mirror_allowed_roots()
+    if not roots:
+        raise HTTPException(503, "mirror roots are not configured")
+    if not any(resolved == root or root in resolved.parents for root in roots):
+        raise HTTPException(403, "mirror path is outside configured mirror roots")
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(404, "mirror backing file not found")
+    return resolved
+
+
+def _artifact_filesystem_path(row: sqlite3.Row) -> Path:
+    uri = str(row["uri"] or "").strip()
+    if uri.startswith("dir:"):
+        raw_path = uri[4:]
+    elif uri.startswith("file:"):
+        raw_path = uri[5:]
+    else:
+        raise HTTPException(415, "artifact URI is not a local file artifact")
+    if not raw_path:
+        raise HTTPException(422, "artifact URI has no path")
+    try:
+        resolved = Path(raw_path).expanduser().resolve(strict=False)
+    except OSError as exc:
+        raise HTTPException(422, f"artifact path is invalid: {exc}") from None
+    roots = _artifact_allowed_roots()
+    if not roots:
+        raise HTTPException(503, "artifact content roots are not configured")
+    if not any(resolved == root or root in resolved.parents for root in roots):
+        raise HTTPException(403, "artifact path is outside configured artifact roots")
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(404, "artifact backing file not found")
+    return resolved
+
+
+def _artifact_content_type(row: sqlite3.Row, path: Path) -> str:
+    declared = str(row["content_type"] or "").strip()
+    if declared:
+        return declared
+    guessed, _ = mimetypes.guess_type(str(path))
+    return guessed or "application/octet-stream"
 
 
 def new_id(prefix: str) -> str:
@@ -1117,6 +1227,7 @@ def get_case(case_id: str):
         steps = conn.execute("SELECT * FROM case_steps WHERE case_id = ? ORDER BY idx", (case_id,)).fetchall()
         slots = conn.execute("SELECT * FROM case_slots WHERE case_id = ? ORDER BY name", (case_id,)).fetchall()
         logs = conn.execute("SELECT * FROM case_logs WHERE case_id = ? ORDER BY created_at", (case_id,)).fetchall()
+        artifacts = conn.execute("SELECT * FROM execution_artifacts WHERE case_id = ? ORDER BY created_at", (case_id,)).fetchall()
         audits = _audit_rows(conn, case_id)
         contract = _parse_contract(row)
         dispatch_packet = _parse_dispatch_packet(row)
@@ -1130,6 +1241,7 @@ def get_case(case_id: str):
         "steps": step_dicts,
         "slots": [dict(s) for s in slots],
         "logs": [dict(l) for l in logs],
+        "artifacts": [_row_with_json(a, "metadata_json") for a in artifacts],
         "model_task_audits": audits,
         "progress": _build_progress(step_dicts),
     }
@@ -1142,6 +1254,7 @@ def get_case(case_id: str):
             "step_count": len(step_dicts),
             "slot_count": len(slots),
             "log_count": len(logs),
+            "artifact_count": len(artifacts),
             "audit_count": len(audits),
             "response_size_bytes": _safe_json_size(payload),
         },
@@ -1603,12 +1716,85 @@ def list_step_run_artifacts(step_run_id: str):
     return {"artifacts": [_row_with_json(row, "metadata_json") for row in rows]}
 
 
+@app.get("/mirror/files/{encoded_path}/content")
+def get_mirror_file_content(encoded_path: str):
+    path = _mirror_filesystem_path(_decode_mirror_path(encoded_path))
+    guessed, _ = mimetypes.guess_type(str(path))
+    return FileResponse(
+        path,
+        media_type=guessed or "application/octet-stream",
+        filename=path.name,
+        headers={
+            "X-Hub-Mirror-Path": str(path),
+            "Cache-Control": "private, max-age=60",
+        },
+    )
+
+
 @app.get("/case-runs/{run_id}/artifacts")
 def list_case_run_artifacts(run_id: str):
     with get_db() as conn:
         _case_run_row(conn, run_id)
         rows = conn.execute("SELECT * FROM execution_artifacts WHERE case_run_id = ? ORDER BY created_at", (run_id,)).fetchall()
     return {"artifacts": [_row_with_json(row, "metadata_json") for row in rows]}
+
+
+@app.get("/execution-artifacts/{artifact_id}")
+def get_execution_artifact(artifact_id: str):
+    with get_db() as conn:
+        row = _artifact_row(conn, artifact_id)
+        return _row_with_json(row, "metadata_json")
+
+
+@app.get("/execution-artifacts/{artifact_id}/content")
+def get_execution_artifact_content(artifact_id: str):
+    with get_db() as conn:
+        row = _artifact_row(conn, artifact_id)
+        if str(row["redaction_status"] or "").lower() in {"redacted", "restricted"}:
+            raise HTTPException(403, "artifact content is redacted or restricted")
+        path = _artifact_filesystem_path(row)
+        content_type = _artifact_content_type(row, path)
+    return FileResponse(
+        path,
+        media_type=content_type,
+        filename=path.name,
+        headers={
+            "X-Zenith-Artifact-Id": artifact_id,
+            "X-Zenith-Artifact-Role": str(row["role"] or ""),
+        },
+    )
+
+
+@app.get("/case-runs/{run_id}/artifacts/{artifact_id}")
+def get_case_run_artifact(run_id: str, artifact_id: str):
+    with get_db() as conn:
+        _case_run_row(conn, run_id)
+        row = _artifact_row(conn, artifact_id)
+        if row["case_run_id"] != run_id:
+            raise HTTPException(404, "artifact not found for case run")
+        return _row_with_json(row, "metadata_json")
+
+
+@app.get("/case-runs/{run_id}/artifacts/{artifact_id}/content")
+def get_case_run_artifact_content(run_id: str, artifact_id: str):
+    with get_db() as conn:
+        _case_run_row(conn, run_id)
+        row = _artifact_row(conn, artifact_id)
+        if row["case_run_id"] != run_id:
+            raise HTTPException(404, "artifact not found for case run")
+        if str(row["redaction_status"] or "").lower() in {"redacted", "restricted"}:
+            raise HTTPException(403, "artifact content is redacted or restricted")
+        path = _artifact_filesystem_path(row)
+        content_type = _artifact_content_type(row, path)
+    return FileResponse(
+        path,
+        media_type=content_type,
+        filename=path.name,
+        headers={
+            "X-Zenith-Artifact-Id": artifact_id,
+            "X-Zenith-Artifact-Role": str(row["role"] or ""),
+        },
+    )
 
 
 @app.get("/case-runs/{run_id}/stream")
