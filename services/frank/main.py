@@ -49,6 +49,7 @@ QUEUE_NAME = os.environ.get("QUEUE_NAME", "workspace")
 EVENTBUS_URL = os.environ["EVENTBUS_URL"]
 CASES_URL = os.environ["CASES_HTTP_URL"].rstrip("/")
 RECONNECT_DELAY = float(os.environ.get("RECONNECT_DELAY_S", "5"))
+NATIVE_RECOVERY_INTERVAL_S = float(os.environ.get("FRANK_NATIVE_RECOVERY_INTERVAL_S", "60"))
 WORKER_ID = "frank"
 TOPIC = "queue.job.enqueued"
 TERMINAL_CWD = Path(os.environ.get("TERMINAL_CWD", "/hub")).resolve()
@@ -75,6 +76,7 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 TERMINAL_STEP_STATUSES = {"COMPLETED", "FAILED", "SKIPPED"}
 TERMINAL_CASE_STATUSES = {"COMPLETED", "FAILED"}
 ACTIVE_CASE_TASKS: dict[str, asyncio.Task[Any]] = {}
+BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
 REVIEW_EVENT_MAP = {
     "review_submitted": "process-queued-review.md",
@@ -1103,8 +1105,13 @@ async def schedule_native_case_pipeline_task(
     return True
 
 
-async def recover_native_case_pipelines(client: httpx.AsyncClient, *, limit: int = 100) -> dict[str, Any]:
-    """Recover active native case runs after a Frank process restart."""
+async def recover_native_case_pipelines(client: httpx.AsyncClient, *, limit: int = 100, reason: str = "recovered after Frank startup") -> dict[str, Any]:
+    """Recover native case runs that have no durable active runner.
+
+    This covers the production failure mode where Frank claimed/acked a queue
+    message, wrote root slots, and logged "native case pipeline scheduled", but
+    the in-process asyncio task was lost before Step 1 wrote any durable progress.
+    """
     recovered: list[str] = []
     inspected: set[str] = set()
     for status in ("IN_PROGRESS", "OPEN"):
@@ -1118,13 +1125,16 @@ async def recover_native_case_pipelines(client: httpx.AsyncClient, *, limit: int
                 continue
             inspected.add(case_id)
             dispatch_packet = _dispatch_packet_from_case_payload(summary)
-            if not dispatch_packet:
+            detail: dict[str, Any] | None = None
+            if not dispatch_packet or status == "IN_PROGRESS":
                 detail = await get_case_detail(client, case_id)
-                dispatch_packet = _dispatch_packet_from_case_payload(detail.get("case") or detail)
+                dispatch_packet = dispatch_packet or _dispatch_packet_from_case_payload(detail.get("case") or detail)
             if not _is_native_case_pipeline_packet(dispatch_packet):
                 continue
+            if detail is not None and _case_has_durable_active_steps(detail):
+                continue
             case_dir = ensure_case_runtime_dir(case_id)
-            if await schedule_native_case_pipeline_task(client, case_id, dispatch_packet, case_dir, reason="recovered after Frank startup"):
+            if await schedule_native_case_pipeline_task(client, case_id, dispatch_packet, case_dir, reason=reason):
                 recovered.append(case_id)
     return {"recovered_case_ids": recovered, "recovered_count": len(recovered)}
 
@@ -1288,9 +1298,30 @@ async def subscribe_loop(client: httpx.AsyncClient) -> None:
                 await handle_enqueued(client)
 
 
+async def run_native_case_recovery_tick(client: httpx.AsyncClient) -> dict[str, Any]:
+    result = await recover_native_case_pipelines(client, reason="recovered by Frank watchdog")
+    if result.get("recovered_count"):
+        log.warning("Recovered stale native case pipelines  case_ids=%s", result.get("recovered_case_ids"))
+    return result
+
+
+async def native_case_pipeline_recovery_watchdog(client: httpx.AsyncClient) -> None:
+    while True:
+        await asyncio.sleep(NATIVE_RECOVERY_INTERVAL_S)
+        try:
+            await run_native_case_recovery_tick(client)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.exception("Native case pipeline watchdog recovery failed  error=%s", exc)
+
+
 async def main() -> None:
     delay = RECONNECT_DELAY
     async with httpx.AsyncClient() as client:
+        watchdog_task = asyncio.create_task(native_case_pipeline_recovery_watchdog(client))
+        BACKGROUND_TASKS.add(watchdog_task)
+        watchdog_task.add_done_callback(BACKGROUND_TASKS.discard)
         try:
             recovered = await recover_native_case_pipelines(client)
             if recovered["recovered_count"]:
