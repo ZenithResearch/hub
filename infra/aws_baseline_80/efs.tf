@@ -225,7 +225,7 @@ resource "aws_security_group" "efs_cases" {
 
 resource "aws_security_group" "efs_frank" {
   name        = "${local.name_prefix}-efs-frank-sg"
-  description = "EFS mount targets for Frank: NFS ingress from Frank, STT, llama-server, and Gateway tasks"
+  description = "EFS mount targets for Frank: NFS ingress from Frank tasks only"
   vpc_id      = aws_vpc.this.id
 
   ingress {
