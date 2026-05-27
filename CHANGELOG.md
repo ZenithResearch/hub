@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added authenticated Gateway-owned HubFS `stat`, `content`, `list`, `manifest`, and `by-path` routes — gives ZenithOS direct POSIX-style access to the main Hub Gateway `/data` volume through the temporary admin-token bridge while keeping service-level filesystems as separate future volumes.
 - Added Hub mirror file content serving for configured filesystem roots — lets ZenithOS fetch process documents and runtime `/data/...` files through authenticated Gateway admin routes when the operator has not mounted the backing Hub data directory.
 - Added registered artifact content serving for case execution artifacts — lets ZenithOS preview Hub-resident Markdown/file slots through authenticated Gateway admin routes when the operator has not mounted the backing Hub data directory.
 - Added review extraction page/scroll/stroke evidence capture — preserves navigation, scroll position, stroke event IDs, and deictic visual-artifact feedback in Frank review packets so implementation handoffs retain the UI context reviewers point at.
