@@ -27,6 +27,21 @@ resource "aws_ecs_task_definition" "gateway" {
     }
   }
 
+  volume {
+    name = "frank-execution-data"
+
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.frank.id
+      root_directory     = "/"
+      transit_encryption = "ENABLED"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.frank_execution.id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
   container_definitions = jsonencode([
     {
       name      = "app"
@@ -85,6 +100,11 @@ resource "aws_ecs_task_definition" "gateway" {
           sourceVolume  = "gateway-data"
           containerPath = "/data"
           readOnly      = false
+        },
+        {
+          sourceVolume  = "frank-execution-data"
+          containerPath = "/data/frank_execution"
+          readOnly      = true
         }
       ]
       logConfiguration = {

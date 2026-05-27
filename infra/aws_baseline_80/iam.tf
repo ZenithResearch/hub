@@ -193,7 +193,8 @@ resource "aws_iam_role_policy" "llama_server_model_efs" {
   policy = data.aws_iam_policy_document.llama_server_model_efs.json
 }
 
-# Gateway task needs EFS access for persistent CLIENTS_DB_PATH=/data/clients.db.
+# Gateway task mounts its own persistent CLIENTS_DB_PATH=/data/clients.db and reads
+# Frank execution artifacts through /data/frank_execution for HubFS previews.
 data "aws_iam_policy_document" "gateway_efs" {
   statement {
     actions = [
@@ -202,6 +203,20 @@ data "aws_iam_policy_document" "gateway_efs" {
       "elasticfilesystem:ClientRootAccess",
     ]
     resources = [aws_efs_file_system.gateway.arn]
+  }
+
+  statement {
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientRootAccess",
+    ]
+    resources = [aws_efs_file_system.frank.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "elasticfilesystem:AccessPointArn"
+      values   = [aws_efs_access_point.frank_execution.arn]
+    }
   }
 }
 

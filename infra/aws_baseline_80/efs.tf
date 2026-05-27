@@ -169,6 +169,27 @@ resource "aws_efs_access_point" "frank" {
   tags = merge(local.tags, { Name = "${local.name_prefix}-frank-ap" })
 }
 
+# Gateway exposes Frank-produced runtime artifacts through HubFS at /data/frank_execution.
+resource "aws_efs_access_point" "frank_execution" {
+  file_system_id = aws_efs_file_system.frank.id
+
+  posix_user {
+    uid = var.gateway_data_uid
+    gid = var.gateway_data_gid
+  }
+
+  root_directory {
+    path = "/data/frank_execution"
+    creation_info {
+      owner_uid   = var.gateway_data_uid
+      owner_gid   = var.gateway_data_gid
+      permissions = "750"
+    }
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-frank-execution-ap" })
+}
+
 # EFS security group: allows NFS (2049) ingress from queue tasks only.
 resource "aws_security_group" "efs_queue" {
   name        = "${local.name_prefix}-efs-queue-sg"
@@ -204,7 +225,7 @@ resource "aws_security_group" "efs_cases" {
 
 resource "aws_security_group" "efs_frank" {
   name        = "${local.name_prefix}-efs-frank-sg"
-  description = "EFS mount targets for Frank: NFS ingress from Frank tasks only"
+  description = "EFS mount targets for Frank: NFS ingress from Frank, STT, llama-server, and Gateway tasks"
   vpc_id      = aws_vpc.this.id
 
   ingress {
@@ -229,6 +250,14 @@ resource "aws_security_group" "efs_frank" {
     to_port         = 2049
     protocol        = "tcp"
     security_groups = [aws_security_group.llama_server.id]
+  }
+
+  ingress {
+    description     = "nfs_from_gateway_tasks"
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.gateway.id]
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-efs-frank-sg" })
