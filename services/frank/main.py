@@ -53,6 +53,7 @@ WORKER_ID = "frank"
 TOPIC = "queue.job.enqueued"
 TERMINAL_CWD = Path(os.environ.get("TERMINAL_CWD", "/hub")).resolve()
 PROCESS_ROOT = TERMINAL_CWD / "base/ops/processes"
+PROCESS_HUBFS_ROOT = Path(os.environ.get("PROCESS_HUBFS_ROOT", "/app/base/ops/processes"))
 ROLODEX_INDEX = TERMINAL_CWD / "rolodex/index.yaml"
 GATEWAY_HTTP_URL = os.environ.get("GATEWAY_HTTP_URL", "http://gateway-http:8080").rstrip("/")
 HERMES_PROFILE_ROOT = Path(
@@ -168,7 +169,7 @@ def _process_definition_from_path(event_type: str, path: Path) -> ProcessDefinit
     return ProcessDefinition(
         event_type=event_type,
         process_name=event_type,
-        process_path=path.stem,
+        process_path=str(PROCESS_HUBFS_ROOT / path.name),
         path=path,
         source=source,
     )
@@ -195,7 +196,7 @@ def resolve_process_definition(msg: dict[str, Any]) -> ProcessDefinition:
             return ProcessDefinition(
                 event_type=event_type,
                 process_name=event_type,
-                process_path=path.stem,
+                process_path=str(PROCESS_HUBFS_ROOT / path.name),
                 path=path,
                 source=source,
             )

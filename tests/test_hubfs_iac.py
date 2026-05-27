@@ -18,6 +18,7 @@ def test_gateway_mounts_frank_execution_read_only_for_hubfs() -> None:
     assert 'sourceVolume  = "frank-execution-data"' in gateway_block
     assert 'containerPath = "/data/frank_execution"' in gateway_block
     assert "readOnly      = true" in gateway_block
+    assert '{ name = "HUBFS_ALLOWED_ROOTS", value = "/data:/app/base/ops/processes" }' in gateway_block
 
     frank_execution_ap = efs.split('resource "aws_efs_access_point" "frank_execution" {', 1)[1].split(
         '# EFS security group', 1
@@ -44,3 +45,13 @@ def test_gateway_mounts_frank_execution_read_only_for_hubfs() -> None:
     assert "ClientMount" in frank_mount_statement
     assert "ClientRootAccess" in frank_mount_statement
     assert "ClientWrite" not in frank_mount_statement
+
+
+def test_frank_publishes_process_docs_as_gateway_hubfs_paths() -> None:
+    ecs = (ROOT / "infra/aws_baseline_80/ecs.tf").read_text()
+    frank_block = ecs.split('resource "aws_ecs_task_definition" "frank" {', 1)[1].split(
+        'resource "aws_ecs_service" "frank" {', 1
+    )[0]
+
+    assert '{ name = "TERMINAL_CWD", value = "/app" }' in frank_block
+    assert '{ name = "PROCESS_HUBFS_ROOT", value = "/app/base/ops/processes" }' in frank_block

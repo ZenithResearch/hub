@@ -131,6 +131,7 @@ Process a review.
         os.environ["TERMINAL_CWD"] = str(root)
         os.environ["WORKER_HOST"] = "host.docker.internal"
         os.environ["WORKER_CASES_URL"] = "http://localhost:8083"
+        os.environ["PROCESS_HUBFS_ROOT"] = "/app/base/ops/processes"
         os.environ["MODEL"] = ""
         os.environ["FRANK_MODEL"] = ""
         os.environ["OPENAI_BASE_URL"] = ""
@@ -157,6 +158,15 @@ Process a review.
         with patch.dict(os.environ, {}, clear=True):
             missing = self.module.missing_capability_env_vars({"env_vars": ["ELEVENLABS_API_KEY"]})
         self.assertEqual(missing, ["ELEVENLABS_API_KEY"])
+
+    def test_process_definition_uses_gateway_hubfs_process_path(self) -> None:
+        process_def = self.module.resolve_process_definition(
+            {"id": "msg_1", "event_type": "review_submitted", "sender": "tester", "payload": {}}
+        )
+
+        self.assertEqual(process_def.process_name, "review_submitted")
+        self.assertEqual(process_def.process_path, "/app/base/ops/processes/process-queued-review.md")
+        self.assertTrue(process_def.path.exists())
 
 
     def test_build_step_briefs_propagates_parsed_toolsets_to_allowed_toolsets(self) -> None:

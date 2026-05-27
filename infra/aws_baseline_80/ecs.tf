@@ -77,6 +77,7 @@ resource "aws_ecs_task_definition" "gateway" {
         { name = "QUEUE_HTTP_URL", value = "http://${local.queue_http_target}" },
         { name = "CASES_HTTP_URL", value = "http://${local.cases_http_target}" },
         { name = "EVENTBUS_URL", value = "http://${local.eventbus_target}" },
+        { name = "HUBFS_ALLOWED_ROOTS", value = "/data:/app/base/ops/processes" },
         { name = "CORS_ALLOW_ORIGINS", value = var.cors_allow_origins },
         { name = "MAX_BODY_BYTES", value = tostring(var.max_body_bytes) },
         { name = "GATEWAY_GRPC_TIMEOUT_S", value = "5.0" }
@@ -593,6 +594,7 @@ PY
         { name = "STT_HTTP_URL", value = "http://${local.stt_http_target}" },
         { name = "QUEUE_NAME", value = "workspace" },
         { name = "TERMINAL_CWD", value = "/app" },
+        { name = "PROCESS_HUBFS_ROOT", value = "/app/base/ops/processes" },
         { name = "HERMES_HOME", value = "/data/hermes" },
         { name = "HERMES_PROFILE_ROOT", value = "/data/hermes/profiles" },
         { name = "FRANK_EXECUTION_ROOT", value = "/data/frank_execution" },

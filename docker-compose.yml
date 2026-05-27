@@ -157,6 +157,7 @@ services:
       GATEWAY_GRPC_TIMEOUT_S: ${GATEWAY_GRPC_TIMEOUT_S:-5.0}
       QUEUE_HTTP_URL: http://queue:8081
       EVENTBUS_URL: http://eventbus:8082
+      HUBFS_ALLOWED_ROOTS: ${HUBFS_ALLOWED_ROOTS:-/data:/app/base/ops/processes}
       REVIEWS_DATA_DIR: /data/reviews
       CLIENTS_DB_BACKEND: ${CLIENTS_DB_BACKEND:-postgres}
       REVIEW_ACCESS_ADMIN_TOKEN: ${REVIEW_ACCESS_ADMIN_TOKEN:-}
@@ -340,6 +341,7 @@ services:
       QUEUE_NAME: ${QUEUE_NAME:-workspace}
       HERMES_HOME: /hub/rolodex/agents/frank
       TERMINAL_CWD: /hub
+      PROCESS_HUBFS_ROOT: ${PROCESS_HUBFS_ROOT:-/app/base/ops/processes}
       GATEWAY_HTTP_URL: ${GATEWAY_HTTP_URL:-http://gateway-http:8080}
       STT_HTTP_URL: http://stt-http:8765
       TOOL_DIR: ${TOOL_DIR:-/app/libs/tools}

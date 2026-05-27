@@ -47,7 +47,7 @@ class GatewaySettings(BaseServiceSettings):
     queue_http_url: str = Field(default="http://localhost:8081", alias="QUEUE_HTTP_URL")
     eventbus_url: str = Field(default="http://localhost:8082", alias="EVENTBUS_URL")
     cases_http_url: str = Field(default="http://cases:8083", alias="CASES_HTTP_URL")
-    hubfs_allowed_roots: str = Field(default="/data", alias="HUBFS_ALLOWED_ROOTS")
+    hubfs_allowed_roots: str = Field(default="/data:/app/base/ops/processes", alias="HUBFS_ALLOWED_ROOTS")
 
     # Matrix inbox — gateway posts review submissions to the feedback room as gateway-bot
     matrix_homeserver_url: str = Field(default="", alias="MATRIX_HOMESERVER_URL")
