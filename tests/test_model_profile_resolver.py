@@ -143,6 +143,7 @@ class GatewayModelProfileAdminTests(unittest.TestCase):
         os.environ["MODEL_PROFILES_PATH"] = "infra/model-profiles.yaml"
         os.environ["MODEL_PROFILE_OVERRIDES_PATH"] = str(root / "model-profile-overrides.yaml")
         os.environ["MODEL_PROFILE_AUDIT_PATH"] = str(root / "model-profile-audit.jsonl")
+        os.environ["IMAGE_ENV_MANIFEST_PATH"] = "infra/image-env-manifest.yaml"
 
         async def _close() -> None:
             return None
@@ -182,7 +183,84 @@ class GatewayModelProfileAdminTests(unittest.TestCase):
         os.environ.pop("MODEL_PROFILES_PATH", None)
         os.environ.pop("MODEL_PROFILE_OVERRIDES_PATH", None)
         os.environ.pop("MODEL_PROFILE_AUDIT_PATH", None)
+        os.environ.pop("IMAGE_ENV_MANIFEST_PATH", None)
+        os.environ.pop("ELEVENLABS_API_KEY", None)
         self.tmpdir.cleanup()
+
+    def test_admin_image_env_manifest_requires_admin_token(self) -> None:
+        response = self.client.get("/v1/admin/config/image-env-manifest")
+
+        assert response.status_code == 401
+
+    def test_admin_image_env_manifest_returns_secret_manager_contract_without_secret_values(self) -> None:
+        os.environ["ELEVENLABS_API_KEY"] = "test-elevenlabs-secret-value"
+
+        response = self.client.get(
+            "/v1/admin/config/image-env-manifest",
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["secrets_printed"] is False
+        by_service = {service["service"]: service for service in payload["services"]}
+        frank = by_service["frank"]
+        assert frank["environment"]["STT_AUDIO_PREPROCESSOR"] == "terraform:stt_audio_preprocessor"
+        elevenlabs = frank["secrets"]["ELEVENLABS_API_KEY"]
+        assert elevenlabs["source"] == "aws_secrets_manager"
+        assert elevenlabs["secret_ref"] == "var.elevenlabs_api_key_secret_arn"
+        assert elevenlabs["configured"] is True
+        assert elevenlabs["preview"]
+        serialized = json.dumps(payload)
+        assert "test-elevenlabs-secret-value" not in serialized
+        assert "sk-" not in serialized
+        assert "Bearer " not in serialized
+
+    def test_admin_config_reports_manifest_backed_secret_status(self) -> None:
+        os.environ["ELEVENLABS_API_KEY"] = "runtime-injected-secret"
+
+        response = self.client.get(
+            "/v1/admin/config",
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["secrets_printed"] is False
+        elevenlabs = payload["secrets"]["ELEVENLABS_API_KEY"]
+        assert elevenlabs["source"] == "aws_secrets_manager"
+        assert elevenlabs["configured"] is True
+        assert elevenlabs["secret_ref"] == "var.elevenlabs_api_key_secret_arn"
+        assert "runtime-injected-secret" not in json.dumps(payload)
+
+    def test_admin_config_secret_writes_are_not_local_overrides(self) -> None:
+        response = self.client.put(
+            "/v1/admin/config/secrets/ELEVENLABS_API_KEY",
+            headers={"Authorization": "Bearer admin-secret"},
+            json={"value": "should-not-be-written"},
+        )
+
+        assert response.status_code == 410
+        assert "Secrets Manager" in response.text
+
+    def test_admin_validate_stt_config_uses_runtime_injected_secret(self) -> None:
+        missing = self.client.post(
+            "/v1/admin/config/validate/stt",
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+        assert missing.status_code == 200
+        assert missing.json()["ok"] is False
+        assert missing.json()["missing"] == ["ELEVENLABS_API_KEY"]
+
+        os.environ["ELEVENLABS_API_KEY"] = "runtime-injected-secret"
+        configured = self.client.post(
+            "/v1/admin/config/validate/stt",
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+        assert configured.status_code == 200
+        assert configured.json()["ok"] is True
+        assert configured.json()["missing"] == []
+        assert "runtime-injected-secret" not in configured.text
 
     def test_admin_effective_profile_endpoint_requires_admin_token(self) -> None:
         response = self.client.get(

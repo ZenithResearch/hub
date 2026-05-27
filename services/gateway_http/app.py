@@ -17,6 +17,7 @@ from urllib.parse import quote_plus, urlparse
 
 import grpc
 import httpx
+import yaml
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -207,6 +208,60 @@ def _secret_preview(value: str) -> str:
     if len(value) <= 8:
         return "****"
     return f"{value[:4]}...{value[-4:]}"
+
+
+def _load_image_env_manifest(path: Path | str) -> dict[str, Any]:
+    manifest_path = Path(path)
+    if not manifest_path.exists():
+        raise HTTPException(status_code=503, detail="image/env manifest is not configured")
+    data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("services"), list):
+        raise HTTPException(status_code=503, detail="image/env manifest is invalid")
+    return data
+
+
+def _runtime_secret_status(env_name: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    value = os.environ.get(env_name, "") or ""
+    return {
+        **metadata,
+        "configured": bool(value),
+        "preview": _secret_preview(value) if value else "",
+    }
+
+
+def _safe_image_env_manifest(path: Path | str) -> dict[str, Any]:
+    manifest = _load_image_env_manifest(path)
+    services: list[dict[str, Any]] = []
+    for raw_service in manifest.get("services", []):
+        if not isinstance(raw_service, dict):
+            continue
+        service = dict(raw_service)
+        raw_secrets = service.get("secrets")
+        secrets_map = raw_secrets if isinstance(raw_secrets, dict) else {}
+        service["secrets"] = {
+            str(name): _runtime_secret_status(str(name), metadata if isinstance(metadata, dict) else {})
+            for name, metadata in sorted(secrets_map.items())
+        }
+        services.append(service)
+    return {
+        "schema_version": manifest.get("schema_version"),
+        "status": manifest.get("status"),
+        "principles": manifest.get("principles", []),
+        "services": services,
+        "secrets_printed": False,
+    }
+
+
+def _manifest_secret_statuses(path: Path | str, allowed_keys: set[str]) -> dict[str, dict[str, Any]]:
+    safe_manifest = _safe_image_env_manifest(path)
+    statuses: dict[str, dict[str, Any]] = {}
+    for service in safe_manifest["services"]:
+        for key, metadata in (service.get("secrets") or {}).items():
+            if key in allowed_keys:
+                statuses[key] = {**metadata, "service": service.get("service", "")}
+    for key in sorted(allowed_keys - set(statuses)):
+        statuses[key] = {"configured": bool(os.environ.get(key)), "preview": _secret_preview(os.environ[key]) if os.environ.get(key) else "", "source": "runtime_env", "secret_ref": ""}
+    return statuses
 
 
 
@@ -569,46 +624,55 @@ def create_app() -> FastAPI:
     allowed_secret_keys = {"ELEVENLABS_API_KEY"}
 
     def _secret_status(key: str, values: dict[str, str]) -> dict[str, Any]:
+        # Legacy dynamic file support is retained only for REVIEW_ACCESS_ADMIN_TOKEN below.
+        # Runtime provider secrets are reported from the image/env manifest plus process
+        # environment injected by ECS/Secrets Manager.
         value = values.get(key) or ""
         return {
             "configured": bool(value),
             "preview": _secret_preview(value) if value else "",
         }
 
+    @app.get("/v1/admin/config/image-env-manifest")
+    async def get_admin_image_env_manifest(request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
+        return JSONResponse(_safe_image_env_manifest(settings.image_env_manifest_path))
+
     @app.get("/v1/admin/config")
-    async def get_admin_config() -> JSONResponse:
-        values = _read_secret_file(secret_path)
-        return JSONResponse({"secrets": {key: _secret_status(key, values) for key in sorted(allowed_secret_keys)}})
+    async def get_admin_config(request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
+        return JSONResponse(
+            {
+                "secrets": _manifest_secret_statuses(settings.image_env_manifest_path, allowed_secret_keys),
+                "secrets_printed": False,
+            }
+        )
 
     @app.put("/v1/admin/config/secrets/{key}")
-    async def put_admin_secret(key: str, payload: SecretUpdateIn) -> JSONResponse:
+    async def put_admin_secret(key: str, payload: SecretUpdateIn, request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
         if key not in allowed_secret_keys:
             raise HTTPException(status_code=404, detail="config key is not allowlisted")
-        raw_value = payload.value
-        if "\n" in raw_value or "\r" in raw_value:
-            raise HTTPException(status_code=422, detail="secret value must be single-line")
-        value = raw_value.strip()
-        if not value:
-            raise HTTPException(status_code=422, detail="secret value must not be empty")
-        values = _read_secret_file(secret_path)
-        values[key] = value
-        _write_secret_file(secret_path, values)
-        return JSONResponse({"key": key, **_secret_status(key, values)})
+        raise HTTPException(
+            status_code=410,
+            detail="Runtime provider secrets are managed by AWS Secrets Manager; update the secret in the configured backend and redeploy/restart the target service for injection.",
+        )
 
     @app.delete("/v1/admin/config/secrets/{key}")
-    async def delete_admin_secret(key: str) -> JSONResponse:
+    async def delete_admin_secret(key: str, request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
         if key not in allowed_secret_keys:
             raise HTTPException(status_code=404, detail="config key is not allowlisted")
-        values = _read_secret_file(secret_path)
-        values.pop(key, None)
-        _write_secret_file(secret_path, values)
-        return JSONResponse({"key": key, "configured": False, "preview": ""})
+        raise HTTPException(
+            status_code=410,
+            detail="Runtime provider secrets are managed by AWS Secrets Manager; remove or rotate the configured secret handle through the deployment control plane.",
+        )
 
     @app.post("/v1/admin/config/validate/stt")
-    async def validate_stt_config() -> JSONResponse:
-        values = _read_secret_file(secret_path)
-        configured = bool(values.get("ELEVENLABS_API_KEY"))
-        return JSONResponse({"ok": configured, "missing": [] if configured else ["ELEVENLABS_API_KEY"]})
+    async def validate_stt_config(request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
+        configured = bool(os.environ.get("ELEVENLABS_API_KEY"))
+        return JSONResponse({"ok": configured, "missing": [] if configured else ["ELEVENLABS_API_KEY"], "secrets_printed": False})
 
     def _effective_review_access_admin_token() -> str:
         values = _read_secret_file(secret_path)
