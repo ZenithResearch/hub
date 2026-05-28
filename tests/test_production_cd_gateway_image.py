@@ -23,19 +23,31 @@ def test_production_cd_workflow_is_removed_but_local_helper_keeps_image_override
     assert '-var="stt_image_tag=$STT_IMAGE_TAG"' in helper
 
 
-def test_manual_gateway_image_build_workflow_pushes_to_gateway_ecr_only():
+def test_manual_gateway_image_build_workflow_uses_cd_reusable_local_script():
     workflow_path = ROOT / ".github/workflows/gateway-image.yml"
     assert workflow_path.exists()
     workflow = workflow_path.read_text()
 
     assert "workflow_dispatch:" in workflow
     assert "aws-actions/configure-aws-credentials" in workflow
-    assert "aws-actions/amazon-ecr-login" in workflow
-    assert "docker/build-push-action" in workflow
+    assert "scripts/prod_build_image.sh" in workflow
     assert "zenith-hub-prod-gateway-http" in workflow
-    assert "push: true" in workflow
-    assert "tags:" in workflow
-    assert "linux/amd64" in workflow
+    assert "DOCKER_PLATFORM: linux/amd64" in workflow
+    assert "prod_terraform_cd.sh" in workflow
+
+
+def test_prod_build_image_script_builds_only_and_leaves_deploy_to_terraform():
+    script = (ROOT / "scripts/prod_build_image.sh").read_text()
+
+    assert "docker \"${BUILD_ARGS[@]}\"" in script
+    assert "--push" in script
+    assert "PUSH_IMAGE" in script
+    assert "ECR_REPOSITORY:=zenith-hub-prod-gateway-http" in script
+    assert "DOCKER_PLATFORM:=linux/amd64" in script
+    assert "Refusing to build a production image from a dirty worktree" in script
+    assert "prod_terraform_cd.sh" in script
+    assert "terraform apply" not in script
+    assert "aws ecs update-service" not in script
 
 
 def test_gateway_image_override_does_not_roll_eventbus():

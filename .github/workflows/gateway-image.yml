@@ -37,9 +37,8 @@ jobs:
           role-to-assume: ${{ vars.AWS_PROD_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Log in to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Set image metadata
         id: image
@@ -55,27 +54,19 @@ jobs:
             echo "Invalid Docker tag: $TAG" >&2
             exit 2
           fi
-          IMAGE_URI="${{ steps.ecr-login.outputs.registry }}/${ECR_REPOSITORY}:${TAG}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
           echo "Gateway image tag: $TAG"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Build and push gateway image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.image.outputs.image_uri }}
-          provenance: false
-          cache-from: type=gha,scope=gateway-http
-          cache-to: type=gha,mode=max,scope=gateway-http
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          DOCKER_PLATFORM: linux/amd64
+          DOCKER_CACHE_FROM: type=gha,scope=gateway-http
+          DOCKER_CACHE_TO: type=gha,mode=max,scope=gateway-http
+        run: scripts/prod_build_image.sh
 
       - name: Deployment hint
         run: |
-          echo "Pushed gateway image: ${{ steps.image.outputs.image_uri }}"
-          echo "Use Production CD with gateway_image_tag=${{ steps.image.outputs.tag }} to roll Gateway."
+          echo "Pushed gateway image tag: ${{ steps.image.outputs.tag }}"
+          echo "Deployment is Terraform-only: run scripts/prod_terraform_cd.sh with gateway_image_tag=${{ steps.image.outputs.tag }} and explicit live tags for every unaffected service."
