@@ -53,6 +53,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Made model-profile connectivity probes request a small multi-token completion — avoids a production llama.cpp prompt-cache edge case where one-token health checks could abort the internal Qwen server and surface as a 502 in ZenithOS.
+- Returned explicit provider-secret write capabilities from Gateway runtime config status — lets ZenithOS distinguish unsupported Secrets Manager rotation from missing capability data.
 - Hardened Frank native review-pipeline recovery for stale scheduled cases — retries IN_PROGRESS or BLOCKED native cases that still have runnable steps and no durable active runner so claimed review submissions cannot sit forever after an in-process scheduler task is lost.
 - Hardened operator-controlled IaC planning — profile changes now keep profile-specific plan domains even when the source ref is unchanged, and the local production Terraform helper requires explicit live image tags instead of carrying stale hotfix defaults that could roll services backward.
 - Mounted Frank execution artifacts read-only into the Gateway HubFS namespace — lets `/v1/admin/fs/by-path/...` resolve live `/data/frank_execution/...` review Markdown artifacts instead of 404ing on the Gateway-only EFS volume.

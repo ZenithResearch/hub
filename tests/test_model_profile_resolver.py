@@ -101,7 +101,7 @@ class ModelProfileConnectivityTests(unittest.IsolatedAsyncioTestCase):
                 "payload": {
                     "model": "Qwen3.5-9B-Q4_K_M.gguf",
                     "messages": [{"role": "user", "content": "health check"}],
-                    "max_tokens": 1,
+                    "max_tokens": 8,
                     "temperature": 0,
                     "stream": False,
                 },
@@ -231,6 +231,7 @@ class GatewayModelProfileAdminTests(unittest.TestCase):
         assert elevenlabs["source"] == "aws_secrets_manager"
         assert elevenlabs["configured"] is True
         assert elevenlabs["secret_ref"] == "var.elevenlabs_api_key_secret_arn"
+        assert payload["provider_secret_writes"] == {"supported": False, "backend": "aws_secrets_manager", "targets": []}
         assert "runtime-injected-secret" not in json.dumps(payload)
 
     def test_admin_config_secret_writes_are_not_local_overrides(self) -> None:

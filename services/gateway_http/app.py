@@ -644,6 +644,7 @@ def create_app() -> FastAPI:
         return JSONResponse(
             {
                 "secrets": _manifest_secret_statuses(settings.image_env_manifest_path, allowed_secret_keys),
+                "provider_secret_writes": {"supported": False, "backend": "aws_secrets_manager", "targets": []},
                 "secrets_printed": False,
             }
         )

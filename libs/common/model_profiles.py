@@ -268,7 +268,10 @@ async def check_model_profile_connectivity(
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": "health check"}],
-        "max_tokens": 1,
+        # llama.cpp can abort on one-token probes with prompt-cache slot reuse on
+        # the production Qwen server. Keep the probe tiny but ask for enough
+        # tokens to exercise the endpoint without hitting that server edge case.
+        "max_tokens": 8,
         "temperature": 0,
         "stream": False,
     }
