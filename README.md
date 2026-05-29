@@ -73,11 +73,31 @@ cp .env.example .env
 ./scripts/start.sh
 ```
 
-Expect to edit `.env` for local secrets, model providers, Matrix tokens, and service-specific settings.
+Expect to edit `.env` for local secrets, model providers, Matrix tokens, STT provider settings, and service-specific settings.
 
 Runtime state is intentionally local-only. The repo can be pushed publicly while real usage data stays ignored: `.env`, `.hermes/`, `data/*.db`, review artifacts, generated Matrix registrations, and `repos/workspace/` are not tracked. See `docs/local-runtime-state.md`.
 
 For focused development, prefer targeted compose/test commands over assuming the whole stack is stable.
+
+## Review audio and speech-to-text (STT)
+
+Frank transcribes review audio through `services/frank/stt_client.py`. The current production baseline is managed ElevenLabs Scribe v2 with local Whisper fallback; the local development default stays local Whisper through the `stt-http` service.
+
+Configuration lives in `.env` for local runs and in Terraform/ECS task environment for production:
+
+| Setting | Local default | Production baseline | Notes |
+|---|---|---|---|
+| `STT_PROVIDER` | `local_whisper` | `elevenlabs` | Primary provider. Options: `local_whisper`, `elevenlabs`. |
+| `STT_MODEL` | `tiny` | `scribe_v2` | Whisper options include `tiny`, `base`, `small`, `medium`, `large`, `large-v2`, `large-v3`, `turbo`; ElevenLabs uses `scribe_v2`. |
+| `STT_FALLBACK_PROVIDER` | `none` | `local_whisper` | Fallback provider after primary failure. |
+| `STT_AUDIO_PREPROCESSOR` | `none` | `none` | Optional: `elevenlabs_audio_isolation`; keep off by default until sample comparisons prove it helps. |
+| `STT_HTTP_URL` | `http://stt-http:8765` | internal Cloud Map URL | Used by local Whisper fallback. |
+| `ELEVENLABS_API_KEY` | empty | AWS Secrets Manager injection | Required for ElevenLabs STT or audio isolation; never commit real values. |
+
+Useful docs:
+
+- `docs/ops/elevenlabs-stt-rollout.md` — STT options, secret posture, smoke tests, rollback.
+- `docs/local-runtime-state.md` — what stays local/ignored and what is safe to push.
 
 ## Quick Matrix-backed community
 
@@ -172,6 +192,24 @@ ln -s ~/path/to/project ./project-name
 # or
 git clone https://github.com/example/project-name
 ```
+
+## Production updates
+
+A pushed commit is not automatically a live Hub deploy. The standard production path is clean-source first, then one full Terraform plan/apply:
+
+1. land the desired source on clean `main` and push it;
+2. wait for CI to pass;
+3. build and push one immutable image tag from clean `main` with `scripts/prod_build_image.sh`;
+4. inspect live ECS image tags for all services;
+5. run `scripts/prod_terraform_cd.sh plan` with explicit service tags;
+6. apply the saved Terraform plan;
+7. wait for ECS stability and run smokes.
+
+Start here:
+
+- `docs/operations/production-rollout.md` — standard clean-main image build + Terraform rollout.
+- `docs/operations/operator-updates.md` — operator-state doctrine and update planner boundaries.
+- `infra/aws_baseline_80/DEPLOYMENT.md` — AWS production inventory and smoke details.
 
 ## Contributing / issues
 

@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added a standard clean-main production rollout runbook and README links — documents the preferred push → immutable image build → full Terraform plan/apply path so operators can redeploy without ad hoc partial updates.
+- Added local STT configuration defaults to `.env.example` and README STT option guidance — makes local Whisper, ElevenLabs Scribe v2, fallback, and audio-preprocessor settings discoverable without reading Frank internals.
 - Added `scripts/prod_build_image.sh` and routed the Gateway image workflow through it — gives local operators and future CD pipelines one reusable build/push path while keeping production rollout exclusively Terraform-controlled through `scripts/prod_terraform_cd.sh`.
 - Added authenticated Gateway-owned HubFS `stat`, `content`, `list`, `manifest`, and `by-path` routes — gives ZenithOS direct POSIX-style access to the main Hub Gateway `/data` volume through the temporary admin-token bridge while keeping service-level filesystems as separate future volumes.
 - Added Hub mirror file content serving for configured filesystem roots — lets ZenithOS fetch process documents and runtime `/data/...` files through authenticated Gateway admin routes when the operator has not mounted the backing Hub data directory.

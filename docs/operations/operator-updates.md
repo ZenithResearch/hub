@@ -52,14 +52,17 @@ The previous GitHub Actions Production CD workflow has been removed from the rep
 
 ## Safe update flow
 
-1. Choose a target ref or release tag.
-2. Run update plan.
-3. Review changed domains: source, images, migrations, services, smoke.
+1. Land the target source on clean `main` and push it.
+2. Wait for CI, or explicitly classify any failure before proceeding.
+3. Build and push one immutable image tag from clean `main`.
 4. For cloud-prod, verify Terraform backend access before plan/apply.
-5. Export the current live image tags for every service that is not intentionally rolling; the local Terraform helper intentionally has no stale production image-tag defaults.
-6. Apply only with explicit confirmation.
-7. Run smoke checks.
-8. Write operator state after smoke passes.
+5. Inspect live ECS image tags for every service.
+6. Run a full Terraform plan with the new tag for services intentionally rolling and live tags for services being preserved.
+7. Apply only the reviewed Terraform plan.
+8. Wait for ECS stability and run smoke checks.
+9. Write operator state after smoke passes.
+
+See `docs/operations/production-rollout.md` for the concrete command sequence.
 
 ## Dry-run planner
 

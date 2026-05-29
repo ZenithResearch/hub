@@ -21,6 +21,17 @@ Safety rules:
 
 ---
 
+## Standard clean-main rollout
+
+For normal app/source updates, use the repository-level rollout runbook rather than direct ECS updates:
+
+- `docs/operations/production-rollout.md` — clean `main`, CI, immutable image build, Terraform plan/apply, ECS stability, smoke.
+- `docs/operations/operator-updates.md` — operator-owned deployment doctrine and planner boundaries.
+
+This AWS note remains the production inventory/smoke reference. If the rollout plan and this file disagree, treat `docs/operations/production-rollout.md` as the current command sequence and update this file.
+
+---
+
 ## Project A readiness smoke
 
 Run the smoke script from the Hub repo root:
