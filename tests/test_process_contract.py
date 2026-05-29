@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from services.cases.contract import (
@@ -9,7 +9,6 @@ from services.cases.contract import (
     collect_process_capabilities,
     compile_process_contract,
 )
-
 
 VALID_PROCESS = """# Demo process
 
@@ -247,6 +246,23 @@ class ProcessContractTests(unittest.TestCase):
 
         self.assertEqual(contract["capabilities"]["env_vars"], ["ELEVENLABS_API_KEY"])
         self.assertIn("ELEVENLABS_API_KEY", capabilities["env_vars"])
+
+    def test_process_environment_ignores_inline_default_values_and_examples(self) -> None:
+        process = VALID_PROCESS.replace(
+            "---\n\n## Steps",
+            "## Required capabilities\n\n### Environment\n"
+            "- `STT_AUDIO_PREPROCESSOR` (default `none`; optional `elevenlabs_audio_isolation`)\n"
+            "- `ELEVENLABS_API_KEY` (required when `STT_PROVIDER=elevenlabs` or `STT_AUDIO_PREPROCESSOR=elevenlabs_audio_isolation`)\n"
+            "\n---\n\n## Steps",
+            1,
+        )
+        missing_tool_dir = str(Path(__file__).resolve().parents[1] / ".tmp" / "missing-tools")
+        with patch.dict("os.environ", {"TOOL_DIR": missing_tool_dir}, clear=False):
+            contract = compile_process_contract(process, process_path="env-process")
+            capabilities = collect_process_capabilities(contract)
+
+        self.assertEqual(contract["capabilities"]["env_vars"], ["STT_AUDIO_PREPROCESSOR", "ELEVENLABS_API_KEY"])
+        self.assertEqual(capabilities["env_vars"], ["STT_AUDIO_PREPROCESSOR", "ELEVENLABS_API_KEY"])
 
     def test_collect_process_capabilities_includes_tool_env_requirements(self) -> None:
         process = CAPABILITY_PROCESS.replace("`echo_tool`", "`elevenlabs_stt`")

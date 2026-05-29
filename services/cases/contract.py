@@ -563,7 +563,7 @@ def _extract_process_environment(lines: list[str]) -> list[str]:
                 entries = [normalized]
         for entry in entries:
             name = str(entry).strip()
-            if not name or name in seen:
+            if not name or not _looks_like_env_var(name) or name in seen:
                 continue
             seen.add(name)
             env_vars.append(name)
@@ -591,6 +591,10 @@ def _normalize_declared_capability(text: str) -> str:
     if normalized.startswith("`") and normalized.endswith("`") and len(normalized) >= 2:
         normalized = normalized[1:-1].strip()
     return normalized
+
+
+def _looks_like_env_var(name: str) -> bool:
+    return bool(re.fullmatch(r"[A-Z][A-Z0-9_]*", name.strip()))
 
 
 def _load_tool_registry() -> ToolRegistry | None:
