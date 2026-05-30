@@ -202,3 +202,15 @@ Please include:
 ## License
 
 License pending / to be finalized before broader release.
+
+## Integration with secS-magik + Castalia Wallet (2026-05-29)
+
+The Hub implements and consumes the secS-magik RPC layer in its server components.
+
+- The Hub uses the secS-magik RPC layer (sourced from the secS-magik repository) for machine-to-machine capability communication.
+- Implementation of this RPC layer goes through **Dregg** as the underlying generic capability layer.
+- The **Castalia Wallet** (credential/ownership bridge) is used for proving ownership when the Hub needs authenticated capability presentation (via secZ or direct wallet API calls).
+- secC acts as the generic client pattern that the Hub can interact with.
+
+See the current architecture direction:
+https://github.com/bananawalnut/claude-hub/blob/main/capture/2026-05-29-castalia-wallet-rust-api-as-secZ-layer-for-secS-magik.md
