@@ -543,6 +543,12 @@ variable "enable_matrix_https_listener" {
   default     = false
 }
 
+variable "matrix_https_listener_rule_priority" {
+  description = "Priority for the Matrix host-header rule on the existing Hub HTTPS ALB listener."
+  type        = number
+  default     = 110
+}
+
 variable "enable_matrix_federation" {
   description = "Intentionally expose Matrix federation on 8448. Keep false until the security group, listener, and smoke checks are reviewed."
   type        = bool

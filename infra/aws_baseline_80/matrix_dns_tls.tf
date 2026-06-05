@@ -73,11 +73,11 @@ resource "aws_security_group" "matrix" {
   vpc_id      = aws_vpc.this.id
 
   ingress {
-    description = "matrix_client_https_from_alb"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = aws_subnet.public[*].cidr_block
+    description     = "alb_to_matrix_client_http"
+    from_port       = 8008
+    to_port         = 8008
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
   }
 
   ingress {
@@ -117,23 +117,33 @@ resource "aws_lb_target_group" "matrix_client" {
   tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-client-tg" })
 }
 
-resource "aws_lb_listener" "matrix_https" {
-  count = var.public_matrix_domain_name != "" && var.enable_matrix_https_listener ? 1 : 0
+resource "aws_lb_listener_certificate" "matrix_https" {
+  count = var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" && var.public_hub_domain_name != "" && var.enable_https_listener && var.enable_matrix_https_listener ? 1 : 0
 
-  load_balancer_arn = aws_lb.gateway.arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.matrix[0].certificate_arn
+  listener_arn    = aws_lb_listener.https[0].arn
+  certificate_arn = aws_acm_certificate_validation.matrix[0].certificate_arn
+}
 
-  default_action {
+resource "aws_lb_listener_rule" "matrix_https_host" {
+  count = var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" && var.public_hub_domain_name != "" && var.enable_https_listener && var.enable_matrix_https_listener ? 1 : 0
+
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = var.matrix_https_listener_rule_priority
+
+  action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.matrix_client[0].arn
+  }
+
+  condition {
+    host_header {
+      values = [var.public_matrix_domain_name]
+    }
   }
 }
 
 resource "aws_lb_listener" "matrix_federation" {
-  count = var.public_matrix_domain_name != "" && var.enable_matrix_federation ? 1 : 0
+  count = var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" && var.enable_matrix_federation ? 1 : 0
 
   load_balancer_arn = aws_lb.gateway.arn
   port              = 8448
