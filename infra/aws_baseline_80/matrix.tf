@@ -14,3 +14,9 @@ resource "aws_instance" "matrix" {
 # - no production claim without evidence
 # - federation 8448 opt-in only
 
+
+# Operator evidence for iss-p14-002:
+# Verification: terraform fmt -check; terraform init/validate; terraform plan -var=enable_matrix=true
+# Pricing evidence and TLS tradeoff recorded in vault capture before apply
+# Source: docs/issues/matrix-synapse-v0/iss-p14-002-core-terraform-resource-adoption.md
+
