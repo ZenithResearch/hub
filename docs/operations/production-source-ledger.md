@@ -165,3 +165,27 @@ Operational naming note: “clean main” describes a clean `origin/main` worktr
 
 - [ ] Full inventory table with compute/network/DNS/TLS/storage/backup/secret boundaries present and each resource classified (core-managed / candidate / external / unknown)
 - Verification: `grep -r synapse infra/aws_baseline_80` returns no matches (absence proof)
+
+## ISS-P14-001 production Synapse inventory (task 3 implementation)
+
+**Baseline evidence (v0 EC2+EBS path):**
+
+- Compute: EC2 instance (class tbd, encrypted EBS root + data volumes)
+- Network: VPC, subnets, SG rules for 443/8448
+- DNS: synapse.zenith-research.ca (Route53 A/AAAA)
+- TLS: termination path TBD (ALB vs EC2); federation 8448 enabled
+- Storage/Backup: EBS snapshots + S3 cross-region
+- Secrets: external (not in core TF); appservice tokens managed outside core
+- Classification: infra/matrix/aws/ = source-material-only; Synapse absent from aws_baseline_80 core state and ECS tasks (verified via terraform state list + grep)
+- Pricing estimate (planning only): EC2 ~$X/mo, EBS ~$Y/mo, snapshots ~$Z/mo, DNS/TLS ~$W/mo; total baseline TBD post-apply
+
+
+## ISS-P14-001 production Synapse inventory (task 3 implementation)
+
+**Baseline evidence (v0 EC2+EBS path):**
+
+- Compute: EC2 instance (class tbd, encrypted EBS)
+- Network/DNS/TLS/Storage/Backup/Secrets boundaries documented
+- Classification: source-material-only for infra/matrix/aws/; absent from core
+- Pricing: evidence captured as planning-only (deferred apply)
+
