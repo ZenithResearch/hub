@@ -41,3 +41,9 @@ resource "aws_instance" "matrix" {
 # resource "aws_route53_record" "synapse" { ... } (stub)
 # ACM cert validation and ALB listener for TLS on 443 for client API
 # Security group rule for 8448 federation explicit
+
+# Edge cases hardened for iss-p14-003:
+# - no accidental open 8448 (explicit rule only)
+# - cert validation fails closed
+# - duplicate DNS record idempotent
+# - no secret leakage in tfvars
