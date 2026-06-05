@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added ISS-P14-005 backup/restore contract tests — proves backup vault, schedule, retention, resource selection, and restore-runbook boundaries before implementation.
 - Added connected documentation maps and service-level READMEs — makes the Hub docs navigable from root README to service packages, operations runbooks, and focused verification commands.
 - Added a production source ledger for main-head deployability — records live ECS image provenance, branch-lineage risks, feature-equivalence verification, and the remaining STT caveat so operators can plan a `main` roll-forward without losing currently deployed behavior.
 - Added a standard clean-main production rollout runbook and README links — documents the preferred push → immutable image build → full Terraform plan/apply path so operators can redeploy without ad hoc partial updates.
