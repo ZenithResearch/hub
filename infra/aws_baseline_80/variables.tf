@@ -550,3 +550,4 @@ variable "synapse_appservice_token" {
   default     = ""
   sensitive   = true
 }
+# edge: handle empty secret case without leakage
