@@ -24,3 +24,16 @@ resource "aws_secretsmanager_secret_version" "review_access_admin_token" {
   secret_string = var.review_access_admin_token
 }
 
+
+# ISS-P14-004: Synapse secret boundary (refs only, no raw values)
+resource "aws_secretsmanager_secret" "synapse_registration_shared_secret" {
+  name        = "${local.name_prefix}/synapse_registration_shared_secret"
+  description = "Synapse registration_shared_secret (operator managed via Secrets Manager)"
+  tags        = local.tags
+}
+
+resource "aws_secretsmanager_secret" "synapse_appservice_token" {
+  name        = "${local.name_prefix}/synapse_appservice_token"
+  description = "Synapse appservice token (operator managed)"
+  tags        = local.tags
+}

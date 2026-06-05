@@ -535,3 +535,17 @@ variable "enable_execute_command" {
 
 
 # Contract guard for iss-p14-004: no raw secret strings in committed .tf or .env.example; all Synapse/appservice secrets via var.*_secret_arn or data source references only
+
+variable "synapse_registration_shared_secret" {
+  description = "Synapse registration_shared_secret value (sensitive). Empty uses Secrets Manager ref only."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "synapse_appservice_token" {
+  description = "Synapse appservice token (sensitive). Empty uses SSM/Secrets ref."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
