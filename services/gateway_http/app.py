@@ -1513,6 +1513,7 @@ def create_app() -> FastAPI:
         return JSONResponse({})
 
     # iss-p15-001 scope baseline: readiness endpoint to be added under admin for Matrix homeserver reachability (redacted)
+    # iss-p15-001 contract guard: endpoint must return redacted status; no tokens; distinguish liveness vs readiness; fail-closed on missing config
 
     @app.post("/v1/cases/{case_id}/rerun")
     async def rerun_case(case_id: str, force: bool = False) -> JSONResponse:
