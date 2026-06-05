@@ -197,3 +197,10 @@ Operational naming note: “clean main” describes a clean `origin/main` worktr
 - No claim of production deploy or Matrix identity authority
 - Forbidden: wallet/secS claims excluded
 
+
+
+## ISS-P14-001 operator evidence (task 5)
+
+- Verification commands: terraform state list | grep -i matrix; grep -r synapse infra/aws_baseline_80 || echo "absent (expected)"
+- Evidence recorded in ledger; vault note updated via linked capture
+
