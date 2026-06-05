@@ -30,3 +30,9 @@ resource "aws_instance" "matrix" {
 # Locked: direct host, federation 8448 enabled intentionally
 # Files: matrix.tf, alb.tf, (dns.tf if extracted)
 
+
+# Contract guard for iss-p14-003:
+# - dig +short synapse.zenith-research.ca must resolve to ALB
+# - openssl s_client -connect synapse.zenith-research.ca:443 shows valid cert
+# - federation port 8448 intentionally open (security group rule explicit)
+# This test would fail until DNS/TLS implemented
