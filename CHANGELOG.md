@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Recorded ISS-P14-004 PR readiness evidence — verifies placeholder-only examples and non-leakage boundaries for Matrix secrets.
+- Added Matrix Secrets Manager handles and secret-boundary runbook — keeps Synapse/appservice values out of committed files while preserving operator rotation ownership.
+- Added ISS-P14-004 secret-boundary tests — proves Matrix secret classes are sensitive and Secrets Manager-backed before implementation.
 - Recorded ISS-P14-003 PR readiness evidence — keeps DNS/TLS verification commands and forbidden production claims visible for review.
 - Added the Matrix DNS/TLS Terraform contract and operator runbook — makes `synapse.zenith-research.ca` Route53/ACM/listener ownership explicit without claiming production readiness.
 - Added ISS-P14-003 DNS/TLS contract tests — proves the Synapse public host, Route53, ACM, HTTPS, and 8448 federation contract before implementation.
@@ -60,6 +63,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Corrected ISS-P14-004 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
 - Corrected ISS-P14-003 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
 - Fixed process-contract environment capability parsing — prevents inline defaults/examples like `none`, `elevenlabs_audio_isolation`, and `STT_PROVIDER=elevenlabs` from being reported as missing required runtime configuration.
 - Made model-profile connectivity probes request a small multi-token completion — avoids a production llama.cpp prompt-cache edge case where one-token health checks could abort the internal Qwen server and surface as a 502 in ZenithOS.
