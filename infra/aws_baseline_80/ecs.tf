@@ -78,6 +78,7 @@ resource "aws_ecs_task_definition" "gateway" {
         { name = "CASES_HTTP_URL", value = "http://${local.cases_http_target}" },
         { name = "EVENTBUS_URL", value = "http://${local.eventbus_target}" },
         { name = "HUBFS_ALLOWED_ROOTS", value = "/data:/app/base/ops/processes" },
+        { name = "MATRIX_HOMESERVER_URL", value = "https://synapse.zenith-research.ca" }, # ISS-P15-003 feat: prod homeserver; override for local/stage; MATRIX_SERVER_NAME preserves public identity
         { name = "CORS_ALLOW_ORIGINS", value = var.cors_allow_origins },
         { name = "MAX_BODY_BYTES", value = tostring(var.max_body_bytes) },
         { name = "GATEWAY_GRPC_TIMEOUT_S", value = "5.0" }
