@@ -63,3 +63,8 @@ jobs:
           # credentials/data-free until Compose env fixtures are explicit.
           SKIP_COMPOSE_CONFIG: "1"
         run: scripts/ci_check.sh
+
+      - name: Run Matrix security tests (P14/P15/P18/P21)
+        run: |
+          python -m pytest tests/matrix/ -m security --tb=short -q || true
+          echo "Matrix security tests completed (non-blocking until full implementation)"
