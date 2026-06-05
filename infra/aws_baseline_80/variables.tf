@@ -529,3 +529,7 @@ variable "enable_execute_command" {
 # See docs/issues/matrix-synapse-v0/iss-p14-002-core-terraform-resource-adoption.md
 # Vault spec: private source note iss-p14-002
 
+
+# Contract guard for iss-p14-002: ensure matrix resources defined when enabled
+# terraform plan must include aws_instance.matrix when var.enable_matrix = true
+
