@@ -60,6 +60,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Corrected ISS-P14-003 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
 - Fixed process-contract environment capability parsing — prevents inline defaults/examples like `none`, `elevenlabs_audio_isolation`, and `STT_PROVIDER=elevenlabs` from being reported as missing required runtime configuration.
 - Made model-profile connectivity probes request a small multi-token completion — avoids a production llama.cpp prompt-cache edge case where one-token health checks could abort the internal Qwen server and surface as a 502 in ZenithOS.
 - Returned explicit provider-secret write capabilities from Gateway runtime config status — lets ZenithOS distinguish unsupported Secrets Manager rotation from missing capability data.

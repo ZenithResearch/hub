@@ -213,6 +213,6 @@ Areas:
 ## PR readiness evidence — 2026-06-05
 
 - Issue PR branch: `issue/iss-p14-003-dns-tls-contract-main`
-- Targeted test: `uv run pytest tests/matrix/test_iss_p14_003_dns_tls.py -q`
+- Targeted test: `uv run --with pytest pytest tests/matrix/test_iss_p14_003_dns_tls.py -q`
 - Scope: this PR completes ISS-P14-003: DNS and TLS contract only; it does not claim production deployment, appservice delivery, or Matrix identity as Hub authority.
 - Review boundary: issue = PR, with test-first contract commit followed by implementation and readiness evidence.
