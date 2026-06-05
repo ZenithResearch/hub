@@ -535,6 +535,7 @@ variable "enable_execute_command" {
 
 
 # Contract guard for iss-p14-004: no raw secret strings in committed .tf or .env.example; all Synapse/appservice secrets via var.*_secret_arn or data source references only
+# test guard (pre-impl): if any raw value appears in committed files outside var defaults, this contract fails
 
 variable "synapse_registration_shared_secret" {
   description = "Synapse registration_shared_secret value (sensitive). Empty uses Secrets Manager ref only."
