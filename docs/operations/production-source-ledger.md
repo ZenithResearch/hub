@@ -189,3 +189,11 @@ Operational naming note: “clean main” describes a clean `origin/main` worktr
 - Classification: source-material-only for infra/matrix/aws/; absent from core
 - Pricing: evidence captured as planning-only (deferred apply)
 
+
+
+## ISS-P14-001 edge cases (task 4)
+
+- No raw secrets persisted
+- No claim of production deploy or Matrix identity authority
+- Forbidden: wallet/secS claims excluded
+
