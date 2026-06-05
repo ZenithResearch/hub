@@ -1,0 +1,210 @@
+# ISS-P15-001: Matrix readiness endpoint
+
+> Issue = PR boundary. Tasks below = commit boundaries inside that PR.
+
+## PR boundary
+
+- **PR scope:** ISS-P15-001: Matrix readiness endpoint
+- **Suggested branch:** `issue/iss-p15-001-matrix-readiness-endpoint`
+- **Suggested PR title:** `ISS-P15-001: Matrix readiness endpoint`
+- **Primary repo:** `ZenithResearch/hub`
+- **Supporting repo/API dependency:** none identified for this issue note
+- **Source vault note:** `private source note: iss-p15-001`
+- **GitHub issue:** https://github.com/ZenithResearch/hub/issues/35
+- **Repo-local spec path:** `docs/issues/matrix-synapse-v0/iss-p15-001-matrix-readiness-endpoint.md`
+
+## Full spec
+
+### Objective
+
+Add a redacted Gateway admin status endpoint for homeserver reachability, service identities, configured booleans, rooms, and ingest reachability.
+
+### Repo rationale
+
+Hub owns Gateway/ingest/appservice readiness, tokens, homeserver config, and smoke tests.
+
+### Dependencies / blocked by
+
+- PRP-PR-014 production Synapse target
+
+### Target files and surfaces
+
+- services/gateway_http/app.py, services/matrix_bridge/, services/ingest/, tests
+
+### Locked decisions and invariants
+
+- Gateway admin endpoint owns v0 Matrix readiness/status/config.
+- Production homeserver target is `synapse.zenith-research.ca`.
+- Appservice tokens fail closed outside local dev.
+- Hub provenance/reply correlation belongs in P18; do not overclaim P15 smoke.
+
+### Acceptance criteria
+
+- Endpoint distinguishes liveness from Matrix readiness; missing config is degraded/fail-closed; response leaks no tokens.
+- Evidence is recorded in the implementation repo or linked capture before this issue is marked complete.
+- The project note is updated with the completion evidence and any downstream blockers.
+
+### Verification commands
+
+- pytest gateway/matrix tests; curl admin endpoint; secret scan.
+
+### Forbidden claims / non-goals
+
+- Do not claim production deployment unless live deploy evidence exists.
+- Do not claim Matrix identity is Hub authority.
+- Do not print or persist raw appservice/admin/reviewer secrets.
+- Do not claim wallet, secS-magik, Zenith Review SDK wallet-auth, or Dregg-backed authorization in this v0 Matrix/Synapse issue set.
+
+## Task list — commit boundaries
+
+Each checked task should land as a separate commit on the PR branch. Do not combine tasks unless the diff is mechanically inseparable; if combined, explain why in the PR body.
+
+### Task 1: Scope and baseline evidence
+
+**Commit boundary:** one commit in the `ISS-P15-001` PR.
+
+**Objective:** Read the source vault note and inspect the target repo surfaces for `ISS-P15-001`. Confirm the exact files/modules to touch, record current behavior, and update this spec if discovery changes the file list.
+
+**Files / surfaces:**
+- services/gateway_http/app.py, services/matrix_bridge/, services/ingest/, tests
+
+**Steps:**
+1. Inspect the named files/surfaces and keep the diff limited to this issue.
+2. Make only the change required for this task.
+3. Run the narrowest relevant verification command before committing.
+4. Commit with:
+
+```bash
+git add <changed-files>
+git commit -m "docs: scope iss-p15-001"
+```
+
+**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
+### Task 2: Contract / failing test or guard
+
+**Commit boundary:** one commit in the `ISS-P15-001` PR.
+
+**Objective:** Add the smallest failing test, static check, fixture, or documentation guard that proves the issue is not already complete and captures the desired behavior before implementation.
+
+**Files / surfaces:**
+- services/gateway_http/app.py, services/matrix_bridge/, services/ingest/, tests
+
+**Steps:**
+1. Inspect the named files/surfaces and keep the diff limited to this issue.
+2. Make only the change required for this task.
+3. Run the narrowest relevant verification command before committing.
+4. Commit with:
+
+```bash
+git add <changed-files>
+git commit -m "test: cover iss-p15-001 contract"
+```
+
+**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
+### Task 3: Implement the primary behavior
+
+**Commit boundary:** one commit in the `ISS-P15-001` PR.
+
+**Objective:** Make the minimal production change for the objective. Keep the diff limited to this issue's PR boundary and do not pull in adjacent phase work.
+
+**Files / surfaces:**
+- services/gateway_http/app.py, services/matrix_bridge/, services/ingest/, tests
+
+**Steps:**
+1. Inspect the named files/surfaces and keep the diff limited to this issue.
+2. Make only the change required for this task.
+3. Run the narrowest relevant verification command before committing.
+4. Commit with:
+
+```bash
+git add <changed-files>
+git commit -m "feat: implement iss-p15-001"
+```
+
+**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
+### Task 4: Negative cases and edge behavior
+
+**Commit boundary:** one commit in the `ISS-P15-001` PR.
+
+**Objective:** Add fail-closed, non-leakage, duplicate/idempotency, unavailable-dependency, or no-op cases relevant to this issue. If the issue is documentation-only, add explicit forbidden examples instead.
+
+**Files / surfaces:**
+- services/gateway_http/app.py, services/matrix_bridge/, services/ingest/, tests
+
+**Steps:**
+1. Inspect the named files/surfaces and keep the diff limited to this issue.
+2. Make only the change required for this task.
+3. Run the narrowest relevant verification command before committing.
+4. Commit with:
+
+```bash
+git add <changed-files>
+git commit -m "test: harden iss-p15-001 edge cases"
+```
+
+**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
+### Task 5: Docs, operator notes, and evidence hooks
+
+**Commit boundary:** one commit in the `ISS-P15-001` PR.
+
+**Objective:** Update repo-local docs/runbooks/config comments so an operator or future agent can verify the behavior without reading the vault. Add evidence placeholders or command examples, but do not commit secrets or live tokens.
+
+**Files / surfaces:**
+- services/gateway_http/app.py, services/matrix_bridge/, services/ingest/, tests
+
+**Steps:**
+1. Inspect the named files/surfaces and keep the diff limited to this issue.
+2. Make only the change required for this task.
+3. Run the narrowest relevant verification command before committing.
+4. Commit with:
+
+```bash
+git add <changed-files>
+git commit -m "docs: record iss-p15-001 operator evidence"
+```
+
+**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
+### Task 6: PR readiness verification
+
+**Commit boundary:** one commit in the `ISS-P15-001` PR.
+
+**Objective:** Run the verification commands below, run `git diff --check`, inspect the PR diff for scope creep/secrets, and update the PR body with evidence and explicit non-claims.
+
+**Files / surfaces:**
+- services/gateway_http/app.py, services/matrix_bridge/, services/ingest/, tests
+
+**Steps:**
+1. Inspect the named files/surfaces and keep the diff limited to this issue.
+2. Make only the change required for this task.
+3. Run the narrowest relevant verification command before committing.
+4. Commit with:
+
+```bash
+git add <changed-files>
+git commit -m "chore: verify iss-p15-001 pr readiness"
+```
+
+**Done when:** this task's change is independently reviewable and the next task can build on it without rewriting it.
+
+## PR body checklist
+
+Before opening or marking the PR ready, include:
+
+- [ ] Link to this repo-local spec.
+- [ ] Link to source vault note `private source note: iss-p15-001`.
+- [ ] Summary of the implementation.
+- [ ] Task/commit list with commit SHAs.
+- [ ] Verification commands and results.
+- [ ] Explicit forbidden claims that remain false.
+- [ ] Supporting repo/API dependency status, if any.
+
+## Related
+
+- [[prp-pr-015|PRP-PR-015: Production Synapse smoke and Hub appservice wiring]]
+- [[../capture/2026-06-04-matrix-wallet-extension-initiative|Matrix production and vanilla auth initiative]]
+- [[projects]]
+- [[Zenith]]
+
+Areas:
+- [[Zenith]]
+- [[projects]]

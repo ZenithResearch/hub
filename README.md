@@ -212,5 +212,4 @@ The Hub implements and consumes the secS-magik RPC layer in its server component
 - The **Castalia Wallet** (credential/ownership bridge) is used for proving ownership when the Hub needs authenticated capability presentation (via secZ or direct wallet API calls).
 - secC acts as the generic client pattern that the Hub can interact with.
 
-See the current architecture direction:
-https://github.com/bananawalnut/claude-hub/blob/main/capture/2026-05-29-castalia-wallet-rust-api-as-secZ-layer-for-secS-magik.md
+See the current architecture direction in the internal architecture capture for the Castalia Wallet / secZ layer for secS-magik.
