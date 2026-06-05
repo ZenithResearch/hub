@@ -26,3 +26,9 @@ resource "aws_instance" "matrix" {
 # All 6 tasks complete; references vault spec
 # No secrets, scope limited, forbidden claims avoided
 
+
+# Edge cases for iss-p14-004:
+# - rotation of secrets via operator without code change
+# - no leakage in tfstate (use sensitive vars)
+# - duplicate secret names prevented by name_prefix
+# - unavailable secret manager -> apply fails closed
