@@ -524,3 +524,8 @@ variable "enable_execute_command" {
   type        = bool
   default     = false
 }
+
+# ISS-P14-002 scope: Core Terraform resource adoption for Matrix EC2 + EBS
+# See docs/issues/matrix-synapse-v0/iss-p14-002-core-terraform-resource-adoption.md
+# Vault spec: private source note iss-p14-002
+
