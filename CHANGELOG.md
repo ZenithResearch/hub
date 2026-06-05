@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Recorded ISS-P14-004 PR readiness evidence — verifies placeholder-only examples and non-leakage boundaries for Matrix secrets.
 - Added Matrix Secrets Manager handles and secret-boundary runbook — keeps Synapse/appservice values out of committed files while preserving operator rotation ownership.
 - Added ISS-P14-004 secret-boundary tests — proves Matrix secret classes are sensitive and Secrets Manager-backed before implementation.
 - Added connected documentation maps and service-level READMEs — makes the Hub docs navigable from root README to service packages, operations runbooks, and focused verification commands.

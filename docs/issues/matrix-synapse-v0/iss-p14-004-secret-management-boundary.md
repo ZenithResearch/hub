@@ -209,3 +209,10 @@ Before opening or marking the PR ready, include:
 Areas:
 - [[Zenith]]
 - [[projects]]
+
+## PR readiness evidence — 2026-06-05
+
+- Issue PR branch: `issue/iss-p14-004-secret-management-boundary-main`
+- Targeted test: `uv run pytest tests/matrix/test_iss_p14_004_secret_boundary.py -q`
+- Scope: this PR completes ISS-P14-004: Secret management boundary only; it does not claim production deployment, appservice delivery, or Matrix identity as Hub authority.
+- Review boundary: issue = PR, with test-first contract commit followed by implementation and readiness evidence.
