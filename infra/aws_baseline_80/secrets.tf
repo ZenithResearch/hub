@@ -39,3 +39,4 @@ resource "aws_secretsmanager_secret" "synapse_appservice_token" {
 }
 
 # ISS-P14-004 scope baseline: files confirmed: secrets.tf, variables.tf, user_data.sh.tpl, .env examples; current: secrets use var.* with sensitive=true, no raw values committed
+# feat impl: use secret ARNs for matrix bootstrap in production
