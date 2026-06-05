@@ -25,6 +25,28 @@ def test_matrix_restore_runbook_names_state_classes_and_unproven_restore_boundar
     assert 'Untested restore paths are unproven' in doc
     assert 'Do not claim durable production Synapse' in doc
     assert 'aws backup list-recovery-points-by-backup-vault' in doc
+    assert 'Restore owner: Hub operator' in doc
+    assert 'Restore workflow' in doc
+    for phrase in [
+        'select a recovery point',
+        'restore to a non-production target',
+        'restore job role',
+        'restore order',
+        'validate `/_matrix/client/versions`',
+    ]:
+        assert phrase in doc
+
+
+def test_matrix_backup_runbook_records_empty_selection_and_restore_failure_boundaries():
+    doc = read("docs/operations/matrix-backup-restore.md")
+    for phrase in [
+        'empty `matrix_backup_resource_arns`',
+        'missing IAM permissions',
+        'wrong account or AZ',
+        'partial restore',
+        'token rotation during restore',
+    ]:
+        assert phrase in doc
 
 def test_matrix_backup_contract_does_not_store_raw_secrets():
     backup = read("infra/aws_baseline_80/matrix_backup.tf")
