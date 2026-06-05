@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Recorded ISS-P14-003 PR readiness evidence — keeps DNS/TLS verification commands and forbidden production claims visible for review.
+- Added the Matrix DNS/TLS Terraform contract and operator runbook — makes `synapse.zenith-research.ca` Route53/ACM/listener ownership explicit without claiming production readiness.
+- Added ISS-P14-003 DNS/TLS contract tests — proves the Synapse public host, Route53, ACM, HTTPS, and 8448 federation contract before implementation.
 - Added connected documentation maps and service-level READMEs — makes the Hub docs navigable from root README to service packages, operations runbooks, and focused verification commands.
 - Added a production source ledger for main-head deployability — records live ECS image provenance, branch-lineage risks, feature-equivalence verification, and the remaining STT caveat so operators can plan a `main` roll-forward without losing currently deployed behavior.
 - Added a standard clean-main production rollout runbook and README links — documents the preferred push → immutable image build → full Terraform plan/apply path so operators can redeploy without ad hoc partial updates.
@@ -57,6 +60,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Corrected ISS-P14-003 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
 - Fixed process-contract environment capability parsing — prevents inline defaults/examples like `none`, `elevenlabs_audio_isolation`, and `STT_PROVIDER=elevenlabs` from being reported as missing required runtime configuration.
 - Made model-profile connectivity probes request a small multi-token completion — avoids a production llama.cpp prompt-cache edge case where one-token health checks could abort the internal Qwen server and surface as a 502 in ZenithOS.
 - Returned explicit provider-secret write capabilities from Gateway runtime config status — lets ZenithOS distinguish unsupported Secrets Manager rotation from missing capability data.

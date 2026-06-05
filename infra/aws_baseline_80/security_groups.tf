@@ -21,6 +21,27 @@ resource "aws_security_group" "alb" {
     ipv6_cidr_blocks = var.enable_dual_stack_public_edge ? ["::/0"] : []
   }
 
+  dynamic "ingress" {
+    for_each = var.enable_matrix_federation ? [1] : []
+
+    content {
+      description      = "matrix_federation_8448_explicit"
+      from_port        = 8448
+      to_port          = 8448
+      protocol         = "tcp"
+      cidr_blocks      = var.matrix_federation_allowed_cidr_blocks
+      ipv6_cidr_blocks = var.enable_dual_stack_public_edge ? ["::/0"] : []
+    }
+  }
+
+  egress {
+    description = "alb_to_matrix_client_http"
+    from_port   = 8008
+    to_port     = 8008
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
   egress {
     description = "alb_to_gateway_http"
     from_port   = 8080
