@@ -524,3 +524,38 @@ variable "enable_execute_command" {
   type        = bool
   default     = false
 }
+
+variable "matrix_homeserver_signing_key" {
+  description = "Sensitive Synapse homeserver signing key material. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_macaroon_secret_key" {
+  description = "Sensitive Synapse macaroon secret key. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_registration_shared_secret" {
+  description = "Sensitive Synapse registration shared secret for controlled provisioning. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_appservice_as_token" {
+  description = "Sensitive Matrix appservice as_token. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_appservice_hs_token" {
+  description = "Sensitive Matrix appservice hs_token. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
