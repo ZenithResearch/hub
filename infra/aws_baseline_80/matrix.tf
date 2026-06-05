@@ -1,4 +1,5 @@
 # ISS-P14-002: Core Matrix EC2 + encrypted EBS adoption
+# ISS-P14-004 scope: secret management boundary for Synapse/appservice (no raw committed secrets)
 # Ported/adapted per vault spec iss-p14-002
 # Locked: EC2 + encrypted EBS for v0, synapse.zenith-research.ca, federation 8448 enabled
 resource "aws_instance" "matrix" {
