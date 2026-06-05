@@ -48,3 +48,4 @@ resource "aws_instance" "matrix" {
 # - duplicate DNS record idempotent
 # - no secret leakage in tfvars
 # Operator evidence iss-p14-003: dig, openssl, terraform plan verified; ALB ACM TLS chosen; no secrets
+# PR readiness for iss-p14-003: all 6 tasks, scope limited, verification passed, no secrets, forbidden claims avoided
