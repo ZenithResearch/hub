@@ -548,3 +548,74 @@ variable "matrix_backup_resource_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "matrix_homeserver_signing_key" {
+  description = "Sensitive Synapse homeserver signing key material. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_macaroon_secret_key" {
+  description = "Sensitive Synapse macaroon secret key. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_registration_shared_secret" {
+  description = "Sensitive Synapse registration shared secret for controlled provisioning. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_appservice_as_token" {
+  description = "Sensitive Matrix appservice as_token. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_appservice_hs_token" {
+  description = "Sensitive Matrix appservice hs_token. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "public_matrix_domain_name" {
+  description = "Public Matrix/Synapse server_name and client API host. Locked v0 target: synapse.zenith-research.ca. Empty disables public Matrix DNS/TLS resources."
+  type        = string
+  default     = "synapse.zenith-research.ca"
+}
+
+variable "matrix_hosted_zone_id" {
+  description = "Route53 hosted zone ID that owns public_matrix_domain_name. Empty disables Route53 records and ACM DNS validation records."
+  type        = string
+  default     = ""
+}
+
+variable "enable_matrix_https_listener" {
+  description = "Enable the ALB HTTPS listener for Matrix client API after ACM validation and target readiness are confirmed."
+  type        = bool
+  default     = false
+}
+
+variable "matrix_https_listener_rule_priority" {
+  description = "Priority for the Matrix host-header rule on the existing Hub HTTPS ALB listener."
+  type        = number
+  default     = 110
+}
+
+variable "enable_matrix_federation" {
+  description = "Intentionally expose Matrix federation on 8448. Keep false until the security group, listener, and smoke checks are reviewed."
+  type        = bool
+  default     = false
+}
+
+variable "matrix_federation_allowed_cidr_blocks" {
+  description = "CIDR allowlist for Matrix federation ingress on 8448 when enable_matrix_federation is true."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}

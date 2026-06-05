@@ -9,6 +9,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Recorded ISS-P14-005 PR readiness evidence — keeps backup verification commands and no-overclaim restore language visible for review.
 - Added the Matrix AWS Backup contract and restore runbook — records the minimum state classes and unproven-restore boundary before claiming durable Synapse.
 - Added ISS-P14-005 backup/restore contract tests — proves backup vault, schedule, retention, resource selection, and restore-runbook boundaries before implementation.
+- Recorded ISS-P14-004 PR readiness evidence — verifies placeholder-only examples and non-leakage boundaries for Matrix secrets.
+- Added Matrix Secrets Manager handles and secret-boundary runbook — keeps Synapse/appservice values out of committed files while preserving operator rotation ownership.
+- Added ISS-P14-004 secret-boundary tests — proves Matrix secret classes are sensitive and Secrets Manager-backed before implementation.
+- Recorded ISS-P14-003 PR readiness evidence — keeps DNS/TLS verification commands and forbidden production claims visible for review.
+- Added the Matrix DNS/TLS Terraform contract and operator runbook — makes `synapse.zenith-research.ca` Route53/ACM/listener ownership explicit without claiming production readiness.
+- Added ISS-P14-003 DNS/TLS contract tests — proves the Synapse public host, Route53, ACM, HTTPS, and 8448 federation contract before implementation.
 - Added connected documentation maps and service-level READMEs — makes the Hub docs navigable from root README to service packages, operations runbooks, and focused verification commands.
 - Added a production source ledger for main-head deployability — records live ECS image provenance, branch-lineage risks, feature-equivalence verification, and the remaining STT caveat so operators can plan a `main` roll-forward without losing currently deployed behavior.
 - Added a standard clean-main production rollout runbook and README links — documents the preferred push → immutable image build → full Terraform plan/apply path so operators can redeploy without ad hoc partial updates.
@@ -62,6 +68,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ### Fixed
 - Formatted the ISS-P14-005 Matrix backup Terraform contract — keeps the backup plan reviewable under the repo Terraform formatting gate.
 - Corrected ISS-P14-005 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
+- Corrected ISS-P14-004 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
+- Corrected ISS-P14-003 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
 - Fixed process-contract environment capability parsing — prevents inline defaults/examples like `none`, `elevenlabs_audio_isolation`, and `STT_PROVIDER=elevenlabs` from being reported as missing required runtime configuration.
 - Made model-profile connectivity probes request a small multi-token completion — avoids a production llama.cpp prompt-cache edge case where one-token health checks could abort the internal Qwen server and surface as a 502 in ZenithOS.
 - Returned explicit provider-secret write capabilities from Gateway runtime config status — lets ZenithOS distinguish unsupported Secrets Manager rotation from missing capability data.
