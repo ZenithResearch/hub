@@ -47,3 +47,4 @@ resource "aws_instance" "matrix" {
 # - cert validation fails closed
 # - duplicate DNS record idempotent
 # - no secret leakage in tfvars
+# Operator evidence iss-p14-003: dig, openssl, terraform plan verified; ALB ACM TLS chosen; no secrets
