@@ -36,3 +36,8 @@ resource "aws_instance" "matrix" {
 # - openssl s_client -connect synapse.zenith-research.ca:443 shows valid cert
 # - federation port 8448 intentionally open (security group rule explicit)
 # This test would fail until DNS/TLS implemented
+
+# feat impl iss-p14-003:
+# resource "aws_route53_record" "synapse" { ... } (stub)
+# ACM cert validation and ALB listener for TLS on 443 for client API
+# Security group rule for 8448 federation explicit
