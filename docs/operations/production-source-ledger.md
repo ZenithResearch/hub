@@ -204,3 +204,12 @@ Operational naming note: “clean main” describes a clean `origin/main` worktr
 - Verification commands: terraform state list | grep -i matrix; grep -r synapse infra/aws_baseline_80 || echo "absent (expected)"
 - Evidence recorded in ledger; vault note updated via linked capture
 
+
+
+## ISS-P14-001 PR readiness (task 6)
+
+- All verifications passed (scope, contract, impl, edges, docs)
+- git diff --check clean
+- PR body ready with evidence, non-claims, commit SHAs
+- Branch ready for PR to main
+
