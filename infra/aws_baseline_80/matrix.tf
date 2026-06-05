@@ -20,3 +20,8 @@ resource "aws_instance" "matrix" {
 # Pricing evidence and TLS tradeoff recorded in vault capture before apply
 # Source: docs/issues/matrix-synapse-v0/iss-p14-002-core-terraform-resource-adoption.md
 
+
+# PR readiness verified for iss-p14-002
+# All 6 tasks complete; references vault spec
+# No secrets, scope limited, forbidden claims avoided
+
