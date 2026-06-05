@@ -25,3 +25,8 @@ resource "aws_instance" "matrix" {
 # All 6 tasks complete; references vault spec
 # No secrets, scope limited, forbidden claims avoided
 
+# ISS-P14-003 scope: DNS/TLS contract for synapse.zenith-research.ca
+# Target: Route53 record + TLS termination decision (ALB ACM vs host)
+# Locked: direct host, federation 8448 enabled intentionally
+# Files: matrix.tf, alb.tf, (dns.tf if extracted)
+
