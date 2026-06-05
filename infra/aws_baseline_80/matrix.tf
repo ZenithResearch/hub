@@ -7,3 +7,10 @@ resource "aws_instance" "matrix" {
   instance_type = var.matrix_instance_type
   # TODO: EBS encryption, user_data from matrix_user_data.sh.tpl
 }
+
+# Edge cases for iss-p14-002:
+# - no raw secrets in tf
+# - idempotent apply
+# - no production claim without evidence
+# - federation 8448 opt-in only
+
