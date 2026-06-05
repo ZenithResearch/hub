@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Recorded ISS-P14-003 PR readiness evidence — keeps DNS/TLS verification commands and forbidden production claims visible for review.
 - Added the Matrix DNS/TLS Terraform contract and operator runbook — makes `synapse.zenith-research.ca` Route53/ACM/listener ownership explicit without claiming production readiness.
 - Added ISS-P14-003 DNS/TLS contract tests — proves the Synapse public host, Route53, ACM, HTTPS, and 8448 federation contract before implementation.
 - Added connected documentation maps and service-level READMEs — makes the Hub docs navigable from root README to service packages, operations runbooks, and focused verification commands.
