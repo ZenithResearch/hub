@@ -1512,6 +1512,8 @@ def create_app() -> FastAPI:
         # gateway-bot only sends; this endpoint satisfies Synapse's push requirement
         return JSONResponse({})
 
+    # iss-p15-001 scope baseline: readiness endpoint to be added under admin for Matrix homeserver reachability (redacted)
+
     @app.post("/v1/cases/{case_id}/rerun")
     async def rerun_case(case_id: str, force: bool = False) -> JSONResponse:
         """Re-enqueue the original message for a completed, failed, or force-retried case."""
