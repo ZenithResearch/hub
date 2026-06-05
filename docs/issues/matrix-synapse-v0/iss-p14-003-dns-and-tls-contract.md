@@ -199,6 +199,21 @@ Before opening or marking the PR ready, include:
 - [ ] Explicit forbidden claims that remain false.
 - [ ] Supporting repo/API dependency status, if any.
 
+## Review blocker resolution evidence — 2026-06-05
+
+- Follow-up GitHub issue: https://github.com/ZenithResearch/hub/issues/60
+- Blocker-resolution branch: `issue/iss-p14-003-review-blockers-fix`
+- Target branch for blocker-resolution PR: `issue/iss-p14-003-dns-tls-contract-main`
+- Resolution summary:
+  - Replaces the duplicate Matrix 443 listener with `aws_lb_listener_certificate.matrix_https` plus `aws_lb_listener_rule.matrix_https_host` on the existing Hub HTTPS listener.
+  - Gates Matrix 443 host routing and 8448 federation listener creation on DNS validation availability before referencing `aws_acm_certificate_validation.matrix[0]`.
+  - Adds explicit ALB security-group ingress for 8448 and egress to Matrix target port 8008.
+  - Keeps target attachment / production smoke out of scope and documented as a downstream gate.
+- Verification commands:
+  - `uv run --with pytest pytest tests/matrix/test_iss_p14_003_dns_tls.py -q`
+  - `terraform fmt -check infra/aws_baseline_80`
+  - `git diff --check`
+
 ## Related
 
 - [[prp-pr-014|PRP-PR-014: Production Synapse core Terraform]]
