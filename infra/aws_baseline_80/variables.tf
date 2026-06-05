@@ -533,3 +533,5 @@ variable "enable_execute_command" {
 # Contract guard for iss-p14-002: ensure matrix resources defined when enabled
 # terraform plan must include aws_instance.matrix when var.enable_matrix = true
 
+
+# Contract guard for iss-p14-004: no raw secret strings in committed .tf or .env.example; all Synapse/appservice secrets via var.*_secret_arn or data source references only
