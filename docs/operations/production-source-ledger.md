@@ -152,3 +152,11 @@ Verification performed after convergence:
 - A Terraform plan with the same explicit convergence vars returned `No changes. Your infrastructure matches the configuration.`
 
 Operational naming note: “clean main” describes a clean `origin/main` worktree/image lineage, not a branch named `clean-main`.
+
+## ISS-P14-001 scope note (task 1 baseline)
+
+- Target surfaces inspected: infra/aws_baseline_80/, infra/matrix/aws/, scripts/prod_terraform_cd.sh, docs/operations/production-source-ledger.md
+- Synapse confirmed absent from core ECS task definitions and terraform state in aws_baseline_80.
+- infra/matrix/aws/ classified as source-material-only (non-core, v0 EC2+EBS path).
+- No raw secrets recorded.
+- Pricing evidence and TLS decision deferred per locked decisions.
