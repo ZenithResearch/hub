@@ -199,6 +199,21 @@ Before opening or marking the PR ready, include:
 - [ ] Explicit forbidden claims that remain false.
 - [ ] Supporting repo/API dependency status, if any.
 
+## Review blocker resolution evidence — 2026-06-05
+
+- Follow-up GitHub issue: https://github.com/ZenithResearch/hub/issues/61
+- Blocker-resolution branch: `issue/iss-p14-005-review-blockers-fix`
+- Target branch for blocker-resolution PR: `issue/iss-p14-005-backup-restore-minimum-main`
+- Resolution summary:
+  - Adds explicit restore owner/contact/escalation to `docs/operations/matrix-backup-restore.md`.
+  - Adds a concrete restore workflow covering recovery-point selection, restore job role/IAM, non-production target, restore order, and validation.
+  - Records failure boundaries for missing IAM permissions, wrong account/AZ, partial restore, token rotation during restore, config drift, and empty `matrix_backup_resource_arns`.
+  - Preserves the unproven-restore / no-durable-production-overclaim boundary.
+- Verification commands:
+  - `uv run --with pytest pytest tests/matrix/test_iss_p14_005_backup_restore.py -q`
+  - `terraform fmt -check infra/aws_baseline_80`
+  - `git diff --check`
+
 ## Related
 
 - [[prp-pr-014|PRP-PR-014: Production Synapse core Terraform]]
@@ -209,3 +224,10 @@ Before opening or marking the PR ready, include:
 Areas:
 - [[Zenith]]
 - [[projects]]
+
+## PR readiness evidence — 2026-06-05
+
+- Issue PR branch: `issue/iss-p14-005-backup-restore-minimum-main`
+- Targeted test: `uv run --with pytest pytest tests/matrix/test_iss_p14_005_backup_restore.py -q`
+- Scope: this PR completes ISS-P14-005: Backup and restore minimum only; it does not claim production deployment, appservice delivery, or Matrix identity as Hub authority.
+- Review boundary: issue = PR, with test-first contract commit followed by implementation and readiness evidence.

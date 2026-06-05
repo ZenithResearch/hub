@@ -525,6 +525,30 @@ variable "enable_execute_command" {
   default     = false
 }
 
+variable "enable_matrix_backup" {
+  description = "Create the Matrix/Synapse AWS Backup vault and plan. Resource selection remains empty until concrete Matrix state resource ARNs are reviewed."
+  type        = bool
+  default     = false
+}
+
+variable "matrix_backup_schedule" {
+  description = "AWS Backup cron expression for Matrix/Synapse state backups."
+  type        = string
+  default     = "cron(0 9 * * ? *)"
+}
+
+variable "matrix_backup_retention_days" {
+  description = "Retention in days for Matrix/Synapse backup recovery points."
+  type        = number
+  default     = 35
+}
+
+variable "matrix_backup_resource_arns" {
+  description = "Stateful Matrix/Synapse resource ARNs selected for backup: DB, media volume/storage, signing-key/config storage. Empty creates no selection."
+  type        = list(string)
+  default     = []
+}
+
 variable "matrix_homeserver_signing_key" {
   description = "Sensitive Synapse homeserver signing key material. Empty means do not write/update the secret version from Terraform."
   type        = string

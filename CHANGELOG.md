@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Recorded ISS-P14-005 PR readiness evidence — keeps backup verification commands and no-overclaim restore language visible for review.
+- Added the Matrix AWS Backup contract and restore runbook — records the minimum state classes and unproven-restore boundary before claiming durable Synapse.
+- Added ISS-P14-005 backup/restore contract tests — proves backup vault, schedule, retention, resource selection, and restore-runbook boundaries before implementation.
 - Recorded ISS-P14-004 PR readiness evidence — verifies placeholder-only examples and non-leakage boundaries for Matrix secrets.
 - Added Matrix Secrets Manager handles and secret-boundary runbook — keeps Synapse/appservice values out of committed files while preserving operator rotation ownership.
 - Added ISS-P14-004 secret-boundary tests — proves Matrix secret classes are sensitive and Secrets Manager-backed before implementation.
@@ -63,6 +66,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Formatted the ISS-P14-005 Matrix backup Terraform contract — keeps the backup plan reviewable under the repo Terraform formatting gate.
+- Corrected ISS-P14-005 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
 - Corrected ISS-P14-004 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
 - Corrected ISS-P14-003 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
 - Fixed process-contract environment capability parsing — prevents inline defaults/examples like `none`, `elevenlabs_audio_isolation`, and `STT_PROVIDER=elevenlabs` from being reported as missing required runtime configuration.
