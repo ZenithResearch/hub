@@ -24,3 +24,20 @@ resource "aws_secretsmanager_secret_version" "review_access_admin_token" {
   secret_string = var.review_access_admin_token
 }
 
+
+# ISS-P14-004: Synapse secret boundary (refs only, no raw values)
+resource "aws_secretsmanager_secret" "synapse_registration_shared_secret" {
+  name        = "${local.name_prefix}/synapse_registration_shared_secret"
+  description = "Synapse registration_shared_secret (operator managed via Secrets Manager)"
+  tags        = local.tags
+}
+
+resource "aws_secretsmanager_secret" "synapse_appservice_token" {
+  name        = "${local.name_prefix}/synapse_appservice_token"
+  description = "Synapse appservice token (operator managed)"
+  tags        = local.tags
+}
+
+# ISS-P14-004 scope baseline: files confirmed: secrets.tf, variables.tf, user_data.sh.tpl, .env examples; current: secrets use var.* with sensitive=true, no raw values committed
+# feat impl: use secret ARNs for matrix bootstrap in production
+# operator evidence: rotation owner documented in vault; verify with aws secretsmanager list-secrets
