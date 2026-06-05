@@ -160,3 +160,8 @@ Operational naming note: “clean main” describes a clean `origin/main` worktr
 - infra/matrix/aws/ classified as source-material-only (non-core, v0 EC2+EBS path).
 - No raw secrets recorded.
 - Pricing evidence and TLS decision deferred per locked decisions.
+
+## ISS-P14-001 contract guard (task 2)
+
+- [ ] Full inventory table with compute/network/DNS/TLS/storage/backup/secret boundaries present and each resource classified (core-managed / candidate / external / unknown)
+- Verification: `grep -r synapse infra/aws_baseline_80` returns no matches (absence proof)
