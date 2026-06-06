@@ -71,3 +71,18 @@ git diff --check
 6. PR readiness verification.
 7. DAG/checklist handoff evidence.
 8. Final issue/PR evidence sync.
+
+## PR evidence sync
+
+The PR branch is intentionally task-per-commit:
+
+1. `53d78a8` — scope and baseline evidence.
+2. `e44b604` — contract tests for the evidence gate.
+3. `bfa6579` — primary evidence validator/template implementation.
+4. `bc292e3` — edge-case validation hardening.
+5. `6022b3e` — operator runbook and evidence hooks.
+6. `e88a5a3` — PR readiness verification evidence.
+7. `045b7d8` — downstream P15 gate/checklist handoff.
+8. Final commit — issue/PR sync and non-claim preservation.
+
+Live operator plan/apply evidence remains gated on AWS SSO/operator approval and must be recorded through the validated evidence artifact before P15 is treated as production-unlocked.
