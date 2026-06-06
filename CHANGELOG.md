@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Recorded ISS-P14-007 PR readiness evidence — preserves verification commands and the operator-auth limitation without overclaiming production apply.
 - Added the Matrix production evidence runbook — gives operators exact redaction, plan/apply, smoke, and backup/restore steps for completing ISS-P14-007 safely.
 - Hardened ISS-P14-007 evidence validation errors — reports compound smoke and P15-lock failures so operators can fix every edge case before claiming acceptance.
 - Added the ISS-P14-007 evidence validator and template — gives operators a redacted, test-backed artifact contract before P15 can unlock.
