@@ -69,6 +69,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Added regression coverage for Gallery review-access regeneration with compatibility deployment metadata — ensures renewing an existing project-scoped Gallery access code keeps the canonical apex, www, and local authentication model working without leaking raw secrets.
 - Formatted the ISS-P14-005 Matrix backup Terraform contract — keeps the backup plan reviewable under the repo Terraform formatting gate.
 - Corrected ISS-P14-005 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
 - Corrected ISS-P14-004 readiness evidence to use the repo-local pytest invocation with an explicit pytest dependency — makes the recorded gate reproducible from a clean checkout.
