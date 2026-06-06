@@ -31,6 +31,9 @@ Create an auditable, redacted, test-backed production evidence gate for Synapse 
 
 ## Evidence artifact contract
 
+Operator runbook: `docs/operations/matrix-production-evidence.md`.
+
+
 The evidence artifact is JSON, generated/validated by `scripts/matrix_production_evidence_check.py`. It must include:
 
 - `issue`: `ISS-P14-007`

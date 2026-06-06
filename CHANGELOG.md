@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added the Matrix production evidence runbook — gives operators exact redaction, plan/apply, smoke, and backup/restore steps for completing ISS-P14-007 safely.
 - Hardened ISS-P14-007 evidence validation errors — reports compound smoke and P15-lock failures so operators can fix every edge case before claiming acceptance.
 - Added the ISS-P14-007 evidence validator and template — gives operators a redacted, test-backed artifact contract before P15 can unlock.
 - Added ISS-P14-007 production evidence contract tests — locks the required plan/apply, public smoke, backup/restore, sensitive-material, and P15-unlock edge cases before implementation.
