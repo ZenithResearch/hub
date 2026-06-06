@@ -25,7 +25,7 @@ Hub owns Gateway/ingest/appservice readiness, tokens, homeserver config, and smo
 
 ### Dependencies / blocked by
 
-- PRP-PR-014 DNS/TLS
+- ISS-P14-007 production evidence gate (`docs/issues/matrix-synapse-v0/iss-p14-007-production-plan-apply-smoke-evidence.md` and `docs/operations/matrix-production-evidence.md`)
 
 ### Target files and surfaces
 

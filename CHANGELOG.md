@@ -69,6 +69,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 
 ### Changed
+- Linked ISS-P14-007 from the Matrix issue index and P15 production homeserver spec — keeps downstream work blocked on accepted production evidence instead of older DNS/TLS shorthand.
 - Upgraded the manual Gateway image workflow actions to Node 24-compatible releases — keeps the build-only image rail current without changing operator-controlled Terraform deployment ownership.
 - Upgraded baseline CI workflow actions to Node 24-compatible releases — removes GitHub Actions runtime deprecation noise before the remaining Matrix production PR train.
 - Split Gallery review access policy validation across separate apex and `www` production deployment rows while preserving `gallery-local` — lets Gallery support both production hostnames without dropping local Review SDK/admin access.
