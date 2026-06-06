@@ -680,6 +680,119 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertNotIn("old-bead-sequence-row", {row[0] for row in rows})
         self.assertTrue(all(row[1] == 1 for row in rows))
 
+    def test_admin_review_access_rotate_regenerates_existing_gallery_access_with_compat_metadata(self) -> None:
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            conn.execute(
+                "INSERT INTO clients (id, slug, name, created_at) VALUES (?, ?, ?, ?)",
+                ("minerva-mcgonagall", "minerva-mcgonagall", "Minerva McGonagall", "2026-06-06T00:00:00Z"),
+            )
+            conn.execute(
+                "INSERT INTO projects (id, client_id, slug, name, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("gallery", "minerva-mcgonagall", "gallery", "Gallery", "2026-06-06T00:00:00Z"),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_access_codes
+                    (id, project_id, deployment_id, label, email, code_hash, active, created_at, expires_at)
+                VALUES (?, ?, NULL, ?, NULL, ?, 1, ?, NULL)
+                """,
+                (
+                    "minerva-mcgonagall-gallery-review",
+                    "gallery",
+                    "Minerva McGonagall",
+                    "prior-hash-placeholder",
+                    "2026-06-06T00:00:00Z",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO review_access_code_policies
+                    (id, access_code_id, project_id, deployment_id, allowed_origin, subject_pattern, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                """,
+                (
+                    "old-gallery-apex-row",
+                    "minerva-mcgonagall-gallery-review",
+                    "gallery",
+                    "gallery-production-apex",
+                    "https://gal-ler-y.com",
+                    "https://gal-ler-y.com*",
+                    "2026-06-06T00:00:00Z",
+                    "2026-06-06T00:00:00Z",
+                ),
+            )
+
+        response = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "minerva-mcgonagall",
+                "client_slug": "minerva-mcgonagall",
+                "client_name": "Minerva McGonagall",
+                "project_id": "gallery",
+                "project_slug": "gallery",
+                "project_name": "Gallery",
+                "deployment_id": "gallery-production-apex",
+                "deployment_slug": "gallery-production-apex",
+                "allowed_origin": "https://gal-ler-y.com",
+                "subject_pattern": "https://gal-ler-y.com*",
+                "deployment_scoped_access": False,
+                "access_code_id": "minerva-mcgonagall-gallery-review",
+                "access_label": "Minerva McGonagall",
+                "mode": "generate",
+                "policies": [
+                    {
+                        "deployment_id": "gallery-production-apex",
+                        "deployment_slug": "gallery-production-apex",
+                        "allowed_origin": "https://gal-ler-y.com",
+                        "subject_pattern": "https://gal-ler-y.com*",
+                    },
+                    {
+                        "deployment_id": "gallery-production-www",
+                        "deployment_slug": "gallery-production-www",
+                        "allowed_origin": "https://www.gal-ler-y.com",
+                        "subject_pattern": "https://www.gal-ler-y.com*",
+                    },
+                    {
+                        "deployment_id": "gallery-local",
+                        "deployment_slug": "gallery-local",
+                        "allowed_origin": "http://localhost:3000",
+                        "subject_pattern": "http://localhost:3000/*",
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertTrue(payload.get("raw_code", "").startswith("zrv_"))
+        self.assertFalse(payload.get("secrets_printed"))
+        self.assertEqual(payload.get("policy_count"), 3)
+        self.assertTrue(payload.get("project_scoped_access"))
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            access_row = conn.execute(
+                "SELECT deployment_id FROM review_access_codes WHERE id = ?",
+                ("minerva-mcgonagall-gallery-review",),
+            ).fetchone()
+            rows = conn.execute(
+                """
+                SELECT deployment_id, allowed_origin, subject_pattern, active
+                FROM review_access_code_policies
+                WHERE access_code_id = ?
+                ORDER BY deployment_id
+                """,
+                ("minerva-mcgonagall-gallery-review",),
+            ).fetchall()
+        self.assertIsNone(access_row[0])
+        self.assertEqual(
+            rows,
+            [
+                ("gallery-local", "http://localhost:3000", "http://localhost:3000/*", 1),
+                ("gallery-production-apex", "https://gal-ler-y.com", "https://gal-ler-y.com*", 1),
+                ("gallery-production-www", "https://www.gal-ler-y.com", "https://www.gal-ler-y.com*", 1),
+            ],
+        )
+
     def test_admin_review_access_rotate_rejects_gallery_legacy_policy_ids(self) -> None:
         response = self.client.post(
             "/v1/admin/review-auth/access-codes/rotate",
