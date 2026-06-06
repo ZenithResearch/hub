@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added the Matrix CI Node 24 runtime hygiene issue spec — records this PR as CI substrate cleanup only, not P14 production deployment or smoke evidence.
 - Recorded ISS-P14-005 PR readiness evidence — keeps backup verification commands and no-overclaim restore language visible for review.
 - Added the Matrix AWS Backup contract and restore runbook — records the minimum state classes and unproven-restore boundary before claiming durable Synapse.
 - Added ISS-P14-005 backup/restore contract tests — proves backup vault, schedule, retention, resource selection, and restore-runbook boundaries before implementation.
@@ -62,6 +63,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 
 ### Changed
+- Upgraded the manual Gateway image workflow actions to Node 24-compatible releases — keeps the build-only image rail current without changing operator-controlled Terraform deployment ownership.
+- Upgraded baseline CI workflow actions to Node 24-compatible releases — removes GitHub Actions runtime deprecation noise before the remaining Matrix production PR train.
 - Split Gallery review access policy validation across separate apex and `www` production deployment rows while preserving `gallery-local` — lets Gallery support both production hostnames without dropping local Review SDK/admin access.
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
