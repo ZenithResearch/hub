@@ -20,6 +20,7 @@ Source dependency analysis:
 | ISS-P14-004 | Secret management boundary | [32](https://github.com/ZenithResearch/hub/issues/32) | [`iss-p14-004-secret-management-boundary`](iss-p14-004-secret-management-boundary.md) |
 | ISS-P14-005 | Backup and restore minimum | [33](https://github.com/ZenithResearch/hub/issues/33) | [`iss-p14-005-backup-and-restore-minimum`](iss-p14-005-backup-and-restore-minimum.md) |
 | ISS-P14-006 | Static deployment-path tests | [34](https://github.com/ZenithResearch/hub/issues/34) | [`iss-p14-006-static-deployment-path-tests`](iss-p14-006-static-deployment-path-tests.md) |
+| ISS-P14-007 | Production plan/apply and smoke evidence | [67](https://github.com/ZenithResearch/hub/issues/67) | [`iss-p14-007-production-plan-apply-smoke-evidence`](iss-p14-007-production-plan-apply-smoke-evidence.md) |
 | ISS-P15-001 | Matrix readiness endpoint | [35](https://github.com/ZenithResearch/hub/issues/35) | [`iss-p15-001-matrix-readiness-endpoint`](iss-p15-001-matrix-readiness-endpoint.md) |
 | ISS-P15-002 | Fail-closed appservice tokens | [36](https://github.com/ZenithResearch/hub/issues/36) | [`iss-p15-002-fail-closed-appservice-tokens`](iss-p15-002-fail-closed-appservice-tokens.md) |
 | ISS-P15-003 | Production homeserver config | [37](https://github.com/ZenithResearch/hub/issues/37) | [`iss-p15-003-production-homeserver-config`](iss-p15-003-production-homeserver-config.md) |

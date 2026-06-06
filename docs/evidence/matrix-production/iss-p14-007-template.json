@@ -1,0 +1,49 @@
+{
+  "issue": "ISS-P14-007",
+  "source": {
+    "minimum_head": "aa1bd8c",
+    "head": "aa1bd8c8050aacab11182f669085d3c23c7a60ff",
+    "branch": "main-or-issue-branch-used-for-operator-run"
+  },
+  "terraform": {
+    "plan": {
+      "status": "accepted",
+      "artifact": "docs/evidence/matrix-production/iss-p14-007-plan-redacted.txt",
+      "reviewed_by": "operator-handle"
+    },
+    "apply": {
+      "status": "accepted",
+      "artifact": "docs/evidence/matrix-production/iss-p14-007-apply-redacted.txt",
+      "reviewed_by": "operator-handle"
+    }
+  },
+  "public_smoke": {
+    "status": "accepted",
+    "client_api": {
+      "url": "https://synapse.zenith-research.ca/_matrix/client/versions",
+      "status": 200
+    },
+    "federation_8448": {
+      "host": "synapse.zenith-research.ca",
+      "port": 8448,
+      "status": 200
+    }
+  },
+  "backup_restore": {
+    "status": "accepted",
+    "tested_restore_paths": [
+      "postgres database recovery point restored to non-production target",
+      "media store recovery point restored to non-production target"
+    ],
+    "unproven_restore_paths": [
+      "homeserver signing key rotation after restore",
+      "appservice token rotation during restore"
+    ]
+  },
+  "downstream": {
+    "p15": {
+      "status": "unlocked",
+      "reason": "plan, apply, public smoke, and backup/restore evidence accepted"
+    }
+  }
+}

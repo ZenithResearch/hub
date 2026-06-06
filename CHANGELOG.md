@@ -6,6 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Recorded ISS-P14-007 PR readiness evidence — preserves verification commands and the operator-auth limitation without overclaiming production apply.
+- Added the Matrix production evidence runbook — gives operators exact redaction, plan/apply, smoke, and backup/restore steps for completing ISS-P14-007 safely.
+- Hardened ISS-P14-007 evidence validation errors — reports compound smoke and P15-lock failures so operators can fix every edge case before claiming acceptance.
+- Added the ISS-P14-007 evidence validator and template — gives operators a redacted, test-backed artifact contract before P15 can unlock.
+- Added ISS-P14-007 production evidence contract tests — locks the required plan/apply, public smoke, backup/restore, sensitive-material, and P15-unlock edge cases before implementation.
+- Added the ISS-P14-007 production evidence spec — defines the operator-gated plan/apply, smoke, backup/restore, and downstream-unlock evidence boundary before P15 proceeds.
 - Added the Matrix CI Node 24 runtime hygiene issue spec — records this PR as CI substrate cleanup only, not P14 production deployment or smoke evidence.
 - Recorded ISS-P14-005 PR readiness evidence — keeps backup verification commands and no-overclaim restore language visible for review.
 - Added the Matrix AWS Backup contract and restore runbook — records the minimum state classes and unproven-restore boundary before claiming durable Synapse.
@@ -63,6 +69,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 
 ### Changed
+- Synced ISS-P14-007 PR evidence back into the repo-local issue spec — makes the task-per-commit boundary and remaining operator-auth gate visible from the spec itself.
+- Linked ISS-P14-007 from the Matrix issue index and P15 production homeserver spec — keeps downstream work blocked on accepted production evidence instead of older DNS/TLS shorthand.
 - Upgraded the manual Gateway image workflow actions to Node 24-compatible releases — keeps the build-only image rail current without changing operator-controlled Terraform deployment ownership.
 - Upgraded baseline CI workflow actions to Node 24-compatible releases — removes GitHub Actions runtime deprecation noise before the remaining Matrix production PR train.
 - Split Gallery review access policy validation across separate apex and `www` production deployment rows while preserving `gallery-local` — lets Gallery support both production hostnames without dropping local Review SDK/admin access.
