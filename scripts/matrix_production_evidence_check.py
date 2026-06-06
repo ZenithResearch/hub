@@ -103,17 +103,22 @@ def validate_public_smoke(data: dict[str, Any]) -> str:
     smoke_status = status(smoke, "public_smoke")
     client = smoke.get("client_api")
     federation = smoke.get("federation_8448")
+    errors: list[str] = []
     if not isinstance(client, dict):
-        raise EvidenceError("public smoke requires client API status")
+        errors.append("public smoke requires client API status")
     if not isinstance(federation, dict):
-        raise EvidenceError("public smoke requires federation 8448 status")
-    client_status = client.get("status")
-    if smoke_status == "accepted" and client_status != 200:
-        raise EvidenceError("client API status must be 200 for accepted public smoke")
-    if smoke_status == "accepted" and federation.get("port") != 8448:
-        raise EvidenceError("federation smoke must check port 8448")
-    if smoke_status == "accepted" and federation.get("status") != 200:
-        raise EvidenceError("federation 8448 status must be 200 for accepted public smoke")
+        errors.append("public smoke requires federation 8448 status")
+    if isinstance(client, dict):
+        client_status = client.get("status")
+        if smoke_status == "accepted" and client_status != 200:
+            errors.append("client API status must be 200 for accepted public smoke")
+    if isinstance(federation, dict):
+        if smoke_status == "accepted" and federation.get("port") != 8448:
+            errors.append("federation smoke must check port 8448")
+        if smoke_status == "accepted" and federation.get("status") != 200:
+            errors.append("federation 8448 status must be 200 for accepted public smoke")
+    if errors:
+        raise EvidenceError("; ".join(errors))
     return smoke_status
 
 def validate_backup_restore(data: dict[str, Any]) -> str:
@@ -135,15 +140,48 @@ def validate_downstream(data: dict[str, Any], gates: list[str]) -> str:
     return p15_status
 
 def validate(data: dict[str, Any]) -> str:
+    errors: list[str] = []
     findings = walk_sensitive(data)
     if findings:
         preview = "; ".join(findings[:5])
-        raise EvidenceError(f"sensitive tfvars/token/raw material rejected: {preview}")
-    validate_source(data)
-    plan_status, apply_status = validate_terraform(data)
-    smoke_status = validate_public_smoke(data)
-    backup_status = validate_backup_restore(data)
-    p15_status = validate_downstream(data, [plan_status, apply_status, smoke_status, backup_status])
+        errors.append(f"sensitive tfvars/token/raw material rejected: {preview}")
+    try:
+        validate_source(data)
+    except EvidenceError as exc:
+        errors.append(str(exc))
+    try:
+        plan_status, apply_status = validate_terraform(data)
+    except EvidenceError as exc:
+        errors.append(str(exc))
+        raw_terraform = data.get("terraform")
+        terraform = raw_terraform if isinstance(raw_terraform, dict) else {}
+        raw_plan = terraform.get("plan")
+        raw_apply = terraform.get("apply")
+        plan = raw_plan if isinstance(raw_plan, dict) else {}
+        apply = raw_apply if isinstance(raw_apply, dict) else {}
+        plan_status = str(plan.get("status", "missing")).lower()
+        apply_status = str(apply.get("status", "missing")).lower()
+    try:
+        smoke_status = validate_public_smoke(data)
+    except EvidenceError as exc:
+        errors.append(str(exc))
+        raw_smoke = data.get("public_smoke")
+        smoke = raw_smoke if isinstance(raw_smoke, dict) else {}
+        smoke_status = str(smoke.get("status", "missing")).lower()
+    try:
+        backup_status = validate_backup_restore(data)
+    except EvidenceError as exc:
+        errors.append(str(exc))
+        raw_backup = data.get("backup_restore")
+        backup = raw_backup if isinstance(raw_backup, dict) else {}
+        backup_status = str(backup.get("status", "missing")).lower()
+    try:
+        p15_status = validate_downstream(data, [plan_status, apply_status, smoke_status, backup_status])
+    except EvidenceError as exc:
+        errors.append(str(exc))
+        p15_status = "invalid"
+    if errors:
+        raise EvidenceError("; ".join(errors))
     return f"accepted: {ISSUE} evidence valid; p15 {p15_status}"
 
 def main(argv: list[str] | None = None) -> int:

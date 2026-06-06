@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Hardened ISS-P14-007 evidence validation errors — reports compound smoke and P15-lock failures so operators can fix every edge case before claiming acceptance.
 - Added the ISS-P14-007 evidence validator and template — gives operators a redacted, test-backed artifact contract before P15 can unlock.
 - Added ISS-P14-007 production evidence contract tests — locks the required plan/apply, public smoke, backup/restore, sensitive-material, and P15-unlock edge cases before implementation.
 - Added the ISS-P14-007 production evidence spec — defines the operator-gated plan/apply, smoke, backup/restore, and downstream-unlock evidence boundary before P15 proceeds.
