@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added the ISS-P14-007 production evidence spec — defines the operator-gated plan/apply, smoke, backup/restore, and downstream-unlock evidence boundary before P15 proceeds.
 - Added the Matrix CI Node 24 runtime hygiene issue spec — records this PR as CI substrate cleanup only, not P14 production deployment or smoke evidence.
 - Recorded ISS-P14-005 PR readiness evidence — keeps backup verification commands and no-overclaim restore language visible for review.
 - Added the Matrix AWS Backup contract and restore runbook — records the minimum state classes and unproven-restore boundary before claiming durable Synapse.

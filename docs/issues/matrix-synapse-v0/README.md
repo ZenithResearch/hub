@@ -35,3 +35,5 @@ Source dependency analysis:
 | ISS-P21-003 | Vanilla auth boundary | [47](https://github.com/ZenithResearch/hub/issues/47) | [`iss-p21-003-vanilla-auth-boundary`](iss-p21-003-vanilla-auth-boundary.md) |
 | ISS-P21-004 | Ordinary execution path | [48](https://github.com/ZenithResearch/hub/issues/48) | [`iss-p21-004-ordinary-execution-path`](iss-p21-004-ordinary-execution-path.md) |
 | ISS-P21-005 | End-to-end vanilla-auth smoke | [49](https://github.com/ZenithResearch/hub/issues/49) | [`iss-p21-005-end-to-end-vanilla-auth-smoke`](iss-p21-005-end-to-end-vanilla-auth-smoke.md) |
+
+- [ISS-P14-007: Production plan/apply and smoke evidence](iss-p14-007-production-plan-apply-smoke-evidence.md) — production evidence gate before P15 smokes.
