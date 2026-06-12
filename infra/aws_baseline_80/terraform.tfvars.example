@@ -67,7 +67,7 @@ qdrant_url = "https://your-qdrant-cloud-url"
 # surfaces commonly use localhost:3000 and localhost:5173; if these are omitted,
 # browser asset uploads fail at preflight even when review-auth deployment
 # policies allow the localhost subject.
-cors_allow_origins = "https://yourdomain.com,https://gal-ler-y.com,https://www.gal-ler-y.com,http://localhost:3000,http://localhost:5173"
+cors_allow_origins = "https://yourdomain.com,https://www.collectswirls.com,https://collectswirls.com,https://gal-ler-y.com,https://www.gal-ler-y.com,http://localhost:3000,http://localhost:5173"
 
 # Gateway Review SDK auth can use either persistent SQLite on EFS or private RDS Postgres.
 # Keep gateway_desired_count at 1 while this is SQLite-backed.

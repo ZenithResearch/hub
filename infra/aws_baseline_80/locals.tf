@@ -26,5 +26,7 @@ locals {
   stt_image_tag      = var.stt_image_tag != "" ? var.stt_image_tag : local.gateway_image_tag
 
   llama_server_model_bucket_name = var.llama_server_model_bucket_name != "" ? var.llama_server_model_bucket_name : "${local.name_prefix}-llama-models-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
+
+  clients_postgres_secret_arn = var.enable_clients_postgres ? aws_db_instance.clients[0].master_user_secret[0].secret_arn : ""
 }
 
