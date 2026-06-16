@@ -87,10 +87,26 @@ def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def subject_allowed(subject_id: str, origin: str, subject_pattern: str | None) -> bool:
+def origin_allowed(origin: str, allowed_origin: str) -> bool:
+    allowed = (allowed_origin or "").strip()
+    if origin == allowed:
+        return True
+    if not allowed.endswith(":*"):
+        return False
+    allowed_prefix = allowed[:-2]
+    if allowed_prefix not in {"http://localhost", "https://localhost", "http://127.0.0.1", "https://127.0.0.1"}:
+        return False
+    parsed = urlparse(origin)
+    if not parsed.scheme or not parsed.hostname or parsed.port is None:
+        return False
+    return f"{parsed.scheme}://{parsed.hostname.lower()}" == allowed_prefix
+
+
+def subject_allowed(subject_id: str, origin: str, subject_pattern: str | None, allowed_origin: str | None = None) -> bool:
     parsed = urlparse(subject_id)
     subject_origin = f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
-    if subject_origin != origin:
+    origin_pattern = allowed_origin or origin
+    if not origin_allowed(subject_origin, origin_pattern):
         return False
     pattern = (subject_pattern or "").strip()
     if not pattern:
@@ -461,9 +477,10 @@ class ReviewAuthStore:
             policy_deployment_id = str(policy["deployment_id"] or "")
             if policy_deployment_id and policy_deployment_id != deployment_id:
                 continue
-            if str(policy["allowed_origin"]) != origin:
+            allowed_origin = str(policy["allowed_origin"])
+            if not origin_allowed(origin, allowed_origin):
                 continue
-            if subject_allowed(subject_id, origin, policy["subject_pattern"]):
+            if subject_allowed(subject_id, origin, policy["subject_pattern"], allowed_origin):
                 return True
         return False
 
@@ -678,7 +695,7 @@ class ReviewAuthStore:
                 )
                 return None
             allowed_origin = str(deployment["allowed_origin"])
-            if allowed_origin != origin:
+            if not origin_allowed(origin, allowed_origin):
                 log.warning(
                     "review_auth_session_rejected",
                     reason="origin_mismatch",
@@ -691,7 +708,7 @@ class ReviewAuthStore:
                     email_present=email_present,
                 )
                 return None
-            if not subject_allowed(subject_id, origin, deployment["subject_pattern"]):
+            if not subject_allowed(subject_id, origin, deployment["subject_pattern"], allowed_origin):
                 log.warning(
                     "review_auth_session_rejected",
                     reason="subject_not_allowed",

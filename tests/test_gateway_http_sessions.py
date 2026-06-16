@@ -531,8 +531,8 @@ class GatewayHttpSessionTests(unittest.TestCase):
                     {
                         "deployment_id": "gallery-local",
                         "deployment_slug": "gallery-local",
-                        "allowed_origin": "http://localhost:3000",
-                        "subject_pattern": "http://localhost:3000/*",
+                        "allowed_origin": "http://localhost:*",
+                        "subject_pattern": "http://localhost:*/*",
                     },
                 ],
             },
@@ -578,6 +578,18 @@ class GatewayHttpSessionTests(unittest.TestCase):
             },
         )
         self.assertEqual(local_auth.status_code, 200, local_auth.text)
+
+        local_any_port_auth = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "http://localhost:5178"},
+            json={
+                "project_id": "gallery",
+                "deployment_id": "gallery-local",
+                "access_code": "gallery-review-code-for-luna",
+                "subject_id": "http://localhost:5178/admin/events",
+            },
+        )
+        self.assertEqual(local_any_port_auth.status_code, 200, local_any_port_auth.text)
 
         rejected_origin = self.client.post(
             "/v1/review-auth/session",
@@ -662,8 +674,8 @@ class GatewayHttpSessionTests(unittest.TestCase):
                     {
                         "deployment_id": "gallery-local",
                         "deployment_slug": "gallery-local",
-                        "allowed_origin": "http://localhost:3000",
-                        "subject_pattern": "http://localhost:3000/*",
+                        "allowed_origin": "http://localhost:*",
+                        "subject_pattern": "http://localhost:*/*",
                     },
                 ],
             },
@@ -756,8 +768,8 @@ class GatewayHttpSessionTests(unittest.TestCase):
                     {
                         "deployment_id": "gallery-local",
                         "deployment_slug": "gallery-local",
-                        "allowed_origin": "http://localhost:3000",
-                        "subject_pattern": "http://localhost:3000/*",
+                        "allowed_origin": "http://localhost:*",
+                        "subject_pattern": "http://localhost:*/*",
                     },
                 ],
             },
@@ -787,7 +799,7 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertEqual(
             rows,
             [
-                ("gallery-local", "http://localhost:3000", "http://localhost:3000/*", 1),
+                ("gallery-local", "http://localhost:*", "http://localhost:*/*", 1),
                 ("gallery-production-apex", "https://gal-ler-y.com", "https://gal-ler-y.com*", 1),
                 ("gallery-production-www", "https://www.gal-ler-y.com", "https://www.gal-ler-y.com*", 1),
             ],
@@ -842,8 +854,8 @@ class GatewayHttpSessionTests(unittest.TestCase):
                     {
                         "deployment_id": "gallery-local",
                         "deployment_slug": "gallery-local",
-                        "allowed_origin": "http://localhost:3000",
-                        "subject_pattern": "http://localhost:3000/*",
+                        "allowed_origin": "http://localhost:*",
+                        "subject_pattern": "http://localhost:*/*",
                     }
                 ],
             },
