@@ -973,8 +973,15 @@ def create_app() -> FastAPI:
                 status_code=422,
                 detail=f"incomplete {context}: missing {', '.join(missing)}",
             )
-        parsed_origin = urlparse(allowed_origin or "")
-        parsed_subject = urlparse((subject_pattern or "").split("*", 1)[0])
+        origin_value = (allowed_origin or "").strip()
+        subject_value = (subject_pattern or "").strip()
+        if origin_value in {"http://localhost:*", "https://localhost:*", "http://127.0.0.1:*", "https://127.0.0.1:*"}:
+            if not subject_value.startswith(origin_value):
+                raise HTTPException(status_code=422, detail="subject_pattern origin must match allowed_origin")
+            return
+
+        parsed_origin = urlparse(origin_value)
+        parsed_subject = urlparse(subject_value.split("*", 1)[0])
         if not parsed_origin.scheme or not parsed_origin.netloc or parsed_origin.path not in ("", "/"):
             raise HTTPException(status_code=422, detail="allowed_origin must be an origin")
         hostname = (parsed_origin.hostname or "").lower()
@@ -1011,7 +1018,7 @@ def create_app() -> FastAPI:
         expected = {
             ("gallery-production-apex", "gallery-production-apex", "https://gal-ler-y.com", "https://gal-ler-y.com*"),
             ("gallery-production-www", "gallery-production-www", "https://www.gal-ler-y.com", "https://www.gal-ler-y.com*"),
-            ("gallery-local", "gallery-local", "http://localhost:3000", "http://localhost:3000/*"),
+            ("gallery-local", "gallery-local", "http://localhost:*", "http://localhost:*/*"),
         }
         actual = {_gallery_policy_tuple(policy) for policy in payload.policies}
         if actual != expected:
