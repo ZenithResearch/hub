@@ -455,6 +455,96 @@ class ReviewAuthStore:
             (project_id, deployment_identifier, deployment_identifier, deployment_identifier),
         ).fetchone()
 
+    @staticmethod
+    def _policy_staleness_flags(*, project_id: str, deployment_id: str, allowed_origin: str, subject_pattern: str | None) -> list[str]:
+        flags: list[str] = []
+        subject = (subject_pattern or "").strip()
+        origin = (allowed_origin or "").strip()
+        if subject.endswith("*") and not subject.endswith("/*"):
+            parsed = urlparse(subject[:-1])
+            if parsed.scheme and parsed.netloc and parsed.path in {"", "/"}:
+                flags.append("bare_host_wildcard_subject")
+        if origin in {"http://localhost:3000", "https://localhost:3000"} or subject.startswith(("http://localhost:3000", "https://localhost:3000")):
+            flags.append("localhost_fixed_port")
+        canonical_deployments = {
+            "swrl": {"swrl-web-production", "swrl-web-local"},
+            "gallery": {"gallery-local", "gallery-production-apex", "gallery-production-www"},
+        }
+        expected = canonical_deployments.get(project_id)
+        if expected is not None and deployment_id and deployment_id not in expected:
+            flags.append("unexpected_deployment_id")
+        return flags
+
+    def list_access_code_policies(
+        self,
+        *,
+        project_id: str | None = None,
+        access_code_id: str | None = None,
+        active: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if project_id:
+            clauses.append("p.id = ?")
+            params.append(project_id)
+        if access_code_id:
+            clauses.append("rac.id = ?")
+            params.append(access_code_id)
+        if active is not None:
+            clauses.append("rap.active = ?")
+            params.append(1 if active else 0)
+        where = ""
+        if clauses:
+            where = "WHERE " + " AND ".join(clauses)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    rac.id AS access_code_id,
+                    p.id AS project_id,
+                    rap.deployment_id AS deployment_id,
+                    rd.slug AS deployment_slug,
+                    rap.allowed_origin AS allowed_origin,
+                    rap.subject_pattern AS subject_pattern,
+                    rap.active AS active,
+                    rap.created_at AS created_at,
+                    rap.updated_at AS updated_at
+                FROM review_access_code_policies rap
+                JOIN review_access_codes rac ON rac.id = rap.access_code_id
+                JOIN projects p ON p.id = rap.project_id
+                LEFT JOIN review_deployments rd ON rd.id = rap.deployment_id AND rd.project_id = p.id
+                {where}
+                ORDER BY p.id, rac.id, rap.deployment_id, rap.allowed_origin, rap.subject_pattern
+                """,
+                tuple(params),
+            ).fetchall()
+        policies: list[dict[str, Any]] = []
+        for row in rows:
+            row_project_id = str(row["project_id"] or "")
+            row_deployment_id = str(row["deployment_id"] or "")
+            row_allowed_origin = str(row["allowed_origin"] or "")
+            row_subject_pattern = row["subject_pattern"]
+            policies.append(
+                {
+                    "access_code_id": str(row["access_code_id"] or ""),
+                    "project_id": row_project_id,
+                    "deployment_id": row_deployment_id,
+                    "deployment_slug": str(row["deployment_slug"] or row_deployment_id),
+                    "allowed_origin": row_allowed_origin,
+                    "subject_pattern": str(row_subject_pattern or ""),
+                    "active": bool(row["active"]),
+                    "created_at": str(row["created_at"] or ""),
+                    "updated_at": str(row["updated_at"] or ""),
+                    "staleness_flags": self._policy_staleness_flags(
+                        project_id=row_project_id,
+                        deployment_id=row_deployment_id,
+                        allowed_origin=row_allowed_origin,
+                        subject_pattern=str(row_subject_pattern or ""),
+                    ),
+                }
+            )
+        return policies
+
     def _access_code_policy_allows(
         self,
         conn: Any,
