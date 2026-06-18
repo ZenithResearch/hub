@@ -113,6 +113,20 @@ class ReviewAccessRotateOut(BaseModel):
     secrets_printed: bool = False
 
 
+class ReviewAccessPreflightOut(BaseModel):
+    ok: bool
+    client_id: str
+    project_id: str
+    deployment_id: str | None = None
+    access_code_id: str
+    access_label: str
+    project_scoped_access: bool
+    email_configured: bool
+    policy_count: int = 0
+    policies: list[dict[str, str]] = []
+    secrets_printed: bool = False
+
+
 class ReviewAccessCapabilitiesOut(BaseModel):
     ok: bool
     hub: str
@@ -169,6 +183,12 @@ class CaseFollowUpIn(BaseModel):
 
 class SecretUpdateIn(BaseModel):
     value: str
+
+
+class ReviewAccessPolicyRepairPlanIn(BaseModel):
+    project_id: str
+    access_code_id: str
+    mode: Literal["dry_run"] = "dry_run"
 
 
 class ModelProfileBindingUpdateIn(BaseModel):
@@ -745,6 +765,19 @@ def create_app() -> FastAPI:
         )
         return JSONResponse({"ok": True, "policies": policies, "secrets_printed": False})
 
+    @app.post("/v1/admin/review-auth/policies/repair-plan")
+    async def review_access_policy_repair_plan(payload: ReviewAccessPolicyRepairPlanIn, request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
+        project_id = payload.project_id.strip()
+        access_code_id = payload.access_code_id.strip()
+        if not project_id or not access_code_id:
+            raise HTTPException(status_code=422, detail="project_id and access_code_id are required")
+        plan = review_auth_store.plan_access_code_policy_repair(
+            project_id=project_id,
+            access_code_id=access_code_id,
+        )
+        return JSONResponse({"ok": True, "mode": payload.mode, "repairs": plan, "secrets_printed": False})
+
     @app.get("/v1/admin/model-profiles/effective")
     async def get_effective_model_profile(
         request: Request,
@@ -1054,7 +1087,7 @@ def create_app() -> FastAPI:
                     detail="Gallery compatibility deployment metadata must mirror a canonical Gallery policy",
                 )
 
-    def _validate_review_access_rotation(payload: ReviewAccessRotateIn) -> str:
+    def _validate_review_access_rotation(payload: ReviewAccessRotateIn, *, generate_code: bool = True) -> str | None:
         has_deployment_metadata = any(
             bool((value or "").strip())
             for value in (payload.deployment_id, payload.deployment_slug, payload.allowed_origin, payload.subject_pattern)
@@ -1087,13 +1120,58 @@ def create_app() -> FastAPI:
             code = (payload.access_code or "").strip()
             if len(code) < 16:
                 raise HTTPException(status_code=422, detail="access_code must be at least 16 characters")
-            return code
-        return "zrv_" + secrets.token_urlsafe(32)
+            return code if generate_code else None
+        return "zrv_" + secrets.token_urlsafe(32) if generate_code else None
+
+    def _normalized_review_access_policies(payload: ReviewAccessRotateIn) -> list[dict[str, str]]:
+        policies = [
+            {
+                "deployment_id": policy.deployment_id.strip(),
+                "deployment_slug": (policy.deployment_slug or policy.deployment_id).strip(),
+                "allowed_origin": policy.allowed_origin.strip(),
+                "subject_pattern": policy.subject_pattern.strip(),
+            }
+            for policy in payload.policies
+        ]
+        if not policies and (payload.deployment_id or "").strip() and payload.allowed_origin and payload.subject_pattern:
+            deployment_id = (payload.deployment_id or "").strip()
+            policies = [
+                {
+                    "deployment_id": deployment_id,
+                    "deployment_slug": (payload.deployment_slug or deployment_id).strip(),
+                    "allowed_origin": payload.allowed_origin.strip(),
+                    "subject_pattern": payload.subject_pattern.strip(),
+                }
+            ]
+        return policies
+
+    @app.post("/v1/admin/review-auth/access-codes/preflight", response_model=ReviewAccessPreflightOut)
+    async def preflight_review_access_code(payload: ReviewAccessRotateIn, request: Request) -> JSONResponse:
+        _require_review_access_admin(request)
+        _validate_review_access_rotation(payload, generate_code=False)
+        policies = _normalized_review_access_policies(payload)
+        deployment_id = (payload.deployment_id or "").strip() or None
+        response = {
+            "ok": True,
+            "client_id": payload.client_id.strip(),
+            "project_id": payload.project_id.strip(),
+            "deployment_id": deployment_id,
+            "access_code_id": payload.access_code_id.strip(),
+            "access_label": payload.access_label.strip(),
+            "project_scoped_access": not payload.deployment_scoped_access,
+            "email_configured": bool((payload.access_email or "").strip()),
+            "policy_count": len(policies),
+            "policies": policies,
+            "secrets_printed": False,
+        }
+        return JSONResponse(response)
 
     @app.post("/v1/admin/review-auth/access-codes/rotate", response_model=ReviewAccessRotateOut)
     async def rotate_review_access_code(payload: ReviewAccessRotateIn, request: Request) -> JSONResponse:
         _require_review_access_admin(request)
         raw_code = _validate_review_access_rotation(payload)
+        if raw_code is None:
+            raise HTTPException(status_code=500, detail="failed to generate access code")
         result = review_auth_store.rotate_access_code(
             client_id=payload.client_id.strip(),
             client_slug=payload.client_slug.strip(),

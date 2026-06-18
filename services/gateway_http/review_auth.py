@@ -540,36 +540,91 @@ class ReviewAuthStore:
                 """,
                 tuple(params),
             ).fetchall()
-        policies: list[dict[str, Any]] = []
-        for row in rows:
-            row_project_id = str(row["project_id"] or row["policy_project_id"] or "")
-            row_access_code_id = str(row["access_code_id"] or row["policy_access_code_id"] or "")
-            row_deployment_id = str(row["deployment_id"] or "")
-            row_allowed_origin = str(row["allowed_origin"] or "")
-            row_subject_pattern = row["subject_pattern"]
-            policies.append(
+        return [self._public_policy_row(row) for row in rows]
+
+    def _public_policy_row(self, row: Any) -> dict[str, Any]:
+        row_project_id = str(row["project_id"] or row["policy_project_id"] or "")
+        row_access_code_id = str(row["access_code_id"] or row["policy_access_code_id"] or "")
+        row_deployment_id = str(row["deployment_id"] or "")
+        row_allowed_origin = str(row["allowed_origin"] or "")
+        row_subject_pattern = row["subject_pattern"]
+        return {
+            "access_code_id": row_access_code_id,
+            "project_id": row_project_id,
+            "deployment_id": row_deployment_id,
+            "deployment_slug": str(row["deployment_slug"] or row_deployment_id),
+            "allowed_origin": row_allowed_origin,
+            "subject_pattern": str(row_subject_pattern or ""),
+            "active": bool(row["active"]),
+            "created_at": str(row["created_at"] or ""),
+            "updated_at": str(row["updated_at"] or ""),
+            "staleness_flags": self._policy_staleness_flags(
+                project_id=row_project_id,
+                deployment_id=row_deployment_id,
+                allowed_origin=row_allowed_origin,
+                subject_pattern=str(row_subject_pattern or ""),
+                access_code_exists=row["access_code_id"] is not None,
+                project_exists=row["project_id"] is not None,
+                deployment_exists=not row_deployment_id or row["deployment_slug"] is not None,
+            ),
+        }
+
+    @staticmethod
+    def _repair_policy_tuple(policy: dict[str, Any]) -> dict[str, str]:
+        allowed_origin = str(policy["allowed_origin"] or "").strip()
+        subject_pattern = str(policy["subject_pattern"] or "").strip()
+        deployment_id = str(policy["deployment_id"] or "").strip()
+        deployment_slug = str(policy["deployment_slug"] or deployment_id).strip()
+
+        parsed_origin = urlparse(allowed_origin)
+        if parsed_origin.hostname == "localhost" and parsed_origin.port is not None:
+            allowed_origin = f"{parsed_origin.scheme}://localhost:*"
+            parsed_subject = urlparse(subject_pattern.split("*", 1)[0])
+            if parsed_subject.scheme == parsed_origin.scheme and parsed_subject.hostname == "localhost":
+                suffix = parsed_subject.path or "/"
+                if subject_pattern.endswith("*"):
+                    suffix = suffix.rstrip("/") + "/*"
+                subject_pattern = f"{parsed_origin.scheme}://localhost:*{suffix}"
+
+        if subject_pattern.endswith("*") and not subject_pattern.endswith("/*"):
+            parsed_subject = urlparse(subject_pattern[:-1])
+            if parsed_subject.scheme and parsed_subject.netloc and parsed_subject.path in {"", "/"}:
+                subject_pattern = subject_pattern[:-1].rstrip("/") + "/*"
+
+        return {
+            "deployment_id": deployment_id,
+            "deployment_slug": deployment_slug,
+            "allowed_origin": allowed_origin,
+            "subject_pattern": subject_pattern,
+        }
+
+    def plan_access_code_policy_repair(self, *, project_id: str, access_code_id: str) -> list[dict[str, Any]]:
+        policies = self.list_access_code_policies(
+            project_id=project_id,
+            access_code_id=access_code_id,
+            active=True,
+        )
+        plan: list[dict[str, Any]] = []
+        for policy in policies:
+            old_tuple = {
+                "deployment_id": str(policy["deployment_id"] or ""),
+                "deployment_slug": str(policy["deployment_slug"] or policy["deployment_id"] or ""),
+                "allowed_origin": str(policy["allowed_origin"] or ""),
+                "subject_pattern": str(policy["subject_pattern"] or ""),
+            }
+            proposed_tuple = self._repair_policy_tuple(policy)
+            if proposed_tuple == old_tuple:
+                continue
+            plan.append(
                 {
-                    "access_code_id": row_access_code_id,
-                    "project_id": row_project_id,
-                    "deployment_id": row_deployment_id,
-                    "deployment_slug": str(row["deployment_slug"] or row_deployment_id),
-                    "allowed_origin": row_allowed_origin,
-                    "subject_pattern": str(row_subject_pattern or ""),
-                    "active": bool(row["active"]),
-                    "created_at": str(row["created_at"] or ""),
-                    "updated_at": str(row["updated_at"] or ""),
-                    "staleness_flags": self._policy_staleness_flags(
-                        project_id=row_project_id,
-                        deployment_id=row_deployment_id,
-                        allowed_origin=row_allowed_origin,
-                        subject_pattern=str(row_subject_pattern or ""),
-                        access_code_exists=row["access_code_id"] is not None,
-                        project_exists=row["project_id"] is not None,
-                        deployment_exists=not row_deployment_id or row["deployment_slug"] is not None,
-                    ),
+                    "project_id": str(policy["project_id"] or ""),
+                    "access_code_id": str(policy["access_code_id"] or ""),
+                    "old_policy": old_tuple,
+                    "proposed_policy": proposed_tuple,
+                    "staleness_flags": list(policy.get("staleness_flags") or []),
                 }
             )
-        return policies
+        return plan
 
     def _access_code_policy_allows(
         self,
