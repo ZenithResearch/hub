@@ -302,6 +302,79 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertIn("unexpected_deployment_id", row["staleness_flags"])
         self.assertIn("localhost_fixed_port", row["staleness_flags"])
 
+    def test_admin_review_access_policy_repair_plan_is_dry_run_and_redacts_secrets(self) -> None:
+        self._seed_review_auth(
+            client_id="swrl-client",
+            project_id="swrl",
+            project_slug="swrl",
+            deployment_id="swrl-web-production",
+            deployment_slug="swrl-web-production",
+            origin="https://www.collectswirls.com",
+            code="do-not-print-this-code",
+            label="Dan SWRL review",
+            subject_pattern="https://www.collectswirls.com*",
+            project_scoped_access_code=True,
+        )
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            conn.execute(
+                """
+                INSERT INTO review_access_code_policies
+                    (id, access_code_id, project_id, deployment_id, allowed_origin, subject_pattern, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    "policy-stale",
+                    "code-1",
+                    "swrl",
+                    "swrl-web-production",
+                    "https://www.collectswirls.com",
+                    "https://www.collectswirls.com*",
+                    "2026-05-01T00:00:00+00:00",
+                    "2026-05-01T00:00:00+00:00",
+                ),
+            )
+
+        response = self.client.post(
+            "/v1/admin/review-auth/policies/repair-plan",
+            headers=self._admin_headers(),
+            json={"project_id": "swrl", "access_code_id": "code-1", "mode": "dry_run"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["mode"], "dry_run")
+        self.assertEqual(payload["secrets_printed"], False)
+        self.assertEqual(len(payload["repairs"]), 1)
+        repair = payload["repairs"][0]
+        self.assertEqual(
+            repair["old_policy"],
+            {
+                "deployment_id": "swrl-web-production",
+                "deployment_slug": "swrl-web-production",
+                "allowed_origin": "https://www.collectswirls.com",
+                "subject_pattern": "https://www.collectswirls.com*",
+            },
+        )
+        self.assertEqual(repair["proposed_policy"]["subject_pattern"], "https://www.collectswirls.com/*")
+        self.assertIn("bare_host_wildcard_subject", repair["staleness_flags"])
+        redacted = json.dumps(payload)
+        self.assertNotIn("do-not-print-this-code", redacted)
+        self.assertNotIn("code_hash", redacted)
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            unchanged = conn.execute(
+                "SELECT subject_pattern FROM review_access_code_policies WHERE id = ?",
+                ("policy-stale",),
+            ).fetchone()[0]
+        self.assertEqual(unchanged, "https://www.collectswirls.com*")
+
+        unscoped = self.client.post(
+            "/v1/admin/review-auth/policies/repair-plan",
+            headers=self._admin_headers(),
+            json={"project_id": "swrl", "access_code_id": "   ", "mode": "dry_run"},
+        )
+        self.assertEqual(unscoped.status_code, 422)
+        self.assertEqual(unscoped.json()["detail"], "project_id and access_code_id are required")
+
     def test_admin_review_access_admin_token_update_requires_current_token_when_configured(self) -> None:
         response = self.client.put(
             "/v1/admin/review-auth/admin-token",
@@ -546,6 +619,62 @@ class GatewayHttpSessionTests(unittest.TestCase):
             headers={"Origin": "https://staging.example.com"},
         )
         self.assertEqual(response.status_code, 401)
+
+    def test_admin_review_access_preflight_does_not_persist(self) -> None:
+        payload = {
+            "client_id": "dan-prota",
+            "client_slug": "dan-prota",
+            "client_name": "Dan Prota",
+            "rolodex_entry_path": "notes/dan.md",
+            "project_id": "swrl-ui",
+            "project_slug": "swrl-ui",
+            "project_name": "SWRL UI",
+            "deployment_id": "swrl-ui-production-alias",
+            "deployment_slug": "swrl-ui-production-alias",
+            "allowed_origin": "https://swrl-ui.vercel.app",
+            "subject_pattern": "https://swrl-ui.vercel.app*",
+            "access_code_id": "dan-prota-swrl-ui-review",
+            "access_label": "Dan Prota",
+            "mode": "generate",
+        }
+        with patch.object(self.module.app.state.review_auth_store, "rotate_access_code") as rotate:
+            response = self.client.post(
+                "/v1/admin/review-auth/access-codes/preflight",
+                headers=self._admin_headers(),
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        rotate.assert_not_called()
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertFalse(body["secrets_printed"])
+        self.assertNotIn("raw_code", body)
+        self.assertNotIn("code_hash", json.dumps(body))
+        self.assertEqual(body["policy_count"], 1)
+        self.assertEqual(
+            body["policies"],
+            [
+                {
+                    "deployment_id": "swrl-ui-production-alias",
+                    "deployment_slug": "swrl-ui-production-alias",
+                    "allowed_origin": "https://swrl-ui.vercel.app",
+                    "subject_pattern": "https://swrl-ui.vercel.app*",
+                }
+            ],
+        )
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            for table in ("clients", "projects", "review_deployments", "review_access_codes", "review_access_code_policies"):
+                count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                self.assertEqual(count, 0, table)
+
+        invalid = {**payload, "allowed_origin": "https://swrl-ui.vercel.app/path"}
+        invalid_response = self.client.post(
+            "/v1/admin/review-auth/access-codes/preflight",
+            headers=self._admin_headers(),
+            json=invalid,
+        )
+        self.assertEqual(invalid_response.status_code, 422)
+        self.assertEqual(invalid_response.json()["detail"], "allowed_origin must be an origin")
 
     def test_admin_review_access_rotate_generates_raw_code_once_and_project_scoped_hash(self) -> None:
         response = self.client.post(
