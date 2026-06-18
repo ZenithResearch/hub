@@ -730,6 +730,21 @@ def create_app() -> FastAPI:
             }
         )
 
+    @app.get("/v1/admin/review-auth/policies")
+    async def list_review_access_policies(
+        request: Request,
+        project_id: str | None = None,
+        access_code_id: str | None = None,
+        active: bool | None = None,
+    ) -> JSONResponse:
+        _require_review_access_admin(request)
+        policies = review_auth_store.list_access_code_policies(
+            project_id=(project_id or "").strip() or None,
+            access_code_id=(access_code_id or "").strip() or None,
+            active=active,
+        )
+        return JSONResponse({"ok": True, "policies": policies, "secrets_printed": False})
+
     @app.get("/v1/admin/model-profiles/effective")
     async def get_effective_model_profile(
         request: Request,
