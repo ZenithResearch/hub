@@ -456,15 +456,35 @@ class ReviewAuthStore:
         ).fetchone()
 
     @staticmethod
-    def _policy_staleness_flags(*, project_id: str, deployment_id: str, allowed_origin: str, subject_pattern: str | None) -> list[str]:
+    def _is_fixed_localhost(value: str) -> bool:
+        parsed = urlparse(value)
+        return parsed.hostname == "localhost" and parsed.port is not None
+
+    @staticmethod
+    def _policy_staleness_flags(
+        *,
+        project_id: str,
+        deployment_id: str,
+        allowed_origin: str,
+        subject_pattern: str | None,
+        access_code_exists: bool = True,
+        project_exists: bool = True,
+        deployment_exists: bool = True,
+    ) -> list[str]:
         flags: list[str] = []
         subject = (subject_pattern or "").strip()
         origin = (allowed_origin or "").strip()
+        if not access_code_exists:
+            flags.append("missing_access_code")
+        if not project_exists:
+            flags.append("missing_project")
+        if deployment_id and not deployment_exists:
+            flags.append("missing_deployment")
         if subject.endswith("*") and not subject.endswith("/*"):
             parsed = urlparse(subject[:-1])
             if parsed.scheme and parsed.netloc and parsed.path in {"", "/"}:
                 flags.append("bare_host_wildcard_subject")
-        if origin in {"http://localhost:3000", "https://localhost:3000"} or subject.startswith(("http://localhost:3000", "https://localhost:3000")):
+        if ReviewAuthStore._is_fixed_localhost(origin) or ReviewAuthStore._is_fixed_localhost(subject):
             flags.append("localhost_fixed_port")
         canonical_deployments = {
             "swrl": {"swrl-web-production", "swrl-web-local"},
@@ -485,10 +505,10 @@ class ReviewAuthStore:
         clauses: list[str] = []
         params: list[Any] = []
         if project_id:
-            clauses.append("p.id = ?")
+            clauses.append("rap.project_id = ?")
             params.append(project_id)
         if access_code_id:
-            clauses.append("rac.id = ?")
+            clauses.append("rap.access_code_id = ?")
             params.append(access_code_id)
         if active is not None:
             clauses.append("rap.active = ?")
@@ -500,7 +520,9 @@ class ReviewAuthStore:
             rows = conn.execute(
                 f"""
                 SELECT
+                    rap.access_code_id AS policy_access_code_id,
                     rac.id AS access_code_id,
+                    rap.project_id AS policy_project_id,
                     p.id AS project_id,
                     rap.deployment_id AS deployment_id,
                     rd.slug AS deployment_slug,
@@ -510,23 +532,24 @@ class ReviewAuthStore:
                     rap.created_at AS created_at,
                     rap.updated_at AS updated_at
                 FROM review_access_code_policies rap
-                JOIN review_access_codes rac ON rac.id = rap.access_code_id
-                JOIN projects p ON p.id = rap.project_id
-                LEFT JOIN review_deployments rd ON rd.id = rap.deployment_id AND rd.project_id = p.id
+                LEFT JOIN review_access_codes rac ON rac.id = rap.access_code_id
+                LEFT JOIN projects p ON p.id = rap.project_id
+                LEFT JOIN review_deployments rd ON rd.id = rap.deployment_id AND rd.project_id = rap.project_id
                 {where}
-                ORDER BY p.id, rac.id, rap.deployment_id, rap.allowed_origin, rap.subject_pattern
+                ORDER BY rap.project_id, rap.access_code_id, rap.deployment_id, rap.allowed_origin, rap.subject_pattern
                 """,
                 tuple(params),
             ).fetchall()
         policies: list[dict[str, Any]] = []
         for row in rows:
-            row_project_id = str(row["project_id"] or "")
+            row_project_id = str(row["project_id"] or row["policy_project_id"] or "")
+            row_access_code_id = str(row["access_code_id"] or row["policy_access_code_id"] or "")
             row_deployment_id = str(row["deployment_id"] or "")
             row_allowed_origin = str(row["allowed_origin"] or "")
             row_subject_pattern = row["subject_pattern"]
             policies.append(
                 {
-                    "access_code_id": str(row["access_code_id"] or ""),
+                    "access_code_id": row_access_code_id,
                     "project_id": row_project_id,
                     "deployment_id": row_deployment_id,
                     "deployment_slug": str(row["deployment_slug"] or row_deployment_id),
@@ -540,6 +563,9 @@ class ReviewAuthStore:
                         deployment_id=row_deployment_id,
                         allowed_origin=row_allowed_origin,
                         subject_pattern=str(row_subject_pattern or ""),
+                        access_code_exists=row["access_code_id"] is not None,
+                        project_exists=row["project_id"] is not None,
+                        deployment_exists=not row_deployment_id or row["deployment_slug"] is not None,
                     ),
                 }
             )

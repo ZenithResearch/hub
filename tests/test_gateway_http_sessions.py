@@ -263,6 +263,45 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertNotIn("code_hash", encoded)
         self.assertNotIn("raw_code", encoded)
 
+    def test_admin_review_access_policy_list_surfaces_orphan_rows_and_generalized_localhost_ports(self) -> None:
+        db_path = os.environ["CLIENTS_DB_PATH"]
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO review_access_code_policies
+                (id, access_code_id, project_id, deployment_id, allowed_origin, subject_pattern, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    "orphan-policy",
+                    "missing-code",
+                    "swrl",
+                    "missing-deployment",
+                    "http://localhost:5173",
+                    "http://localhost:5173/admin/*",
+                    "2026-05-03T00:00:00+00:00",
+                    "2026-05-04T00:00:00+00:00",
+                ),
+            )
+
+        response = self.client.get(
+            "/v1/admin/review-auth/policies?project_id=swrl",
+            headers=self._admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(len(payload["policies"]), 1)
+        row = payload["policies"][0]
+        self.assertEqual(row["access_code_id"], "missing-code")
+        self.assertEqual(row["project_id"], "swrl")
+        self.assertEqual(row["deployment_id"], "missing-deployment")
+        self.assertEqual(row["deployment_slug"], "missing-deployment")
+        self.assertIn("missing_access_code", row["staleness_flags"])
+        self.assertIn("missing_deployment", row["staleness_flags"])
+        self.assertIn("unexpected_deployment_id", row["staleness_flags"])
+        self.assertIn("localhost_fixed_port", row["staleness_flags"])
+
     def test_admin_review_access_admin_token_update_requires_current_token_when_configured(self) -> None:
         response = self.client.put(
             "/v1/admin/review-auth/admin-token",
