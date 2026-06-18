@@ -204,6 +204,65 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["detail"], "invalid review access admin token")
 
+    def test_admin_review_access_policy_list_redacts_secrets(self) -> None:
+        self._seed_review_auth(
+            client_id="swrl-client",
+            project_id="swrl",
+            project_slug="swrl",
+            deployment_id="swrl-web-production",
+            deployment_slug="swrl-web-production",
+            origin="https://www.collectswirls.com",
+            code="do-not-print-this-code",
+            label="Dan SWRL review",
+            subject_pattern="https://www.collectswirls.com*",
+            project_scoped_access_code=True,
+        )
+        db_path = os.environ["CLIENTS_DB_PATH"]
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO review_access_code_policies
+                (id, access_code_id, project_id, deployment_id, allowed_origin, subject_pattern, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    "policy-1",
+                    "code-1",
+                    "swrl",
+                    "swrl-web-production",
+                    "https://www.collectswirls.com",
+                    "https://www.collectswirls.com*",
+                    "2026-05-01T00:00:00+00:00",
+                    "2026-05-02T00:00:00+00:00",
+                ),
+            )
+
+        response = self.client.get(
+            "/v1/admin/review-auth/policies?project_id=swrl&access_code_id=code-1",
+            headers=self._admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["ok"], True)
+        self.assertEqual(payload["secrets_printed"], False)
+        self.assertEqual(len(payload["policies"]), 1)
+        row = payload["policies"][0]
+        self.assertEqual(row["access_code_id"], "code-1")
+        self.assertEqual(row["project_id"], "swrl")
+        self.assertEqual(row["deployment_id"], "swrl-web-production")
+        self.assertEqual(row["deployment_slug"], "swrl-web-production")
+        self.assertEqual(row["allowed_origin"], "https://www.collectswirls.com")
+        self.assertEqual(row["subject_pattern"], "https://www.collectswirls.com*")
+        self.assertEqual(row["active"], True)
+        self.assertEqual(row["created_at"], "2026-05-01T00:00:00+00:00")
+        self.assertEqual(row["updated_at"], "2026-05-02T00:00:00+00:00")
+        self.assertIn("bare_host_wildcard_subject", row["staleness_flags"])
+        encoded = json.dumps(payload)
+        self.assertNotIn("do-not-print-this-code", encoded)
+        self.assertNotIn("code_hash", encoded)
+        self.assertNotIn("raw_code", encoded)
+
     def test_admin_review_access_admin_token_update_requires_current_token_when_configured(self) -> None:
         response = self.client.put(
             "/v1/admin/review-auth/admin-token",
