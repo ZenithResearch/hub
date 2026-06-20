@@ -103,21 +103,23 @@ NEW_TASK_DEF="$(${AWS[@]} ecs register-task-definition \
   --cluster "$ECS_CLUSTER" \
   --services "$ECS_SERVICE"
 
-SERVICE_STATE="$(${AWS[@]} ecs describe-services \
-  --cluster "$ECS_CLUSTER" \
-  --services "$ECS_SERVICE" \
-  --query 'services[0].{serviceName:serviceName,desired:desiredCount,running:runningCount,pending:pendingCount,taskDefinition:taskDefinition,rolloutState:deployments[?status==`PRIMARY`]|[0].rolloutState}' \
-  --output json)"
+SERVICE_STATE=""
+for _ in $(seq 1 40); do
+  SERVICE_STATE="$(${AWS[@]} ecs describe-services \
+    --cluster "$ECS_CLUSTER" \
+    --services "$ECS_SERVICE" \
+    --query 'services[0].{serviceName:serviceName,desired:desiredCount,running:runningCount,pending:pendingCount,taskDefinition:taskDefinition,rolloutState:deployments[?status==`PRIMARY`]|[0].rolloutState}' \
+    --output json)"
+  PRIMARY_TASK_DEF="$(jq -r '.taskDefinition // ""' <<<"$SERVICE_STATE")"
+  PRIMARY_ROLLOUT_STATE="$(jq -r '.rolloutState // ""' <<<"$SERVICE_STATE")"
+  if [[ "$PRIMARY_TASK_DEF" == "$NEW_TASK_DEF" && "$PRIMARY_ROLLOUT_STATE" == "COMPLETED" ]]; then
+    break
+  fi
+  sleep 10
+done
 
-PRIMARY_TASK_DEF="$(python3 - <<'PY'
-import json, sys
-state=json.loads(sys.stdin.read())
-print(state.get('taskDefinition',''))
-PY
-<<<"$SERVICE_STATE")"
-
-if [[ "$PRIMARY_TASK_DEF" != "$NEW_TASK_DEF" ]]; then
-  echo "Primary deployment is not on the newly registered task definition" >&2
+if [[ "$PRIMARY_TASK_DEF" != "$NEW_TASK_DEF" || "$PRIMARY_ROLLOUT_STATE" != "COMPLETED" ]]; then
+  echo "Primary deployment did not settle on the newly registered task definition" >&2
   echo "$SERVICE_STATE" >&2
   exit 2
 fi
