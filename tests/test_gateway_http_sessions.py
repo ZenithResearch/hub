@@ -375,6 +375,280 @@ class GatewayHttpSessionTests(unittest.TestCase):
         self.assertEqual(unscoped.status_code, 422)
         self.assertEqual(unscoped.json()["detail"], "project_id and access_code_id are required")
 
+    def test_admin_review_access_policy_list_flags_inactive_access_code_and_deployment(self) -> None:
+        self._seed_review_auth(
+            client_id="swrl-client",
+            project_id="swrl",
+            project_slug="swrl",
+            deployment_id="swrl-web-production",
+            deployment_slug="swrl-web-production",
+            origin="https://www.collectswirls.com",
+            code="inactive-code-should-not-auth",
+            label="Dan SWRL inactive review",
+            subject_pattern="https://www.collectswirls.com/*",
+            project_scoped_access_code=True,
+        )
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            conn.execute("UPDATE review_access_codes SET active = 0 WHERE id = ?", ("code-1",))
+            conn.execute("UPDATE review_deployments SET active = 0 WHERE id = ?", ("swrl-web-production",))
+            conn.execute(
+                """
+                INSERT INTO review_access_code_policies
+                    (id, access_code_id, project_id, deployment_id, allowed_origin, subject_pattern, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    "inactive-policy-row",
+                    "code-1",
+                    "swrl",
+                    "swrl-web-production",
+                    "https://www.collectswirls.com",
+                    "https://www.collectswirls.com/*",
+                    "2026-06-19T00:00:00+00:00",
+                    "2026-06-19T00:00:00+00:00",
+                ),
+            )
+
+        response = self.client.get(
+            "/v1/admin/review-auth/policies?project_id=swrl&access_code_id=code-1",
+            headers=self._admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        policies = response.json()["policies"]
+        self.assertEqual(len(policies), 1)
+        self.assertIn("inactive_access_code", policies[0]["staleness_flags"])
+        self.assertIn("inactive_deployment", policies[0]["staleness_flags"])
+
+    def test_admin_review_access_rotate_swrl_policies_list_and_auth_edgecases(self) -> None:
+        response = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "dan-prota",
+                "client_slug": "dan-prota",
+                "client_name": "Dan P",
+                "project_id": "swrl",
+                "project_slug": "swrl",
+                "project_name": "SWRL",
+                "deployment_id": "swrl-web-production",
+                "deployment_slug": "swrl-web-production",
+                "allowed_origin": "https://www.collectswirls.com",
+                "subject_pattern": "https://www.collectswirls.com/*",
+                "deployment_scoped_access": False,
+                "access_code_id": "dan-prota-swrl-review",
+                "access_label": "Dan Admin",
+                "mode": "generate",
+                "policies": [
+                    {
+                        "deployment_id": "swrl-web-production",
+                        "deployment_slug": "swrl-web-production",
+                        "allowed_origin": "https://www.collectswirls.com",
+                        "subject_pattern": "https://www.collectswirls.com/*",
+                    },
+                    {
+                        "deployment_id": "swrl-web-local",
+                        "deployment_slug": "swrl-web-local",
+                        "allowed_origin": "http://localhost:*",
+                        "subject_pattern": "http://localhost:*/*",
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        raw_code = body["raw_code"]
+        self.assertTrue(raw_code.startswith("zrv_"))
+        self.assertTrue(body["project_scoped_access"])
+        self.assertEqual(body["policy_count"], 2)
+        self.assertFalse(body["secrets_printed"])
+
+        policy_list = self.client.get(
+            "/v1/admin/review-auth/policies?project_id=swrl&access_code_id=dan-prota-swrl-review",
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(policy_list.status_code, 200, policy_list.text)
+        policies = policy_list.json()["policies"]
+        self.assertEqual(
+            [(row["deployment_id"], row["allowed_origin"], row["subject_pattern"], row["active"]) for row in policies],
+            [
+                ("swrl-web-local", "http://localhost:*", "http://localhost:*/*", True),
+                ("swrl-web-production", "https://www.collectswirls.com", "https://www.collectswirls.com/*", True),
+            ],
+        )
+        self.assertNotIn(raw_code, json.dumps(policy_list.json()))
+
+        prod_auth = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://www.collectswirls.com"},
+            json={
+                "project_id": "swrl",
+                "deployment_id": "swrl-web-production",
+                "access_code": raw_code,
+                "subject_id": "https://www.collectswirls.com/admin/review",
+            },
+        )
+        self.assertEqual(prod_auth.status_code, 200, prod_auth.text)
+        local_auth = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "http://localhost:5173"},
+            json={
+                "project_id": "swrl",
+                "deployment_id": "swrl-web-local",
+                "access_code": raw_code,
+                "subject_id": "http://localhost:5173/admin/review",
+            },
+        )
+        self.assertEqual(local_auth.status_code, 200, local_auth.text)
+        rejected_subject = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://www.collectswirls.com"},
+            json={
+                "project_id": "swrl",
+                "deployment_id": "swrl-web-production",
+                "access_code": raw_code,
+                "subject_id": "https://attacker.collectswirls.com/admin/review",
+            },
+        )
+        self.assertEqual(rejected_subject.status_code, 401)
+
+    def test_admin_review_access_rotate_replaces_policy_set_and_old_code(self) -> None:
+        first = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "dan-prota",
+                "client_slug": "dan-prota",
+                "client_name": "Dan P",
+                "project_id": "swrl",
+                "project_slug": "swrl",
+                "project_name": "SWRL",
+                "access_code_id": "dan-prota-swrl-review",
+                "access_label": "Dan Admin",
+                "mode": "provided",
+                "access_code": "first-manual-review-code",
+                "policies": [
+                    {
+                        "deployment_id": "swrl-web-production",
+                        "deployment_slug": "swrl-web-production",
+                        "allowed_origin": "https://www.collectswirls.com",
+                        "subject_pattern": "https://www.collectswirls.com/*",
+                    },
+                    {
+                        "deployment_id": "swrl-web-local",
+                        "deployment_slug": "swrl-web-local",
+                        "allowed_origin": "http://localhost:*",
+                        "subject_pattern": "http://localhost:*/*",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+
+        second = self.client.post(
+            "/v1/admin/review-auth/access-codes/rotate",
+            headers=self._admin_headers(),
+            json={
+                "client_id": "dan-prota",
+                "client_slug": "dan-prota",
+                "client_name": "Dan P",
+                "project_id": "swrl",
+                "project_slug": "swrl",
+                "project_name": "SWRL",
+                "access_code_id": "dan-prota-swrl-review",
+                "access_label": "Dan Admin",
+                "mode": "provided",
+                "access_code": "second-manual-review-code",
+                "policies": [
+                    {
+                        "deployment_id": "swrl-web-production",
+                        "deployment_slug": "swrl-web-production",
+                        "allowed_origin": "https://www.collectswirls.com",
+                        "subject_pattern": "https://www.collectswirls.com/*",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(second.json()["policy_count"], 1)
+        self.assertFalse(second.json()["raw_code_present"])
+        self.assertNotIn("raw_code", second.json())
+
+        old_code_rejected = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://www.collectswirls.com"},
+            json={
+                "project_id": "swrl",
+                "deployment_id": "swrl-web-production",
+                "access_code": "first-manual-review-code",
+                "subject_id": "https://www.collectswirls.com/admin/review",
+            },
+        )
+        self.assertEqual(old_code_rejected.status_code, 401)
+        removed_local_policy_rejected = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "http://localhost:5173"},
+            json={
+                "project_id": "swrl",
+                "deployment_id": "swrl-web-local",
+                "access_code": "second-manual-review-code",
+                "subject_id": "http://localhost:5173/admin/review",
+            },
+        )
+        self.assertEqual(removed_local_policy_rejected.status_code, 401)
+        prod_auth = self.client.post(
+            "/v1/review-auth/session",
+            headers={"Origin": "https://www.collectswirls.com"},
+            json={
+                "project_id": "swrl",
+                "deployment_id": "swrl-web-production",
+                "access_code": "second-manual-review-code",
+                "subject_id": "https://www.collectswirls.com/admin/review",
+            },
+        )
+        self.assertEqual(prod_auth.status_code, 200, prod_auth.text)
+
+        policy_list = self.client.get(
+            "/v1/admin/review-auth/policies?project_id=swrl&access_code_id=dan-prota-swrl-review",
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(policy_list.status_code, 200, policy_list.text)
+        self.assertEqual([row["deployment_id"] for row in policy_list.json()["policies"]], ["swrl-web-production"])
+
+    def test_review_auth_session_revocation_and_deployment_deactivation_fail_closed(self) -> None:
+        self._seed_review_auth(code="revocation-test-code", project_scoped_access_code=True)
+        session = self._create_review_session(code="revocation-test-code")
+
+        before_revocation = self.client.post(
+            "/v1/reviews/assets",
+            headers=self._auth_headers(session["token"]),
+            files={"file": ("events.json", b"{}", "application/json")},
+            data={"asset_type": "events", "project_id": "project-one", "deployment_id": "deployment-one"},
+        )
+        self.assertEqual(before_revocation.status_code, 200, before_revocation.text)
+
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            conn.execute("UPDATE review_sessions SET revoked_at = ? WHERE id = ?", ("2026-06-19T00:00:00+00:00", session["session_id"]))
+        after_revocation = self.client.post(
+            "/v1/reviews/assets",
+            headers=self._auth_headers(session["token"]),
+            files={"file": ("events.json", b"{}", "application/json")},
+            data={"asset_type": "events", "project_id": "project-one", "deployment_id": "deployment-one"},
+        )
+        self.assertEqual(after_revocation.status_code, 401)
+
+        fresh_session = self._create_review_session(code="revocation-test-code")
+        with sqlite3.connect(os.environ["CLIENTS_DB_PATH"]) as conn:
+            conn.execute("UPDATE review_deployments SET active = 0 WHERE id = ?", ("deployment-1",))
+        inactive_deployment = self.client.post(
+            "/v1/reviews/assets",
+            headers=self._auth_headers(fresh_session["token"]),
+            files={"file": ("events.json", b"{}", "application/json")},
+            data={"asset_type": "events", "project_id": "project-one", "deployment_id": "deployment-one"},
+        )
+        self.assertEqual(inactive_deployment.status_code, 401)
+
     def test_admin_review_access_admin_token_update_requires_current_token_when_configured(self) -> None:
         response = self.client.put(
             "/v1/admin/review-auth/admin-token",

@@ -458,7 +458,11 @@ class ReviewAuthStore:
     @staticmethod
     def _is_fixed_localhost(value: str) -> bool:
         parsed = urlparse(value)
-        return parsed.hostname == "localhost" and parsed.port is not None
+        try:
+            port = parsed.port
+        except ValueError:
+            return False
+        return parsed.hostname == "localhost" and port is not None
 
     @staticmethod
     def _policy_staleness_flags(
@@ -468,18 +472,24 @@ class ReviewAuthStore:
         allowed_origin: str,
         subject_pattern: str | None,
         access_code_exists: bool = True,
+        access_code_active: bool = True,
         project_exists: bool = True,
         deployment_exists: bool = True,
+        deployment_active: bool = True,
     ) -> list[str]:
         flags: list[str] = []
         subject = (subject_pattern or "").strip()
         origin = (allowed_origin or "").strip()
         if not access_code_exists:
             flags.append("missing_access_code")
+        elif not access_code_active:
+            flags.append("inactive_access_code")
         if not project_exists:
             flags.append("missing_project")
         if deployment_id and not deployment_exists:
             flags.append("missing_deployment")
+        elif deployment_id and not deployment_active:
+            flags.append("inactive_deployment")
         if subject.endswith("*") and not subject.endswith("/*"):
             parsed = urlparse(subject[:-1])
             if parsed.scheme and parsed.netloc and parsed.path in {"", "/"}:
@@ -522,10 +532,12 @@ class ReviewAuthStore:
                 SELECT
                     rap.access_code_id AS policy_access_code_id,
                     rac.id AS access_code_id,
+                    rac.active AS access_code_active,
                     rap.project_id AS policy_project_id,
                     p.id AS project_id,
                     rap.deployment_id AS deployment_id,
                     rd.slug AS deployment_slug,
+                    rd.active AS deployment_active,
                     rap.allowed_origin AS allowed_origin,
                     rap.subject_pattern AS subject_pattern,
                     rap.active AS active,
@@ -564,8 +576,10 @@ class ReviewAuthStore:
                 allowed_origin=row_allowed_origin,
                 subject_pattern=str(row_subject_pattern or ""),
                 access_code_exists=row["access_code_id"] is not None,
+                access_code_active=bool(row["access_code_active"]),
                 project_exists=row["project_id"] is not None,
                 deployment_exists=not row_deployment_id or row["deployment_slug"] is not None,
+                deployment_active=bool(row["deployment_active"]),
             ),
         }
 
