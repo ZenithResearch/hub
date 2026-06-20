@@ -36,6 +36,40 @@ def test_manual_gateway_image_build_workflow_uses_cd_reusable_local_script():
     assert "prod_terraform_cd.sh" in workflow
 
 
+def test_gateway_main_cd_builds_after_green_main_ci_and_uses_narrow_ecs_deploy():
+    workflow_path = ROOT / ".github/workflows/gateway-main-cd.yml"
+    assert workflow_path.exists()
+    workflow = workflow_path.read_text()
+
+    assert "workflow_run:" in workflow
+    assert "workflows: [\"CI\"]" in workflow
+    assert "github.event.workflow_run.conclusion == 'success'" in workflow
+    assert "branches: [main]" in workflow
+    assert "environment: production" in workflow
+    assert "aws-actions/configure-aws-credentials" in workflow
+    assert "scripts/prod_build_image.sh" in workflow
+    assert "scripts/prod_deploy_gateway_image.sh" in workflow
+    assert "zenith-hub-prod-gateway-http" in workflow
+    assert "HUB_HEALTH_URL: https://hub.zenith-research.ca/health" in workflow
+
+
+def test_gateway_narrow_deploy_script_updates_only_gateway_service_image():
+    script = (ROOT / "scripts/prod_deploy_gateway_image.sh").read_text()
+
+    assert "${IMAGE_TAG:?" in script
+    assert "ECS_CLUSTER:=zenith-hub-prod-cluster" in script
+    assert "ECS_SERVICE:=zenith-hub-prod-gateway-http" in script
+    assert "ecr describe-images" in script
+    assert "ecs describe-services" in script
+    assert "ecs describe-task-definition" in script
+    assert "ecs register-task-definition" in script
+    assert "ecs update-service" in script
+    assert "ecs wait services-stable" in script
+    assert "HUB_HEALTH_URL:=https://hub.zenith-research.ca/health" in script
+    assert "terraform apply" not in script
+    assert "prod_terraform_cd.sh" not in script
+
+
 def test_prod_build_image_script_builds_only_and_leaves_deploy_to_terraform():
     script = (ROOT / "scripts/prod_build_image.sh").read_text()
 

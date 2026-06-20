@@ -1,0 +1,94 @@
+name: Gateway Main CD
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional gateway image tag. Defaults to gateway-<deploy-sha>."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gateway-main-cd-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY: zenith-hub-prod-gateway-http
+  ECS_CLUSTER: zenith-hub-prod-cluster
+  ECS_SERVICE: zenith-hub-prod-gateway-http
+  HUB_HEALTH_URL: https://hub.zenith-research.ca/health
+
+jobs:
+  deploy:
+    name: Build and deploy gateway from main
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 60
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Resolve deploy SHA
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            SHA="$(jq -r '.workflow_run.head_sha' "$GITHUB_EVENT_PATH")"
+            INPUT_TAG=""
+          else
+            SHA="$GITHUB_SHA"
+            INPUT_TAG="$(jq -r '.inputs.image_tag // ""' "$GITHUB_EVENT_PATH")"
+          fi
+          if [[ -n "$INPUT_TAG" ]]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="gateway-${SHA:0:12}"
+          fi
+          if [[ ! "$TAG" =~ ^[A-Za-z0-9_.-]{1,128}$ ]]; then
+            echo "Invalid Docker tag: $TAG" >&2
+            exit 2
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Deploy SHA: $SHA"
+          echo "Gateway image tag: $TAG"
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.deploy.outputs.sha }}
+
+      - name: Configure AWS credentials by OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PROD_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push gateway image
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.deploy.outputs.tag }}
+          DOCKER_PLATFORM: linux/amd64
+          DOCKER_CACHE_FROM: type=gha,scope=gateway-http
+          DOCKER_CACHE_TO: type=gha,mode=max,scope=gateway-http
+        run: scripts/prod_build_image.sh
+
+      - name: Deploy gateway ECS service
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.deploy.outputs.tag }}
+        run: scripts/prod_deploy_gateway_image.sh
