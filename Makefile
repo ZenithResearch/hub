@@ -36,7 +36,7 @@ proto:
 	python -c "p='libs/common/proto/agent_pb2_grpc.py'; import pathlib; t=pathlib.Path(p).read_text(); t=t.replace('import agent_pb2 as agent__pb2','from . import agent_pb2 as agent__pb2'); pathlib.Path(p).write_text(t)"
 
 test:
-	docker compose run --rm runtime-grpc python -c "import libs.common.config, libs.kb.qdrant_store, libs.tools.registry; import services.runtime_grpc.main, services.tool_sandbox.main, services.gateway_http.app; print('imports_ok')"
+	docker compose run --rm -e REVIEWS_DATA_DIR=/tmp/hub-reviews -e CLIENTS_DB_PATH=/tmp/hub-clients.db runtime-grpc python -c "import libs.common.config, libs.kb.qdrant_store, libs.tools.registry; import services.runtime_grpc.main, services.tool_sandbox.main, services.gateway_http.app; print('imports_ok')"
 
 doctor:
 	bash scripts/doctor.sh

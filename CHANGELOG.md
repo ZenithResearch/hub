@@ -78,6 +78,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Made the Docker-backed `make test` smoke use writable temporary review/client paths — keeps the import check reproducible when the image runs as the non-root app user and the copied `data/` tree is not writable.
 - Added collectswirls origins to the Gateway CORS example — keeps SWRL Review SDK browser sessions from being blocked at preflight while the Hub Review Auth DB policy remains authoritative.
 - Added regression coverage for Gallery review-access regeneration with compatibility deployment metadata — ensures renewing an existing project-scoped Gallery access code keeps the canonical apex, www, and local authentication model working without leaking raw secrets.
 - Formatted the ISS-P14-005 Matrix backup Terraform contract — keeps the backup plan reviewable under the repo Terraform formatting gate.
