@@ -80,13 +80,6 @@ resource "aws_security_group" "matrix" {
     security_groups = [aws_security_group.alb.id]
   }
 
-  ingress {
-    description = "matrix_federation_8448_explicit"
-    from_port   = 8448
-    to_port     = 8448
-    protocol    = "tcp"
-    cidr_blocks = var.enable_matrix_federation ? var.matrix_federation_allowed_cidr_blocks : []
-  }
 
   egress {
     description = "aws_control_plane_https"

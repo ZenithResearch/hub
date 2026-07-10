@@ -540,7 +540,7 @@ variable "enable_matrix_synapse" {
 variable "matrix_synapse_image" {
   description = "Pinned upstream Synapse container image. Update only through a reviewed production change."
   type        = string
-  default     = "matrixdotorg/synapse:v1.132.0"
+  default     = "matrixdotorg/synapse@sha256:3036ec25dfb5fcc5120942465788c1e1f2bb3671e28b04d7b3a1db4400ac84f4"
 }
 
 variable "matrix_synapse_desired_count" {
@@ -571,6 +571,12 @@ variable "matrix_synapse_postgres_engine_version" {
   description = "Postgres engine version for Synapse RDS."
   type        = string
   default     = "16.6"
+}
+
+variable "matrix_synapse_postgres_multi_az" {
+  description = "Run Synapse Postgres in Multi-AZ mode. Production default is fail-safe high availability."
+  type        = bool
+  default     = true
 }
 
 variable "matrix_synapse_postgres_allocated_storage_gb" {
@@ -636,6 +642,13 @@ variable "matrix_registration_shared_secret" {
   sensitive   = true
 }
 
+variable "matrix_form_secret" {
+  description = "Sensitive Synapse form secret. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "matrix_appservice_as_token" {
   description = "Sensitive Matrix appservice as_token. Empty means do not write/update the secret version from Terraform."
   type        = string
@@ -684,4 +697,10 @@ variable "matrix_federation_allowed_cidr_blocks" {
   description = "CIDR allowlist for Matrix federation ingress on 8448 when enable_matrix_federation is true."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+variable "matrix_federation_allowed_ipv6_cidr_blocks" {
+  description = "IPv6 CIDR allowlist for ALB Matrix federation ingress on 8448. Empty disables IPv6 federation ingress."
+  type        = list(string)
+  default     = []
 }

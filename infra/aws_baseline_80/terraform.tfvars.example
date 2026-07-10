@@ -66,7 +66,7 @@ qdrant_url = "https://your-qdrant-cloud-url"
 # and the existing Secrets Manager handles have operator-populated values.
 enable_matrix_synapse = false
 enable_matrix_backup  = false
-matrix_synapse_image  = "matrixdotorg/synapse:v1.132.0"
+matrix_synapse_image  = "matrixdotorg/synapse@sha256:3036ec25dfb5fcc5120942465788c1e1f2bb3671e28b04d7b3a1db4400ac84f4"
 
 # Include every browser origin that will call Review SDK endpoints directly.
 # Gallery production supports both apex and www origins. Local review/admin

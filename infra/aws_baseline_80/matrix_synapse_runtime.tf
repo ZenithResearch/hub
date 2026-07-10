@@ -51,6 +51,7 @@ resource "aws_db_instance" "matrix_synapse" {
   db_subnet_group_name   = aws_db_subnet_group.matrix_synapse[0].name
   vpc_security_group_ids = [aws_security_group.matrix_synapse_postgres[0].id]
   publicly_accessible    = false
+  multi_az               = var.matrix_synapse_postgres_multi_az
 
   backup_retention_period   = var.matrix_synapse_backup_retention_days
   deletion_protection       = var.matrix_synapse_deletion_protection
@@ -213,6 +214,7 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
             "signing_key_path": str(signing_key_path),
             "macaroon_secret_key": os.environ["SYNAPSE_MACAROON_SECRET_KEY"],
             "registration_shared_secret": os.environ["SYNAPSE_REGISTRATION_SHARED_SECRET"],
+            "form_secret": os.environ["SYNAPSE_FORM_SECRET"],
             "enable_registration": False,
             "report_stats": False,
             "suppress_key_server_warning": True,
@@ -258,6 +260,10 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
           name      = "SYNAPSE_REGISTRATION_SHARED_SECRET"
           valueFrom = aws_secretsmanager_secret.matrix_registration_shared_secret.arn
         },
+        {
+          name      = "SYNAPSE_FORM_SECRET"
+          valueFrom = aws_secretsmanager_secret.matrix_form_secret.arn
+        },
       ]
       mountPoints = [{
         sourceVolume  = "synapse-data"
@@ -265,7 +271,7 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
         readOnly      = false
       }]
       healthCheck = {
-        command     = ["CMD-SHELL", "curl -fsS http://127.0.0.1:8008/_matrix/client/versions >/dev/null || exit 1"]
+        command     = ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8008/_matrix/client/versions\", timeout=3).read()' || exit 1"]
         interval    = 30
         timeout     = 5
         retries     = 5
@@ -291,7 +297,7 @@ resource "aws_ecs_service" "matrix_synapse" {
   name            = "${local.name_prefix}-matrix-synapse"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.matrix_synapse[0].arn
-  desired_count   = var.enable_matrix_synapse ? var.matrix_synapse_desired_count : 0
+  desired_count   = var.enable_matrix_synapse && var.start_ecs_services ? var.matrix_synapse_desired_count : 0
   launch_type     = "FARGATE"
 
   enable_execute_command = var.enable_execute_command

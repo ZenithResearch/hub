@@ -39,7 +39,8 @@ AWS_PROFILE=zenith-hermes AWS_REGION=us-east-1 aws sts get-caller-identity --que
 for secret_id in \
   <name-prefix>/matrix/homeserver_signing_key \
   <name-prefix>/matrix/macaroon_secret_key \
-  <name-prefix>/matrix/registration_shared_secret; do
+  <name-prefix>/matrix/registration_shared_secret \
+  <name-prefix>/matrix/form_secret; do
   aws secretsmanager describe-secret --secret-id "$secret_id" --query '{Name:Name,LastChangedDate:LastChangedDate}'
 done
 ```
@@ -70,7 +71,7 @@ scripts/prod_terraform_cd.sh apply
 
 ```bash
 curl -fsS https://synapse.zenith-research.ca/_matrix/client/versions
-nc -vz synapse.zenith-research.ca 8448
+curl -fsS https://synapse.zenith-research.ca:8448/_matrix/federation/v1/version
 ```
 
 8. Record backup/restore evidence. Restore the RDS and EFS recovery points to isolated non-production targets. If either path is not exercised, list it under `unproven_restore_paths`; #67 cannot close with no tested database and media restore path.

@@ -34,6 +34,7 @@ data "aws_iam_policy_document" "execution_secrets" {
         aws_secretsmanager_secret.matrix_homeserver_signing_key.arn,
         aws_secretsmanager_secret.matrix_macaroon_secret_key.arn,
         aws_secretsmanager_secret.matrix_registration_shared_secret.arn,
+        aws_secretsmanager_secret.matrix_form_secret.arn,
       ] : [],
       var.elevenlabs_api_key_secret_arn != "" ? [var.elevenlabs_api_key_secret_arn] : []
     )

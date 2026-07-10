@@ -42,6 +42,19 @@ resource "aws_secretsmanager_secret_version" "matrix_registration_shared_secret"
   secret_string = var.matrix_registration_shared_secret
 }
 
+resource "aws_secretsmanager_secret" "matrix_form_secret" {
+  name        = "${local.name_prefix}/matrix/form_secret"
+  description = "Synapse form secret"
+  tags        = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "matrix_form_secret" {
+  count = var.matrix_form_secret != "" ? 1 : 0
+
+  secret_id     = aws_secretsmanager_secret.matrix_form_secret.id
+  secret_string = var.matrix_form_secret
+}
+
 resource "aws_secretsmanager_secret" "matrix_appservice_as_token" {
   name        = "${local.name_prefix}/matrix/appservice_as_token"
   description = "Synapse appservice as_token for Hub Matrix appservice"
