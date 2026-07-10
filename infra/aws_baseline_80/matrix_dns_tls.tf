@@ -143,14 +143,14 @@ resource "aws_lb_target_group" "matrix_client" {
 }
 
 resource "aws_lb_listener_certificate" "matrix_https" {
-  count = var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" && var.public_hub_domain_name != "" && var.enable_https_listener && var.enable_matrix_https_listener ? 1 : 0
+  count = var.public_matrix_domain_name != "" && var.public_hub_domain_name != "" && var.enable_https_listener && var.enable_matrix_https_listener ? 1 : 0
 
   listener_arn    = aws_lb_listener.https[0].arn
-  certificate_arn = aws_acm_certificate_validation.matrix[0].certificate_arn
+  certificate_arn = var.matrix_hosted_zone_id != "" ? aws_acm_certificate_validation.matrix[0].certificate_arn : aws_acm_certificate.matrix[0].arn
 }
 
 resource "aws_lb_listener_rule" "matrix_https_host" {
-  count = var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" && var.public_hub_domain_name != "" && var.enable_https_listener && var.enable_matrix_https_listener ? 1 : 0
+  count = var.public_matrix_domain_name != "" && var.public_hub_domain_name != "" && var.enable_https_listener && var.enable_matrix_https_listener ? 1 : 0
 
   listener_arn = aws_lb_listener.https[0].arn
   priority     = var.matrix_https_listener_rule_priority
@@ -168,13 +168,13 @@ resource "aws_lb_listener_rule" "matrix_https_host" {
 }
 
 resource "aws_lb_listener" "matrix_federation" {
-  count = var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" && var.enable_matrix_federation ? 1 : 0
+  count = var.public_matrix_domain_name != "" && var.enable_matrix_federation ? 1 : 0
 
   load_balancer_arn = aws_lb.gateway.arn
   port              = 8448
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.matrix[0].certificate_arn
+  certificate_arn   = var.matrix_hosted_zone_id != "" ? aws_acm_certificate_validation.matrix[0].certificate_arn : aws_acm_certificate.matrix[0].arn
 
   default_action {
     type             = "forward"

@@ -549,6 +549,12 @@ variable "matrix_synapse_desired_count" {
   default     = 1
 }
 
+variable "start_matrix_synapse_service" {
+  description = "Start the Synapse ECS task after infrastructure and secret versions are ready. Independent from existing service desired counts."
+  type        = bool
+  default     = false
+}
+
 variable "matrix_synapse_task_cpu" {
   description = "Fargate CPU units for Synapse."
   type        = number

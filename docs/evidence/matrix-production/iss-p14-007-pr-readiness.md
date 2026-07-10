@@ -25,6 +25,8 @@ git diff --check
 
 The PR #68 operator run proved AWS/backend access but correctly rejected apply because there was no live Synapse target. The follow-up PR supplies that target fail-closed by default. It still does not claim production apply acceptance: apply, smoke, and isolated restore evidence occur only after review/merge and an accepted operator plan.
 
+On 2026-07-10, AWS SSO/backend access was re-established and a targeted first-phase plan was generated from PR #86 with current live image tags, the live clients Postgres engine version, `enable_matrix_synapse=true`, `enable_matrix_backup=true`, and `start_matrix_synapse_service=false`. The reviewed plan contains 25 creates and two intended updates only: Matrix/Synapse compute, RDS, EFS, certificate, secret handles, backup resources, IAM, target group/security groups, plus the existing execution-secret policy and ALB egress. It contains no unrelated service rollout, database engine change, task-definition replacement, or service scale-down. The plan was not applied because PR #86 remains under review and unmerged.
+
 ## Non-claims preserved
 
 - No production deployment is claimed by this PR alone.

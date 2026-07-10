@@ -8,7 +8,7 @@ ISS-P14-007 unlocks P15 only after all of these are true:
 
 1. Hub source is `main` or an issue branch at/after `aa1bd8c8050aacab11182f669085d3c23c7a60ff`.
 2. The reviewed source includes `matrix_synapse_runtime.tf`, and the operator has populated the homeserver signing-key, macaroon, and controlled-registration secret handles without exposing values.
-3. A production Terraform plan with `enable_matrix_synapse=true` and `enable_matrix_backup=true` is captured, redacted, reviewed, and accepted before apply.
+3. A first-phase production Terraform plan with `enable_matrix_synapse=true`, `enable_matrix_backup=true`, and `start_matrix_synapse_service=false` is captured, redacted, reviewed, and accepted before apply. Existing Hub services remain running.
 4. Apply evidence records the changed resources and confirms unrelated live service tags/state were preserved.
 5. ECS target health plus public Matrix smoke verifies the production homeserver client path and federation port 8448.
 6. Backup/restore evidence lists both tested restore paths and restore paths that remain explicitly unproven.
@@ -45,7 +45,7 @@ for secret_id in \
 done
 ```
 
-5. Run the production Terraform plan with redacted output paths. Never commit raw tfvars or raw plan text if it includes sensitive values. The operator tfvars must explicitly set `enable_matrix_synapse=true`, `enable_matrix_backup=true`, the hosted-zone/listener/federation gates, and current service image tags.
+5. Run the production Terraform plan with redacted output paths. Never commit raw tfvars or raw plan text if it includes sensitive values. For the external DNS first phase, keep `matrix_hosted_zone_id` empty, `enable_matrix_https_listener=false`, `enable_matrix_federation=false`, and `start_matrix_synapse_service=false`; preserve current image tags for every unrelated service.
 
 ```bash
 export AWS_PROFILE=zenith-hermes
@@ -61,7 +61,7 @@ export STT_IMAGE_TAG=<current-live-stt-tag>
 scripts/prod_terraform_cd.sh plan
 ```
 
-6. Review the plan resource list. It must include the Synapse ECS task/service, private RDS instance, encrypted EFS/access point/mount targets, target-group attachment, and backup selection; it must not roll unrelated services backward. Only after acceptance, run apply:
+6. Review the plan resource list. It must include the Synapse ECS task/service at desired count zero, private RDS instance, encrypted EFS/access point/mount targets, target-group attachment, certificate, secret handles, and backup selection; it must not roll unrelated services backward. Only after acceptance, run apply. Add the emitted ACM validation CNAME and ALB host record at the external DNS provider, populate secret versions, then run a second accepted plan with `start_matrix_synapse_service=true`, `enable_matrix_https_listener=true`, and `enable_matrix_federation=true`.
 
 ```bash
 scripts/prod_terraform_cd.sh apply

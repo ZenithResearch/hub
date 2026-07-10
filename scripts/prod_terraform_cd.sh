@@ -13,6 +13,7 @@ cd "$ROOT"
 : "${TERRAFORM_PLAN_PATH:=${RUNNER_TEMP:-/tmp}/hub-prod.tfplan}"
 : "${TERRAFORM_PLAN_TEXT:=${RUNNER_TEMP:-/tmp}/hub-prod-plan.txt}"
 : "${PROD_TFVARS_PATH:?set PROD_TFVARS_PATH to the production terraform.tfvars path}"
+: "${IMAGE_TAG:?set IMAGE_TAG to the current shared runtime/queue/sandbox image tag unless intentionally rolling those services}"
 : "${GATEWAY_IMAGE_TAG:?set GATEWAY_IMAGE_TAG to the intended gateway-http image tag}"
 : "${EVENTBUS_IMAGE_TAG:?set EVENTBUS_IMAGE_TAG to the current live eventbus image tag unless intentionally rolling eventbus}"
 : "${CASES_IMAGE_TAG:?set CASES_IMAGE_TAG to the current live cases image tag unless intentionally rolling cases}"
@@ -44,6 +45,7 @@ terraform_plan() {
   terraform -chdir="$TERRAFORM_DIR" plan -no-color -input=false \
     -out="$TERRAFORM_PLAN_PATH" \
     -var-file="$PROD_TFVARS_PATH" \
+    -var="image_tag=$IMAGE_TAG" \
     -var="gateway_image_tag=$GATEWAY_IMAGE_TAG" \
     -var="eventbus_image_tag=$EVENTBUS_IMAGE_TAG" \
     -var="cases_image_tag=$CASES_IMAGE_TAG" \

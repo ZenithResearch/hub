@@ -65,6 +65,7 @@ qdrant_url = "https://your-qdrant-cloud-url"
 # Matrix/Synapse stays fail-closed until the reviewed runtime plan is accepted
 # and the existing Secrets Manager handles have operator-populated values.
 enable_matrix_synapse = false
+start_matrix_synapse_service = false
 enable_matrix_backup  = false
 matrix_synapse_image  = "matrixdotorg/synapse@sha256:3036ec25dfb5fcc5120942465788c1e1f2bb3671e28b04d7b3a1db4400ac84f4"
 

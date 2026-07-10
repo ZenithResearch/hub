@@ -67,7 +67,8 @@ def test_synapse_runtime_fails_closed_until_enabled_and_secrets_are_populated():
 
     assert 'count = var.enable_matrix_synapse ? 1 : 0' in runtime
     assert 'default     = false' in variables
-    assert 'desired_count   = var.enable_matrix_synapse && var.start_ecs_services ? var.matrix_synapse_desired_count : 0' in runtime
+    assert 'var.enable_matrix_synapse && var.start_ecs_services && var.start_matrix_synapse_service' in runtime
+    assert 'variable "start_matrix_synapse_service"' in variables
     assert 'depends_on = [' in runtime
     assert 'aws_efs_mount_target.matrix_synapse' in runtime
 

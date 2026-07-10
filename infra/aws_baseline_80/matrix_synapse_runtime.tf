@@ -297,7 +297,7 @@ resource "aws_ecs_service" "matrix_synapse" {
   name            = "${local.name_prefix}-matrix-synapse"
   cluster         = aws_ecs_cluster.this.id
   task_definition = aws_ecs_task_definition.matrix_synapse[0].arn
-  desired_count   = var.enable_matrix_synapse && var.start_ecs_services ? var.matrix_synapse_desired_count : 0
+  desired_count   = var.enable_matrix_synapse && var.start_ecs_services && var.start_matrix_synapse_service ? var.matrix_synapse_desired_count : 0
   launch_type     = "FARGATE"
 
   enable_execute_command = var.enable_execute_command

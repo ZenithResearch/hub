@@ -187,3 +187,19 @@ output "matrix_synapse_media_file_system_id" {
   description = "Encrypted EFS file-system ID for Synapse media/config state."
   value       = var.enable_matrix_synapse ? aws_efs_file_system.matrix_synapse[0].id : null
 }
+
+output "matrix_certificate_dns_validation_records" {
+  description = "ACM DNS validation records for the Matrix certificate. Add these at the external DNS provider when matrix_hosted_zone_id is empty."
+  value = var.public_matrix_domain_name != "" ? [
+    for option in aws_acm_certificate.matrix[0].domain_validation_options : {
+      name  = option.resource_record_name
+      type  = option.resource_record_type
+      value = option.resource_record_value
+    }
+  ] : []
+}
+
+output "matrix_alb_dns_name" {
+  description = "ALB DNS target for the external synapse.zenith-research.ca record."
+  value       = aws_lb.gateway.dns_name
+}

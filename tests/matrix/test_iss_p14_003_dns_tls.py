@@ -29,17 +29,24 @@ def test_matrix_tls_contract_reuses_existing_https_listener_without_duplicate_44
     assert 'port              = 8448' in dns_tls
 
 
-def test_matrix_tls_listener_counts_require_validated_certificate_and_network_path():
+def test_matrix_tls_listener_supports_external_dns_validation_and_network_path():
     dns_tls = read("infra/aws_baseline_80/matrix_dns_tls.tf")
     security_groups = read("infra/aws_baseline_80/security_groups.tf")
-    assert 'var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != ""' in dns_tls
+    assert 'count = var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" ? 1 : 0' in dns_tls
     assert 'var.enable_matrix_https_listener' in dns_tls
-    assert 'var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" && var.enable_matrix_federation' in dns_tls
-    assert 'certificate_arn   = aws_acm_certificate_validation.matrix[0].certificate_arn' in dns_tls
+    assert 'var.public_matrix_domain_name != "" && var.enable_matrix_federation' in dns_tls
+    assert 'var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" && var.enable_matrix_federation' not in dns_tls
+    assert 'var.matrix_hosted_zone_id != "" ? aws_acm_certificate_validation.matrix[0].certificate_arn : aws_acm_certificate.matrix[0].arn' in dns_tls
     assert 'matrix_federation_8448_explicit' in security_groups
     assert 'from_port        = 8448' in security_groups
     assert 'alb_to_matrix_client_http' in security_groups
     assert 'from_port   = 8008' in security_groups
+
+
+def test_matrix_certificate_and_alb_dns_outputs_support_external_dns_operator():
+    outputs = read("infra/aws_baseline_80/outputs.tf")
+    assert 'output "matrix_certificate_dns_validation_records"' in outputs
+    assert 'output "matrix_alb_dns_name"' in outputs
 
 def test_matrix_tls_runbook_records_smoke_commands_and_no_production_overclaim():
     doc = read("docs/operations/matrix-dns-tls.md")
