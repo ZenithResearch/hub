@@ -62,6 +62,12 @@ qdrant_url = "https://your-qdrant-cloud-url"
 # qdrant_api_key = "REPLACE_ME"
 # review_access_admin_token = "REPLACE_ME_OPERATOR_TOKEN"
 
+# Matrix/Synapse stays fail-closed until the reviewed runtime plan is accepted
+# and the existing Secrets Manager handles have operator-populated values.
+enable_matrix_synapse = false
+enable_matrix_backup  = false
+matrix_synapse_image  = "matrixdotorg/synapse:v1.132.0"
+
 # Include every browser origin that will call Review SDK endpoints directly.
 # Gallery production supports both apex and www origins. Local review/admin
 # surfaces commonly use localhost:3000 and localhost:5173; if these are omitted,

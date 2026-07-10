@@ -173,57 +173,62 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
       entryPoint = ["/bin/sh", "-ec"]
       command = [<<-SCRIPT
         umask 077
-        printf '%s\n' "$${SYNAPSE_SIGNING_KEY}" > /data/$${SYNAPSE_SERVER_NAME}.signing.key
-        cat > /data/homeserver.yaml <<YAML
-        server_name: "$${SYNAPSE_SERVER_NAME}"
-        public_baseurl: "https://$${SYNAPSE_SERVER_NAME}/"
-        pid_file: /data/homeserver.pid
-        web_client_location: null
-        listeners:
-          - port: 8008
-            tls: false
-            type: http
-            x_forwarded: true
-            bind_addresses: ['0.0.0.0']
-            resources:
-              - names: [client, federation]
-                compress: false
-        database:
-          name: psycopg2
-          args:
-            user: synapse
-            password: "$${SYNAPSE_DB_PASSWORD}"
-            database: synapse
-            host: "$${SYNAPSE_DB_HOST}"
-            port: 5432
-            sslmode: require
-            cp_min: 1
-            cp_max: 5
-        log_config: /data/log.config
-        media_store_path: /data/media_store
-        signing_key_path: /data/$${SYNAPSE_SERVER_NAME}.signing.key
-        macaroon_secret_key: "$${SYNAPSE_MACAROON_SECRET_KEY}"
-        registration_shared_secret: "$${SYNAPSE_REGISTRATION_SHARED_SECRET}"
-        enable_registration: false
-        report_stats: false
-        suppress_key_server_warning: true
-        trusted_key_servers:
-          - server_name: matrix.org
-        YAML
-        cat > /data/log.config <<'YAML'
-        version: 1
-        formatters:
-          precise:
-            format: '%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(message)s'
-        handlers:
-          console:
-            class: logging.StreamHandler
-            formatter: precise
-        root:
-          level: INFO
-          handlers: [console]
-        disable_existing_loggers: false
-        YAML
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        import yaml
+
+        server_name = os.environ["SYNAPSE_SERVER_NAME"]
+        data_dir = Path("/data")
+        signing_key_path = data_dir / f"{server_name}.signing.key"
+        signing_key_path.write_text(os.environ["SYNAPSE_SIGNING_KEY"].rstrip("\n") + "\n")
+
+        homeserver = {
+            "server_name": server_name,
+            "public_baseurl": f"https://{server_name}/",
+            "pid_file": "/data/homeserver.pid",
+            "listeners": [{
+                "port": 8008,
+                "tls": False,
+                "type": "http",
+                "x_forwarded": True,
+                "bind_addresses": ["0.0.0.0"],
+                "resources": [{"names": ["client", "federation"], "compress": False}],
+            }],
+            "database": {
+                "name": "psycopg2",
+                "args": {
+                    "user": "synapse",
+                    "password": os.environ["SYNAPSE_DB_PASSWORD"],
+                    "database": "synapse",
+                    "host": os.environ["SYNAPSE_DB_HOST"],
+                    "port": 5432,
+                    "sslmode": "require",
+                    "cp_min": 1,
+                    "cp_max": 5,
+                },
+            },
+            "log_config": "/data/log.config",
+            "media_store_path": "/data/media_store",
+            "signing_key_path": str(signing_key_path),
+            "macaroon_secret_key": os.environ["SYNAPSE_MACAROON_SECRET_KEY"],
+            "registration_shared_secret": os.environ["SYNAPSE_REGISTRATION_SHARED_SECRET"],
+            "enable_registration": False,
+            "report_stats": False,
+            "suppress_key_server_warning": True,
+            "trusted_key_servers": [{"server_name": "matrix.org"}],
+        }
+        (data_dir / "homeserver.yaml").write_text(yaml.safe_dump(homeserver, sort_keys=False))
+
+        log_config = {
+            "version": 1,
+            "formatters": {"precise": {"format": "%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(message)s"}},
+            "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "precise"}},
+            "root": {"level": "INFO", "handlers": ["console"]},
+            "disable_existing_loggers": False,
+        }
+        (data_dir / "log.config").write_text(yaml.safe_dump(log_config, sort_keys=False))
+        PY
         exec /start.py run
       SCRIPT
       ]

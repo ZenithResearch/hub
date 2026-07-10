@@ -172,3 +172,18 @@ output "llama_server_model_name" {
   description = "Configured llama-server GGUF model filename."
   value       = var.llama_server_model_name
 }
+
+output "matrix_synapse_service_name" {
+  description = "ECS service name for the production Synapse target."
+  value       = var.enable_matrix_synapse ? aws_ecs_service.matrix_synapse[0].name : null
+}
+
+output "matrix_synapse_postgres_endpoint" {
+  description = "Private RDS endpoint for Synapse Postgres."
+  value       = var.enable_matrix_synapse ? aws_db_instance.matrix_synapse[0].endpoint : null
+}
+
+output "matrix_synapse_media_file_system_id" {
+  description = "Encrypted EFS file-system ID for Synapse media/config state."
+  value       = var.enable_matrix_synapse ? aws_efs_file_system.matrix_synapse[0].id : null
+}

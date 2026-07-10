@@ -1,23 +1,25 @@
 # ISS-P14-007: Production plan/apply and smoke evidence for Synapse core
 
-> Issue = PR boundary. Tasks below = commit boundaries inside this PR. This PR creates the production-evidence gate and verifies its safety contract. It does not by itself mutate production; production apply requires an operator-authenticated run and accepted plan.
+> Issue #67 remains the operational completion gate. PR #68 created the evidence validator; the current follow-up PR adds the missing production-owned Synapse compute/data target. Neither PR alone unlocks P15: production apply, public smoke, and restore evidence still require an operator-authenticated post-merge run.
 
 ## PR boundary
 
 - **PR scope:** ISS-P14-007: Production plan/apply and smoke evidence for Synapse core
-- **Suggested branch:** `issue/iss-p14-007-production-plan-apply-smoke-evidence`
-- **Suggested PR title:** `ISS-P14-007: Production plan/apply and smoke evidence for Synapse core`
+- **Current branch:** `issue/67-live-synapse-target`
+- **Current PR title:** `ISS-P14-007: Add the production Synapse target`
 - **Primary repo:** `ZenithResearch/hub`
 - **GitHub issue:** https://github.com/ZenithResearch/hub/issues/67
 - **Source base:** Hub `main` at or after `aa1bd8c8050aacab11182f669085d3c23c7a60ff`
 
 ## Objective
 
-Create an auditable, redacted, test-backed production evidence gate for Synapse core before P15 appservice smokes proceed. The gate must separate plan, apply, public Matrix smoke, backup/restore evidence, and downstream unlock state.
+Provide both the auditable evidence gate and a concrete, private production target for Synapse before P15 appservice smokes proceed. The target is a single-worker ECS/Fargate service backed by private RDS Postgres and encrypted EFS media/config state, attached to the existing Matrix ALB target group.
 
 ## Current preflight state
 
 - Source-control gate is complete: P14 PR #57/#58/#59 landed, and Phase 0 cleanup landed via Hub #65/#66, ZenithOS #6/#8, and zenith-hub #6.
+- PR #68 merged the redacted evidence validator and operator runbook. Its operator plan correctly stopped because the plan contained no live Synapse compute/data target.
+- The follow-up branch adds that missing target behind `enable_matrix_synapse = false`; required secret handles and an accepted operator plan are prerequisites to enabling it.
 - Production evidence is not complete until an operator-authenticated run records an accepted plan, apply result, public smoke, and backup/restore scope.
 - AWS SSO/operator authentication is required for the live plan/apply steps; no committed file may contain tfvars, tokens, or raw Terraform output that includes sensitive values.
 
@@ -50,6 +52,8 @@ The evidence artifact is JSON, generated/validated by `scripts/matrix_production
 python3 scripts/matrix_production_evidence_check.py --help
 python3 scripts/matrix_production_evidence_check.py validate docs/evidence/matrix-production/iss-p14-007-template.json
 python3 -m pytest tests/matrix/test_iss_p14_007_production_evidence.py -q
+python3 -m pytest tests/matrix/test_iss_p14_007_live_synapse_target.py -q
+terraform -chdir=infra/aws_baseline_80 validate -no-color
 git diff --check
 ```
 
@@ -85,4 +89,4 @@ The PR branch is intentionally task-per-commit:
 7. `045b7d8` — downstream P15 gate/checklist handoff.
 8. Final commit — issue/PR sync and non-claim preservation.
 
-Live operator plan/apply evidence remains gated on AWS SSO/operator approval and must be recorded through the validated evidence artifact before P15 is treated as production-unlocked.
+PR #68 completed the evidence-gate commits above. The follow-up target PR uses separate commits for runtime infrastructure/tests, operator surfaces, and final verification. Live operator plan/apply evidence remains a post-merge gate and must be recorded through the validated evidence artifact before P15 is treated as production-unlocked.

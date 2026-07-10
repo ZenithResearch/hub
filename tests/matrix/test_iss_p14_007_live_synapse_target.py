@@ -68,3 +68,25 @@ def test_synapse_runtime_fails_closed_until_enabled_and_secrets_are_populated():
     assert 'desired_count   = var.enable_matrix_synapse ? var.matrix_synapse_desired_count : 0' in runtime
     assert 'depends_on = [' in runtime
     assert 'aws_efs_mount_target.matrix_synapse' in runtime
+
+
+def test_synapse_runtime_exposes_operator_outputs_and_example_inputs():
+    outputs = read("infra/aws_baseline_80/outputs.tf")
+    example = read("infra/aws_baseline_80/terraform.tfvars.example")
+
+    assert 'output "matrix_synapse_service_name"' in outputs
+    assert 'output "matrix_synapse_postgres_endpoint"' in outputs
+    assert 'output "matrix_synapse_media_file_system_id"' in outputs
+    assert 'enable_matrix_synapse = false' in example
+    assert 'enable_matrix_backup  = false' in example
+    assert 'matrix_synapse_image' in example
+
+
+def test_synapse_config_serializes_secret_values_without_yaml_interpolation():
+    runtime = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+
+    assert "yaml.safe_dump" in runtime
+    assert 'os.environ["SYNAPSE_DB_PASSWORD"]' in runtime
+    assert 'os.environ["SYNAPSE_MACAROON_SECRET_KEY"]' in runtime
+    assert 'password: "$${SYNAPSE_DB_PASSWORD}"' not in runtime
+    assert 'macaroon_secret_key: "$${SYNAPSE_MACAROON_SECRET_KEY}"' not in runtime

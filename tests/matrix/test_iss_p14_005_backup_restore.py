@@ -16,7 +16,10 @@ def test_matrix_backup_plan_declares_vault_schedule_retention_and_selection():
     assert 'schedule          = var.matrix_backup_schedule' in backup
     assert 'delete_after = var.matrix_backup_retention_days' in backup
     assert 'resource "aws_backup_selection" "matrix"' in backup
-    assert 'resources    = var.matrix_backup_resource_arns' in backup
+    assert 'resources = concat(' in backup
+    assert 'var.matrix_backup_resource_arns' in backup
+    assert 'aws_db_instance.matrix_synapse[0].arn' in backup
+    assert 'aws_efs_file_system.matrix_synapse[0].arn' in backup
 
 def test_matrix_restore_runbook_names_state_classes_and_unproven_restore_boundary():
     doc = read("docs/operations/matrix-backup-restore.md")
