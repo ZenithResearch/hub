@@ -531,6 +531,72 @@ variable "enable_matrix_backup" {
   default     = false
 }
 
+variable "enable_matrix_synapse" {
+  description = "Create and run the production Synapse ECS/RDS/EFS target. Keep false until required Matrix secret values exist and an operator accepts the plan."
+  type        = bool
+  default     = false
+}
+
+variable "matrix_synapse_image" {
+  description = "Pinned upstream Synapse container image. Update only through a reviewed production change."
+  type        = string
+  default     = "matrixdotorg/synapse:v1.132.0"
+}
+
+variable "matrix_synapse_desired_count" {
+  description = "Desired Synapse task count when enable_matrix_synapse is true. The initial production topology is intentionally single-worker."
+  type        = number
+  default     = 1
+}
+
+variable "matrix_synapse_task_cpu" {
+  description = "Fargate CPU units for Synapse."
+  type        = number
+  default     = 512
+}
+
+variable "matrix_synapse_task_memory" {
+  description = "Fargate memory in MiB for Synapse."
+  type        = number
+  default     = 1024
+}
+
+variable "matrix_synapse_postgres_instance_class" {
+  description = "RDS instance class for Synapse Postgres."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "matrix_synapse_postgres_engine_version" {
+  description = "Postgres engine version for Synapse RDS."
+  type        = string
+  default     = "16.6"
+}
+
+variable "matrix_synapse_postgres_allocated_storage_gb" {
+  description = "Initial allocated storage in GiB for Synapse RDS."
+  type        = number
+  default     = 20
+}
+
+variable "matrix_synapse_postgres_max_allocated_storage_gb" {
+  description = "Maximum autoscaled storage in GiB for Synapse RDS."
+  type        = number
+  default     = 100
+}
+
+variable "matrix_synapse_backup_retention_days" {
+  description = "Automated RDS backup retention for Synapse."
+  type        = number
+  default     = 7
+}
+
+variable "matrix_synapse_deletion_protection" {
+  description = "Protect the production Synapse RDS instance from deletion."
+  type        = bool
+  default     = true
+}
+
 variable "matrix_backup_schedule" {
   description = "AWS Backup cron expression for Matrix/Synapse state backups."
   type        = string

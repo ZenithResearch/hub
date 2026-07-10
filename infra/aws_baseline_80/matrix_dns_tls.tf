@@ -96,6 +96,38 @@ resource "aws_security_group" "matrix" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  egress {
+    description = "private_postgres"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    description = "private_efs"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    description = "vpc_dns_udp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    description = "vpc_dns_tcp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
   tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-sg" })
 }
 
@@ -105,7 +137,7 @@ resource "aws_lb_target_group" "matrix_client" {
   name        = "${local.name_prefix}-matrix-client"
   port        = 8008
   protocol    = "HTTP"
-  target_type = "instance"
+  target_type = "ip"
   vpc_id      = aws_vpc.this.id
 
   health_check {

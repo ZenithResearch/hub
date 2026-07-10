@@ -1,0 +1,70 @@
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def read(relative_path: str) -> str:
+    return (ROOT / relative_path).read_text()
+
+
+def test_synapse_runtime_owns_compute_database_and_media_state():
+    runtime = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+    variables = read("infra/aws_baseline_80/variables.tf")
+
+    assert 'resource "aws_ecs_task_definition" "matrix_synapse"' in runtime
+    assert 'resource "aws_ecs_service" "matrix_synapse"' in runtime
+    assert 'resource "aws_db_instance" "matrix_synapse"' in runtime
+    assert 'resource "aws_efs_file_system" "matrix_synapse"' in runtime
+    assert 'resource "aws_efs_access_point" "matrix_synapse"' in runtime
+    assert 'resource "aws_efs_mount_target" "matrix_synapse"' in runtime
+    assert 'variable "enable_matrix_synapse"' in variables
+    assert 'variable "matrix_synapse_image"' in variables
+    assert 'variable "matrix_synapse_desired_count"' in variables
+
+
+def test_synapse_runtime_is_private_and_attached_to_the_matrix_target_group():
+    runtime = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+    dns_tls = read("infra/aws_baseline_80/matrix_dns_tls.tf")
+
+    assert 'assign_public_ip = false' in runtime
+    assert 'subnets          = aws_subnet.private[*].id' in runtime
+    assert 'security_groups  = [aws_security_group.matrix.id]' in runtime
+    assert 'target_group_arn = aws_lb_target_group.matrix_client[0].arn' in runtime
+    assert 'container_port   = 8008' in runtime
+    assert 'target_type = "ip"' in dns_tls
+
+
+def test_synapse_runtime_injects_secret_handles_without_committed_secret_values():
+    runtime = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+    iam = read("infra/aws_baseline_80/iam.tf")
+
+    assert 'aws_db_instance.matrix_synapse[0].master_user_secret[0].secret_arn' in runtime
+    assert 'aws_secretsmanager_secret.matrix_homeserver_signing_key.arn' in runtime
+    assert 'aws_secretsmanager_secret.matrix_macaroon_secret_key.arn' in runtime
+    assert 'aws_secretsmanager_secret.matrix_registration_shared_secret.arn' in runtime
+    assert 'aws_db_instance.matrix_synapse[0].master_user_secret[0].secret_arn' in iam
+    assert 'aws_secretsmanager_secret.matrix_homeserver_signing_key.arn' in iam
+    assert 'secret_string' not in runtime
+
+
+def test_synapse_database_and_media_have_deletion_and_backup_guards():
+    runtime = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+    backup = read("infra/aws_baseline_80/matrix_backup.tf")
+
+    assert 'storage_encrypted     = true' in runtime
+    assert 'deletion_protection       = var.matrix_synapse_deletion_protection' in runtime
+    assert 'skip_final_snapshot       = false' in runtime
+    assert 'prevent_destroy = true' in runtime
+    assert 'aws_db_instance.matrix_synapse[0].arn' in backup
+    assert 'aws_efs_file_system.matrix_synapse[0].arn' in backup
+
+
+def test_synapse_runtime_fails_closed_until_enabled_and_secrets_are_populated():
+    runtime = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+    variables = read("infra/aws_baseline_80/variables.tf")
+
+    assert 'count = var.enable_matrix_synapse ? 1 : 0' in runtime
+    assert 'default     = false' in variables
+    assert 'desired_count   = var.enable_matrix_synapse ? var.matrix_synapse_desired_count : 0' in runtime
+    assert 'depends_on = [' in runtime
+    assert 'aws_efs_mount_target.matrix_synapse' in runtime
