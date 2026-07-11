@@ -43,7 +43,6 @@ resource "aws_db_instance" "matrix_synapse" {
   storage_type          = "gp3"
   storage_encrypted     = true
 
-  db_name  = "synapse"
   username = "synapse"
 
   manage_master_user_password = true
@@ -60,6 +59,9 @@ resource "aws_db_instance" "matrix_synapse" {
 
   lifecycle {
     prevent_destroy = true
+    # Preserve the pre-bootstrap production state without forcing replacement.
+    # Fresh instances omit db_name so bootstrap can create a C/C database.
+    ignore_changes = [db_name]
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-synapse-db" })

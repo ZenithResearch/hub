@@ -64,6 +64,8 @@ def test_synapse_database_and_media_have_deletion_and_backup_guards():
     assert 'sslrootcert": "/data/aws-rds-global-bundle.pem"' in runtime
     assert 'matrix_rds_ca_bundle_sha256' in runtime
     assert 'default     = "16.13"' in variables
+    assert 'db_name  = "synapse"' not in runtime
+    assert "ignore_changes = [db_name]" in runtime
     assert "SELECT datcollate, datctype FROM pg_database" in runtime
     assert "DROP DATABASE synapse" not in runtime
     assert "pg_terminate_backend" not in runtime
