@@ -159,7 +159,7 @@ resource "aws_lb_listener_certificate" "matrix_https" {
 }
 
 resource "aws_lb_listener_rule" "matrix_https_host" {
-  count = var.public_matrix_domain_name != "" && var.public_hub_domain_name != "" && var.enable_https_listener && var.enable_matrix_https_listener ? 1 : 0
+  count = var.enable_matrix_synapse && var.public_matrix_domain_name != "" && var.public_hub_domain_name != "" && var.enable_https_listener ? 1 : 0
 
   listener_arn = aws_lb_listener.https[0].arn
   priority     = var.matrix_https_listener_rule_priority

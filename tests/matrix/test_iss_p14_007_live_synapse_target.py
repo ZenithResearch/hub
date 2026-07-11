@@ -51,6 +51,7 @@ def test_synapse_runtime_injects_secret_handles_without_committed_secret_values(
 def test_synapse_database_and_media_have_deletion_and_backup_guards():
     runtime = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
     backup = read("infra/aws_baseline_80/matrix_backup.tf")
+    variables = read("infra/aws_baseline_80/variables.tf")
 
     assert 'storage_encrypted     = true' in runtime
     assert 'deletion_protection       = var.matrix_synapse_deletion_protection' in runtime
@@ -62,6 +63,7 @@ def test_synapse_database_and_media_have_deletion_and_backup_guards():
     assert 'sslmode": "verify-full"' in runtime
     assert 'sslrootcert": "/data/aws-rds-global-bundle.pem"' in runtime
     assert 'matrix_rds_ca_bundle_sha256' in runtime
+    assert 'default     = "16.13"' in variables
 
 
 def test_synapse_runtime_fails_closed_until_enabled_and_secrets_are_populated():

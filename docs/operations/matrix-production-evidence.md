@@ -8,7 +8,7 @@ ISS-P14-007 unlocks P15 only after all of these are true:
 
 1. Hub source is `main` or an issue branch at/after `aa1bd8c8050aacab11182f669085d3c23c7a60ff`.
 2. The reviewed source includes `matrix_synapse_runtime.tf`, and the operator has populated the homeserver signing-key, macaroon, and controlled-registration secret handles without exposing values.
-3. A first-phase production Terraform plan with `enable_matrix_synapse=true`, `enable_matrix_backup=true`, and `start_matrix_synapse_service=false` is captured, redacted, reviewed, and accepted before apply. Existing Hub services remain running.
+3. A first-phase production Terraform plan with `enable_matrix_synapse=true`, `enable_matrix_backup=true`, and `start_matrix_synapse_service=false` is captured, redacted, reviewed, and accepted before apply. Existing Hub services remain running. The existing HTTPS listener receives the Matrix host-routing rule in Phase 1 so ECS can associate the target group while the separate Matrix certificate attachment remains disabled until ACM is issued.
 4. Apply evidence records the changed resources and confirms unrelated live service tags/state were preserved.
 5. ECS target health plus public Matrix smoke verifies the production homeserver client path and federation port 8448.
 6. Backup/restore evidence lists both tested restore paths and restore paths that remain explicitly unproven.

@@ -601,7 +601,7 @@ variable "matrix_alarm_email" {
 variable "matrix_synapse_postgres_engine_version" {
   description = "Postgres engine version for Synapse RDS."
   type        = string
-  default     = "16.6"
+  default     = "16.13"
 }
 
 variable "matrix_synapse_postgres_multi_az" {
