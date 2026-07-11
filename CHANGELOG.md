@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Documented the digest-pinned Synapse landing rollout and issue boundary — keeps publication, Synapse-only deployment, API/federation smoke, browser QA, and rollback evidence explicit without claiming deployment.
+- Added dynamic Synapse static-path installation and image-byte verification — avoids Python site-packages assumptions and proves the hardened image contains the reviewed landing-page bytes.
+- Added the self-contained Zenith Synapse landing page and source contract tests — gives visitors a sparse, accessible route to ZenithOS without adding scripts, tracking, remote assets, or authority claims.
 - Documented the Matrix administrator operator runbook — gives operators a secret-safe preflight, first-login password-change, Keychain cleanup, and account-verification procedure.
 - Added controlled Matrix administrator provisioning — lets trusted operators create only explicit new Synapse admins while keeping generated credentials in Keychain and registration authority out of argv and output.
 - Added Matrix admin provisioning contract tests — locks HMAC, temporary-password, fail-closed endpoint, safe-output, and post-registration Keychain behavior before implementation.

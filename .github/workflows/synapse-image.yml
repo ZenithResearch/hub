@@ -47,6 +47,12 @@ jobs:
           test "$(docker image inspect hardened-synapse:verify --format '{{.Config.User}}')" = "991:991"
           docker run --rm --entrypoint python hardened-synapse:verify -c 'import cryptography, twisted, yaml, psycopg2; print("runtime_dependencies_ok")'
           docker run --rm --entrypoint /bin/sh hardened-synapse:verify -ec 'test ! -e /usr/sbin/gosu && test -x /start.py'
+      - name: Verify installed static page bytes
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(sha256sum infra/matrix/synapse/static/index.html | cut -d ' ' -f 1)"
+          INSTALLED_SHA="$(docker run --rm --entrypoint python hardened-synapse:verify -c 'import hashlib, pathlib, synapse; target = pathlib.Path(synapse.__file__).resolve().parent / "static/index.html"; print(hashlib.sha256(target.read_bytes()).hexdigest())')"
+          test "$SOURCE_SHA" = "$INSTALLED_SHA"
       - name: Fail on fixable high or critical vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
