@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added Matrix admin provisioning contract tests — locks HMAC, temporary-password, fail-closed endpoint, safe-output, and post-registration Keychain behavior before implementation.
 - Added EventBridge/Lambda automation for clients Postgres secret rotation — forces Gateway to restart after RDS-managed password rotation so ECS-injected database credentials do not go stale.
 - Recorded ISS-P14-007 PR readiness evidence — preserves verification commands and the operator-auth limitation without overclaiming production apply.
 - Added the Matrix production evidence runbook — gives operators exact redaction, plan/apply, smoke, and backup/restore steps for completing ISS-P14-007 safely.
