@@ -199,26 +199,19 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
             "port": 5432,
             "sslmode": "verify-full",
             "sslrootcert": str(ca_path),
+            "connect_timeout": 15,
+            "options": "-c statement_timeout=30000",
         }
         with psycopg2.connect(database="postgres", **database_connect) as admin:
             admin.autocommit = True
             with admin.cursor() as cursor:
                 cursor.execute("SELECT datcollate, datctype FROM pg_database WHERE datname = 'synapse'")
                 locale = cursor.fetchone()
-            if locale != ("C", "C"):
-                has_user_tables = False
-                if locale is not None:
-                    with psycopg2.connect(database="synapse", **database_connect) as existing:
-                        with existing.cursor() as cursor:
-                            cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_stat_user_tables)")
-                            has_user_tables = cursor.fetchone()[0]
-                if has_user_tables:
-                    raise SystemExit("existing Synapse database has an unsafe non-C locale")
+            if locale is None:
                 with admin.cursor() as cursor:
-                    if locale is not None:
-                        cursor.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'synapse' AND pid <> pg_backend_pid()")
-                        cursor.execute("DROP DATABASE synapse")
                     cursor.execute("CREATE DATABASE synapse WITH TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'")
+            elif locale != ("C", "C"):
+                raise SystemExit("existing Synapse database has an unsafe non-C locale; explicit migration is required")
 
         signing_key_path = data_dir / f"{server_name}.signing.key"
         signing_key_path.write_text(os.environ["SYNAPSE_SIGNING_KEY"].rstrip("\n") + "\n")
