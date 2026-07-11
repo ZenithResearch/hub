@@ -48,7 +48,7 @@ jobs:
           docker run --rm --entrypoint python hardened-synapse:verify -c 'import cryptography, twisted, yaml, psycopg2; print("runtime_dependencies_ok")'
           docker run --rm --entrypoint /bin/sh hardened-synapse:verify -ec 'test ! -e /usr/sbin/gosu && test -x /start.py'
       - name: Fail on fixable high or critical vulnerabilities
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: hardened-synapse:verify
           scanners: vuln
