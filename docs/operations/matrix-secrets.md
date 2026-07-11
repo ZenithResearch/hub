@@ -19,3 +19,5 @@ Generated appservice registration files are runtime artifacts. They may contain 
 `terraform.tfvars` examples may show placeholder wiring, but `terraform.tfvars` must not contain raw production Matrix secrets.
 
 Do not print raw Matrix, appservice, registration, macaroon, or signing-key material in logs, PR bodies, screenshots, or daily notes.
+
+For controlled administrator creation, follow [`matrix-admin-provisioning.md`](matrix-admin-provisioning.md). The operator script reads the registration secret directly from AWS Secrets Manager and never accepts its value as a command-line option.
