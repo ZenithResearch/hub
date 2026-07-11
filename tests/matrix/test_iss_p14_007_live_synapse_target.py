@@ -64,6 +64,16 @@ def test_synapse_database_and_media_have_deletion_and_backup_guards():
     assert 'sslrootcert": "/data/aws-rds-global-bundle.pem"' in runtime
     assert 'matrix_rds_ca_bundle_sha256' in runtime
     assert 'default     = "16.13"' in variables
+    assert 'db_name  = "synapse"' not in runtime
+    assert "ignore_changes = [db_name]" in runtime
+    assert "SELECT datcollate, datctype FROM pg_database" in runtime
+    assert "DROP DATABASE synapse" not in runtime
+    assert "pg_terminate_backend" not in runtime
+    assert "explicit migration is required" in runtime
+    assert "LC_COLLATE 'C' LC_CTYPE 'C'" in runtime
+    assert '"connect_timeout": 15' in runtime
+    assert '"options": "-c statement_timeout=30000"' in runtime
+    assert "allow_unsafe_locale" not in runtime
 
 
 def test_synapse_runtime_fails_closed_until_enabled_and_secrets_are_populated():

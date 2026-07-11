@@ -43,7 +43,6 @@ resource "aws_db_instance" "matrix_synapse" {
   storage_type          = "gp3"
   storage_encrypted     = true
 
-  db_name  = "synapse"
   username = "synapse"
 
   manage_master_user_password = true
@@ -60,6 +59,9 @@ resource "aws_db_instance" "matrix_synapse" {
 
   lifecycle {
     prevent_destroy = true
+    # Preserve the pre-bootstrap production state without forcing replacement.
+    # Fresh instances omit db_name so bootstrap can create a C/C database.
+    ignore_changes = [db_name]
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-synapse-db" })
@@ -180,6 +182,7 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
         import hashlib
         import urllib.request
         from pathlib import Path
+        import psycopg2
         import yaml
 
         server_name = os.environ["SYNAPSE_SERVER_NAME"]
@@ -190,6 +193,28 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
         if ca_digest != os.environ["SYNAPSE_RDS_CA_BUNDLE_SHA256"]:
             raise SystemExit("RDS CA bundle checksum mismatch")
         ca_path.write_bytes(ca_bytes)
+
+        database_connect = {
+            "user": "synapse",
+            "password": os.environ["SYNAPSE_DB_PASSWORD"],
+            "host": os.environ["SYNAPSE_DB_HOST"],
+            "port": 5432,
+            "sslmode": "verify-full",
+            "sslrootcert": str(ca_path),
+            "connect_timeout": 15,
+            "options": "-c statement_timeout=30000",
+        }
+        with psycopg2.connect(database="postgres", **database_connect) as admin:
+            admin.autocommit = True
+            with admin.cursor() as cursor:
+                cursor.execute("SELECT datcollate, datctype FROM pg_database WHERE datname = 'synapse'")
+                locale = cursor.fetchone()
+            if locale is None:
+                with admin.cursor() as cursor:
+                    cursor.execute("CREATE DATABASE synapse WITH TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'")
+            elif locale != ("C", "C"):
+                raise SystemExit("existing Synapse database has an unsafe non-C locale; explicit migration is required")
+
         signing_key_path = data_dir / f"{server_name}.signing.key"
         signing_key_path.write_text(os.environ["SYNAPSE_SIGNING_KEY"].rstrip("\n") + "\n")
 
