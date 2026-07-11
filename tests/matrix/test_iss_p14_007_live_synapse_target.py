@@ -171,3 +171,18 @@ def test_hardened_synapse_image_build_is_non_root_and_scanned():
     assert "aquasecurity/trivy-action@v0.36.0" in workflow
     assert "severity: HIGH,CRITICAL" in workflow
     assert 'exit-code: "1"' in workflow
+
+
+def test_hardened_synapse_image_installs_and_verifies_the_checked_in_static_page():
+    dockerfile = read("infra/matrix/synapse/Dockerfile")
+    workflow = read(".github/workflows/synapse-image.yml")
+
+    assert "COPY infra/matrix/synapse/static/index.html" in dockerfile
+    assert "synapse" in dockerfile
+    assert 'pathlib.Path(synapse.__file__).resolve().parent / "static/index.html"' in dockerfile
+    assert "shutil.copyfile" in dockerfile
+    assert "infra/matrix/synapse/static/index.html" in workflow
+    assert "sha256sum" in workflow
+    assert "import hashlib, pathlib, synapse" in workflow
+    assert 'pathlib.Path(synapse.__file__).resolve().parent / "static/index.html"' in workflow
+    assert 'test "$SOURCE_SHA" = "$INSTALLED_SHA"' in workflow
