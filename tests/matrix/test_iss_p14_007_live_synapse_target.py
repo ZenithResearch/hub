@@ -152,6 +152,6 @@ def test_hardened_synapse_image_build_is_non_root_and_scanned():
     assert '"Twisted==26.4.0rc2"' in dockerfile
     assert "rm -f /usr/sbin/gosu" in dockerfile
     assert "USER 991:991" in dockerfile
-    assert "aquasecurity/trivy-action@v0.33.1" in workflow
+    assert "aquasecurity/trivy-action@v0.36.0" in workflow
     assert "severity: HIGH,CRITICAL" in workflow
     assert 'exit-code: "1"' in workflow
