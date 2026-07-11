@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Documented the Matrix administrator operator runbook — gives operators a secret-safe preflight, first-login password-change, Keychain cleanup, and account-verification procedure.
 - Added controlled Matrix administrator provisioning — lets trusted operators create only explicit new Synapse admins while keeping generated credentials in Keychain and registration authority out of argv and output.
 - Added Matrix admin provisioning contract tests — locks HMAC, temporary-password, fail-closed endpoint, safe-output, and post-registration Keychain behavior before implementation.
 - Added EventBridge/Lambda automation for clients Postgres secret rotation — forces Gateway to restart after RDS-managed password rotation so ECS-injected database credentials do not go stale.
