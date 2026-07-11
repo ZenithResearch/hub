@@ -538,9 +538,9 @@ variable "enable_matrix_synapse" {
 }
 
 variable "matrix_synapse_image" {
-  description = "Pinned upstream Synapse container image. Update only through a reviewed production change."
+  description = "Digest-pinned Synapse container image used by the production ECS target."
   type        = string
-  default     = "matrixdotorg/synapse@sha256:3036ec25dfb5fcc5120942465788c1e1f2bb3671e28b04d7b3a1db4400ac84f4"
+  default     = "matrixdotorg/synapse@sha256:6882d26594b87171e0fe807ac6bd7f0000665cd70e73fb88c58ec9bff14c19ce"
 }
 
 variable "matrix_synapse_desired_count" {
@@ -558,19 +558,37 @@ variable "start_matrix_synapse_service" {
 variable "matrix_synapse_task_cpu" {
   description = "Fargate CPU units for Synapse."
   type        = number
-  default     = 512
+  default     = 1024
 }
 
 variable "matrix_synapse_task_memory" {
   description = "Fargate memory in MiB for Synapse."
   type        = number
-  default     = 1024
+  default     = 2048
 }
 
 variable "matrix_synapse_postgres_instance_class" {
   description = "RDS instance class for Synapse Postgres."
   type        = string
-  default     = "db.t4g.micro"
+  default     = "db.t4g.small"
+}
+
+variable "matrix_rds_ca_bundle_url" {
+  description = "Reviewed AWS RDS trust-store bundle URL downloaded before Synapse starts."
+  type        = string
+  default     = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+}
+
+variable "matrix_rds_ca_bundle_sha256" {
+  description = "Pinned SHA-256 for the reviewed AWS RDS global CA bundle."
+  type        = string
+  default     = "e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3"
+}
+
+variable "matrix_alarm_actions" {
+  description = "SNS topic or incident-routing ARNs notified by every production Matrix alarm. Required before starting Synapse."
+  type        = list(string)
+  default     = []
 }
 
 variable "matrix_synapse_postgres_engine_version" {

@@ -59,6 +59,9 @@ def test_synapse_database_and_media_have_deletion_and_backup_guards():
     assert 'aws_db_instance.matrix_synapse[0].arn' in backup
     assert 'aws_efs_file_system.matrix_synapse[0].arn' in backup
     assert 'multi_az               = var.matrix_synapse_postgres_multi_az' in runtime
+    assert 'sslmode": "verify-full"' in runtime
+    assert 'sslrootcert": "/data/aws-rds-global-bundle.pem"' in runtime
+    assert 'matrix_rds_ca_bundle_sha256' in runtime
 
 
 def test_synapse_runtime_fails_closed_until_enabled_and_secrets_are_populated():
@@ -71,6 +74,11 @@ def test_synapse_runtime_fails_closed_until_enabled_and_secrets_are_populated():
     assert 'variable "start_matrix_synapse_service"' in variables
     assert 'depends_on = [' in runtime
     assert 'aws_efs_mount_target.matrix_synapse' in runtime
+    assert 'var.enable_matrix_backup' in runtime
+    assert 'var.matrix_synapse_desired_count == 1' in runtime
+    assert 'length(var.matrix_alarm_actions) > 0' in runtime
+    assert 'var.matrix_synapse_image' in runtime and 'runtime-grpc@sha256:' in runtime
+    assert 'matrix_synapse_image must be a digest-pinned hardened ECR image' in runtime
 
 
 def test_synapse_runtime_exposes_operator_outputs_and_example_inputs():
@@ -85,7 +93,7 @@ def test_synapse_runtime_exposes_operator_outputs_and_example_inputs():
     assert 'enable_matrix_backup  = false' in example
     assert 'matrix_synapse_image' in example
     assert 'matrixdotorg/synapse@sha256:' in variables
-    assert 'matrixdotorg/synapse@sha256:' in example
+    assert 'dkr.ecr.us-east-1.amazonaws.com/zenith-hub-prod-runtime-grpc@sha256:' in example
 
 
 def test_synapse_config_serializes_secret_values_without_yaml_interpolation():
@@ -108,3 +116,42 @@ def test_federation_terminates_at_alb_without_direct_task_ingress():
     assert 'matrix_federation_allowed_ipv6_cidr_blocks' in variables
     assert 'var.enable_dual_stack_public_edge ? var.matrix_federation_allowed_ipv6_cidr_blocks : []' in edge
     assert 'https://synapse.zenith-research.ca:8448/_matrix/federation/v1/version' in runbook
+    assert 'matrix_federation_outbound_8448' in matrix
+
+
+def test_synapse_deployment_has_rollback_monitoring_and_capacity_guards():
+    runtime = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+    monitoring = read("infra/aws_baseline_80/matrix_synapse_monitoring.tf")
+    variables = read("infra/aws_baseline_80/variables.tf")
+
+    assert 'deployment_circuit_breaker' in runtime
+    assert 'rollback = true' in runtime
+    assert 'deployment_minimum_healthy_percent = 100' in runtime
+    assert 'matrix_synapse_task_cpu' in variables and 'default     = 1024' in variables
+    assert 'matrix_synapse_task_memory' in variables and 'default     = 2048' in variables
+    assert 'default     = "db.t4g.small"' in variables
+    for alarm in [
+        "matrix_synapse_healthy_hosts",
+        "matrix_synapse_cpu",
+        "matrix_synapse_memory",
+        "matrix_synapse_rds_cpu",
+        "matrix_synapse_rds_free_storage",
+        "matrix_synapse_rds_connections",
+        "matrix_synapse_efs_burst_credits",
+    ]:
+        assert f'resource "aws_cloudwatch_metric_alarm" "{alarm}"' in monitoring
+    assert 'alarm_actions' in monitoring and 'var.matrix_alarm_actions' in monitoring
+
+
+def test_hardened_synapse_image_build_is_non_root_and_scanned():
+    dockerfile = read("infra/matrix/synapse/Dockerfile")
+    workflow = read(".github/workflows/synapse-image.yml")
+
+    assert "matrixdotorg/synapse@sha256:" in dockerfile
+    assert '"cryptography==48.0.1"' in dockerfile
+    assert '"Twisted==26.4.0rc2"' in dockerfile
+    assert "rm -f /usr/sbin/gosu" in dockerfile
+    assert "USER 991:991" in dockerfile
+    assert "aquasecurity/trivy-action@0.33.1" in workflow
+    assert "severity: HIGH,CRITICAL" in workflow
+    assert 'exit-code: "1"' in workflow

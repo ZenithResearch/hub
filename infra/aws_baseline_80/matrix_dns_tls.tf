@@ -90,6 +90,15 @@ resource "aws_security_group" "matrix" {
   }
 
   egress {
+    description      = "matrix_federation_outbound_8448"
+    from_port        = 8448
+    to_port          = 8448
+    protocol         = "tcp"
+    cidr_blocks      = var.enable_matrix_federation ? ["0.0.0.0/0"] : []
+    ipv6_cidr_blocks = var.enable_matrix_federation && var.enable_dual_stack_public_edge ? ["::/0"] : []
+  }
+
+  egress {
     description = "private_postgres"
     from_port   = 5432
     to_port     = 5432

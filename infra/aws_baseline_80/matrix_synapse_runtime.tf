@@ -170,17 +170,26 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
     {
       name       = "synapse"
       image      = var.matrix_synapse_image
+      user       = "991:991"
       essential  = true
       entryPoint = ["/bin/sh", "-ec"]
       command = [<<-SCRIPT
         umask 077
         python - <<'PY'
         import os
+        import hashlib
+        import urllib.request
         from pathlib import Path
         import yaml
 
         server_name = os.environ["SYNAPSE_SERVER_NAME"]
         data_dir = Path("/data")
+        ca_path = data_dir / "aws-rds-global-bundle.pem"
+        ca_bytes = urllib.request.urlopen(os.environ["SYNAPSE_RDS_CA_BUNDLE_URL"], timeout=30).read()
+        ca_digest = hashlib.sha256(ca_bytes).hexdigest()
+        if ca_digest != os.environ["SYNAPSE_RDS_CA_BUNDLE_SHA256"]:
+            raise SystemExit("RDS CA bundle checksum mismatch")
+        ca_path.write_bytes(ca_bytes)
         signing_key_path = data_dir / f"{server_name}.signing.key"
         signing_key_path.write_text(os.environ["SYNAPSE_SIGNING_KEY"].rstrip("\n") + "\n")
 
@@ -204,7 +213,8 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
                     "database": "synapse",
                     "host": os.environ["SYNAPSE_DB_HOST"],
                     "port": 5432,
-                    "sslmode": "require",
+                    "sslmode": "verify-full",
+                    "sslrootcert": "/data/aws-rds-global-bundle.pem",
                     "cp_min": 1,
                     "cp_max": 5,
                 },
@@ -242,6 +252,8 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
         { name = "SYNAPSE_REPORT_STATS", value = "no" },
         { name = "SYNAPSE_CONFIG_PATH", value = "/data/homeserver.yaml" },
         { name = "SYNAPSE_DB_HOST", value = aws_db_instance.matrix_synapse[0].address },
+        { name = "SYNAPSE_RDS_CA_BUNDLE_URL", value = var.matrix_rds_ca_bundle_url },
+        { name = "SYNAPSE_RDS_CA_BUNDLE_SHA256", value = var.matrix_rds_ca_bundle_sha256 },
       ]
       secrets = [
         {
@@ -315,8 +327,43 @@ resource "aws_ecs_service" "matrix_synapse" {
   }
 
   health_check_grace_period_seconds  = 120
-  deployment_minimum_healthy_percent = 0
+  deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !var.start_matrix_synapse_service || var.enable_matrix_backup
+      error_message = "start_matrix_synapse_service requires enable_matrix_backup so RDS and EFS are protected before startup."
+    }
+
+    precondition {
+      condition     = var.matrix_synapse_desired_count == 1
+      error_message = "Monolithic Synapse requires matrix_synapse_desired_count == 1 until worker-mode topology is implemented."
+    }
+
+    precondition {
+      condition     = !var.start_matrix_synapse_service || length(var.matrix_alarm_actions) > 0
+      error_message = "Starting production Synapse requires at least one matrix_alarm_actions incident destination."
+    }
+
+    precondition {
+      condition     = var.matrix_synapse_task_cpu >= 1024 && var.matrix_synapse_task_memory >= 2048
+      error_message = "Production Synapse requires at least 1 vCPU and 2 GiB memory."
+    }
+
+    precondition {
+      condition = !var.start_matrix_synapse_service || can(regex(
+        "^${data.aws_caller_identity.current.account_id}\\.dkr\\.ecr\\.${data.aws_region.current.name}\\.amazonaws\\.com/${local.name_prefix}-runtime-grpc@sha256:[0-9a-f]{64}$",
+        var.matrix_synapse_image,
+      ))
+      error_message = "matrix_synapse_image must be a digest-pinned hardened ECR image before production startup."
+    }
+  }
 
   depends_on = [
     aws_efs_mount_target.matrix_synapse,

@@ -34,6 +34,13 @@ resource "aws_iam_role_policy_attachment" "matrix_backup_service" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
 }
 
+resource "aws_iam_role_policy_attachment" "matrix_restore_service" {
+  count = var.enable_matrix_backup ? 1 : 0
+
+  role       = aws_iam_role.matrix_backup[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
+}
+
 resource "aws_backup_plan" "matrix" {
   count = var.enable_matrix_backup ? 1 : 0
 

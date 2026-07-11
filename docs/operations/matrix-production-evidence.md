@@ -63,6 +63,10 @@ scripts/prod_terraform_cd.sh plan
 
 6. Review the plan resource list. It must include the Synapse ECS task/service at desired count zero, private RDS instance, encrypted EFS/access point/mount targets, target-group attachment, certificate, secret handles, and backup selection; it must not roll unrelated services backward. Only after acceptance, run apply. Add the emitted ACM validation CNAME and ALB host record at the external DNS provider, populate secret versions, then run a second accepted plan with `start_matrix_synapse_service=true`, `enable_matrix_https_listener=true`, and `enable_matrix_federation=true`.
 
+7. Before accepting capacity, run 1,000 authenticated or public read-path requests with 10 concurrent clients. Acceptance requires less than 1% failures, p95 latency below 500 ms, ECS CPU and memory below 80%, RDS CPU below 80%, database connections below 70, and no EFS burst-credit alarm for the 15-minute observation window. The monolithic v0 topology is constrained to exactly one Synapse task; scaling above one task requires a reviewed Synapse worker architecture.
+
+8. Verify outbound federation against a remote homeserver that resolves or delegates to port 8448, not only the local inbound listener. Record the remote host, resolved port, HTTP status, and timestamp without recording access tokens.
+
 ```bash
 scripts/prod_terraform_cd.sh apply
 ```

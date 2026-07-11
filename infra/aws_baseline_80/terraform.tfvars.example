@@ -67,7 +67,8 @@ qdrant_url = "https://your-qdrant-cloud-url"
 enable_matrix_synapse = false
 start_matrix_synapse_service = false
 enable_matrix_backup  = false
-matrix_synapse_image  = "matrixdotorg/synapse@sha256:3036ec25dfb5fcc5120942465788c1e1f2bb3671e28b04d7b3a1db4400ac84f4"
+matrix_synapse_image  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/zenith-hub-prod-runtime-grpc@sha256:<reviewed-hardened-image-digest>"
+matrix_alarm_actions  = ["arn:aws:sns:us-east-1:123456789012:matrix-production-alerts"]
 
 # Include every browser origin that will call Review SDK endpoints directly.
 # Gallery production supports both apex and www origins. Local review/admin
