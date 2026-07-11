@@ -48,6 +48,14 @@ def test_matrix_certificate_and_alb_dns_outputs_support_external_dns_operator():
     assert 'output "matrix_certificate_dns_validation_records"' in outputs
     assert 'output "matrix_alb_dns_name"' in outputs
 
+
+def test_phase_one_associates_target_group_before_matrix_certificate_is_enabled():
+    dns_tls = read("infra/aws_baseline_80/matrix_dns_tls.tf")
+    rule = dns_tls.split('resource "aws_lb_listener_rule" "matrix_https_host"', 1)[1]
+    count_line = next(line.strip() for line in rule.splitlines() if line.strip().startswith("count ="))
+    assert "var.enable_matrix_synapse" in count_line
+    assert "var.enable_matrix_https_listener" not in count_line
+
 def test_matrix_tls_runbook_records_smoke_commands_and_no_production_overclaim():
     doc = read("docs/operations/matrix-dns-tls.md")
     assert 'dig +short synapse.zenith-research.ca' in doc
