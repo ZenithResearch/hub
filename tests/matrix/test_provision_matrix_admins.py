@@ -53,7 +53,7 @@ def test_hmac_matches_synapse_shared_secret_admin_registration_contract():
         secret="shared-value",
         nonce="nonce-value",
         username="operator",
-        password="<password>",
+        credential="<password>",
         admin=True,
     )
 
