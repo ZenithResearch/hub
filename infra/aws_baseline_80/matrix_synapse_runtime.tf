@@ -180,6 +180,7 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
         import hashlib
         import urllib.request
         from pathlib import Path
+        import psycopg2
         import yaml
 
         server_name = os.environ["SYNAPSE_SERVER_NAME"]
@@ -190,6 +191,35 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
         if ca_digest != os.environ["SYNAPSE_RDS_CA_BUNDLE_SHA256"]:
             raise SystemExit("RDS CA bundle checksum mismatch")
         ca_path.write_bytes(ca_bytes)
+
+        database_connect = {
+            "user": "synapse",
+            "password": os.environ["SYNAPSE_DB_PASSWORD"],
+            "host": os.environ["SYNAPSE_DB_HOST"],
+            "port": 5432,
+            "sslmode": "verify-full",
+            "sslrootcert": str(ca_path),
+        }
+        with psycopg2.connect(database="postgres", **database_connect) as admin:
+            admin.autocommit = True
+            with admin.cursor() as cursor:
+                cursor.execute("SELECT datcollate, datctype FROM pg_database WHERE datname = 'synapse'")
+                locale = cursor.fetchone()
+            if locale != ("C", "C"):
+                has_user_tables = False
+                if locale is not None:
+                    with psycopg2.connect(database="synapse", **database_connect) as existing:
+                        with existing.cursor() as cursor:
+                            cursor.execute("SELECT EXISTS (SELECT 1 FROM pg_stat_user_tables)")
+                            has_user_tables = cursor.fetchone()[0]
+                if has_user_tables:
+                    raise SystemExit("existing Synapse database has an unsafe non-C locale")
+                with admin.cursor() as cursor:
+                    if locale is not None:
+                        cursor.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'synapse' AND pid <> pg_backend_pid()")
+                        cursor.execute("DROP DATABASE synapse")
+                    cursor.execute("CREATE DATABASE synapse WITH TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'")
+
         signing_key_path = data_dir / f"{server_name}.signing.key"
         signing_key_path.write_text(os.environ["SYNAPSE_SIGNING_KEY"].rstrip("\n") + "\n")
 

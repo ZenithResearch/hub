@@ -64,6 +64,11 @@ def test_synapse_database_and_media_have_deletion_and_backup_guards():
     assert 'sslrootcert": "/data/aws-rds-global-bundle.pem"' in runtime
     assert 'matrix_rds_ca_bundle_sha256' in runtime
     assert 'default     = "16.13"' in variables
+    assert "SELECT datcollate, datctype FROM pg_database" in runtime
+    assert "pg_stat_user_tables" in runtime
+    assert "DROP DATABASE synapse" in runtime
+    assert "LC_COLLATE 'C' LC_CTYPE 'C'" in runtime
+    assert "allow_unsafe_locale" not in runtime
 
 
 def test_synapse_runtime_fails_closed_until_enabled_and_secrets_are_populated():
