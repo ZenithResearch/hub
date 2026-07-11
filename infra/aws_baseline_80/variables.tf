@@ -531,6 +531,109 @@ variable "enable_matrix_backup" {
   default     = false
 }
 
+variable "enable_matrix_synapse" {
+  description = "Create and run the production Synapse ECS/RDS/EFS target. Keep false until required Matrix secret values exist and an operator accepts the plan."
+  type        = bool
+  default     = false
+}
+
+variable "matrix_synapse_image" {
+  description = "Digest-pinned Synapse container image used by the production ECS target."
+  type        = string
+  default     = "matrixdotorg/synapse@sha256:6882d26594b87171e0fe807ac6bd7f0000665cd70e73fb88c58ec9bff14c19ce"
+}
+
+variable "matrix_synapse_desired_count" {
+  description = "Desired Synapse task count when enable_matrix_synapse is true. The initial production topology is intentionally single-worker."
+  type        = number
+  default     = 1
+}
+
+variable "start_matrix_synapse_service" {
+  description = "Start the Synapse ECS task after infrastructure and secret versions are ready. Independent from existing service desired counts."
+  type        = bool
+  default     = false
+}
+
+variable "matrix_synapse_task_cpu" {
+  description = "Fargate CPU units for Synapse."
+  type        = number
+  default     = 1024
+}
+
+variable "matrix_synapse_task_memory" {
+  description = "Fargate memory in MiB for Synapse."
+  type        = number
+  default     = 2048
+}
+
+variable "matrix_synapse_postgres_instance_class" {
+  description = "RDS instance class for Synapse Postgres."
+  type        = string
+  default     = "db.t4g.small"
+}
+
+variable "matrix_rds_ca_bundle_url" {
+  description = "Reviewed AWS RDS trust-store bundle URL downloaded before Synapse starts."
+  type        = string
+  default     = "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"
+}
+
+variable "matrix_rds_ca_bundle_sha256" {
+  description = "Pinned SHA-256 for the reviewed AWS RDS global CA bundle."
+  type        = string
+  default     = "e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3"
+}
+
+variable "matrix_alarm_actions" {
+  description = "SNS topic or incident-routing ARNs notified by every production Matrix alarm. Required before starting Synapse."
+  type        = list(string)
+  default     = []
+}
+
+variable "matrix_alarm_email" {
+  description = "Operator email subscribed to the encrypted Matrix production alarm topic. Supply through private production inputs, never committed tfvars."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_synapse_postgres_engine_version" {
+  description = "Postgres engine version for Synapse RDS."
+  type        = string
+  default     = "16.6"
+}
+
+variable "matrix_synapse_postgres_multi_az" {
+  description = "Run Synapse Postgres in Multi-AZ mode. Production default is fail-safe high availability."
+  type        = bool
+  default     = true
+}
+
+variable "matrix_synapse_postgres_allocated_storage_gb" {
+  description = "Initial allocated storage in GiB for Synapse RDS."
+  type        = number
+  default     = 20
+}
+
+variable "matrix_synapse_postgres_max_allocated_storage_gb" {
+  description = "Maximum autoscaled storage in GiB for Synapse RDS."
+  type        = number
+  default     = 100
+}
+
+variable "matrix_synapse_backup_retention_days" {
+  description = "Automated RDS backup retention for Synapse."
+  type        = number
+  default     = 7
+}
+
+variable "matrix_synapse_deletion_protection" {
+  description = "Protect the production Synapse RDS instance from deletion."
+  type        = bool
+  default     = true
+}
+
 variable "matrix_backup_schedule" {
   description = "AWS Backup cron expression for Matrix/Synapse state backups."
   type        = string
@@ -565,6 +668,13 @@ variable "matrix_macaroon_secret_key" {
 
 variable "matrix_registration_shared_secret" {
   description = "Sensitive Synapse registration shared secret for controlled provisioning. Empty means do not write/update the secret version from Terraform."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "matrix_form_secret" {
+  description = "Sensitive Synapse form secret. Empty means do not write/update the secret version from Terraform."
   type        = string
   default     = ""
   sensitive   = true
@@ -618,4 +728,10 @@ variable "matrix_federation_allowed_cidr_blocks" {
   description = "CIDR allowlist for Matrix federation ingress on 8448 when enable_matrix_federation is true."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+variable "matrix_federation_allowed_ipv6_cidr_blocks" {
+  description = "IPv6 CIDR allowlist for ALB Matrix federation ingress on 8448. Empty disables IPv6 federation ingress."
+  type        = list(string)
+  default     = []
 }

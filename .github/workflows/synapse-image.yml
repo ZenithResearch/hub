@@ -1,0 +1,102 @@
+name: Hardened Synapse Image
+
+on:
+  pull_request:
+    paths:
+      - "infra/matrix/synapse/**"
+      - ".github/workflows/synapse-image.yml"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Immutable candidate tag; defaults to matrix-synapse-<short-sha>."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: synapse-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY: zenith-hub-prod-runtime-grpc
+
+jobs:
+  verify:
+    name: Build, exercise, and scan hardened Synapse
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - name: Build local verification image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/matrix/synapse/Dockerfile
+          load: true
+          tags: hardened-synapse:verify
+          platforms: linux/amd64
+      - name: Verify runtime dependencies and non-root execution
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect hardened-synapse:verify --format '{{.Config.User}}')" = "991:991"
+          docker run --rm --entrypoint python hardened-synapse:verify -c 'import cryptography, twisted, yaml, psycopg2; print("runtime_dependencies_ok")'
+          docker run --rm --entrypoint /bin/sh hardened-synapse:verify -ec 'test ! -e /usr/sbin/gosu && test -x /start.py'
+      - name: Fail on fixable high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: hardened-synapse:verify
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  publish:
+    name: Publish reviewed Synapse candidate
+    if: github.event_name == 'workflow_dispatch'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure AWS credentials by OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_PROD_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: docker/setup-buildx-action@v4
+      - name: Resolve immutable tag and registry
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.image_tag }}"
+          if [[ -z "$TAG" ]]; then TAG="matrix-synapse-${GITHUB_SHA::12}"; fi
+          [[ "$TAG" =~ ^matrix-synapse-[A-Za-z0-9_.-]{1,111}$ ]] || { echo "invalid tag" >&2; exit 2; }
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "registry=$REGISTRY" >> "$GITHUB_OUTPUT"
+          echo "image=$REGISTRY/$ECR_REPOSITORY:$TAG" >> "$GITHUB_OUTPUT"
+      - name: Authenticate to ECR
+        run: aws ecr get-login-password | docker login --username AWS --password-stdin "${{ steps.image.outputs.registry }}"
+      - name: Build and push reviewed candidate
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/matrix/synapse/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.image.outputs.image }}
+          provenance: true
+          sbom: true
+      - name: Emit digest-pinned deployment reference
+        run: echo "${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}"

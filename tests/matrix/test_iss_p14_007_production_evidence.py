@@ -43,6 +43,15 @@ def valid_evidence() -> dict:
         },
         "backup_restore": {
             "status": "accepted",
+            "rpo_target_hours": 24,
+            "rds_recovery_point_age_hours": 1.5,
+            "efs_recovery_point_age_hours": 2.0,
+            "rto_target_minutes": 120,
+            "start_to_usable_minutes": 45,
+            "restore_jobs": {
+                "rds": "COMPLETED",
+                "efs": "COMPLETED",
+            },
             "tested_restore_paths": [
                 "postgres database recovery point restored to non-production target",
                 "media store recovery point restored to non-production target",
@@ -184,6 +193,17 @@ def test_backup_restore_requires_tested_and_unproven_restore_paths(tmp_path):
     result = run_check(tmp_path, evidence)
 
     assert_rejected(result, "tested", "unproven", "restore")
+
+
+def test_backup_restore_rejects_missed_rpo_rto_or_incomplete_jobs(tmp_path):
+    evidence = valid_evidence()
+    evidence["backup_restore"]["rds_recovery_point_age_hours"] = 25
+    evidence["backup_restore"]["start_to_usable_minutes"] = 121
+    evidence["backup_restore"]["restore_jobs"]["efs"] = "FAILED"
+
+    result = run_check(tmp_path, evidence)
+
+    assert_rejected(result, "rpo", "rto", "restore", "completed")
 
 
 def test_downstream_p15_remains_locked_unless_all_required_gates_are_accepted(tmp_path):

@@ -12,6 +12,7 @@ def test_matrix_secret_classes_are_secrets_manager_backed_and_sensitive():
         "matrix_homeserver_signing_key",
         "matrix_macaroon_secret_key",
         "matrix_registration_shared_secret",
+        "matrix_form_secret",
         "matrix_appservice_as_token",
         "matrix_appservice_hs_token",
     ]:
@@ -21,6 +22,7 @@ def test_matrix_secret_classes_are_secrets_manager_backed_and_sensitive():
         'matrix_homeserver_signing_key',
         'matrix_macaroon_secret_key',
         'matrix_registration_shared_secret',
+        'matrix_form_secret',
         'matrix_appservice_as_token',
         'matrix_appservice_hs_token',
     ]:

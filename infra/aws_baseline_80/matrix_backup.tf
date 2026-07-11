@@ -34,6 +34,13 @@ resource "aws_iam_role_policy_attachment" "matrix_backup_service" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
 }
 
+resource "aws_iam_role_policy_attachment" "matrix_restore_service" {
+  count = var.enable_matrix_backup ? 1 : 0
+
+  role       = aws_iam_role.matrix_backup[0].name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores"
+}
+
 resource "aws_backup_plan" "matrix" {
   count = var.enable_matrix_backup ? 1 : 0
 
@@ -53,10 +60,16 @@ resource "aws_backup_plan" "matrix" {
 }
 
 resource "aws_backup_selection" "matrix" {
-  count = var.enable_matrix_backup && length(var.matrix_backup_resource_arns) > 0 ? 1 : 0
+  count = var.enable_matrix_backup && (var.enable_matrix_synapse || length(var.matrix_backup_resource_arns) > 0) ? 1 : 0
 
   iam_role_arn = aws_iam_role.matrix_backup[0].arn
   name         = "${local.name_prefix}-matrix-backup-selection"
   plan_id      = aws_backup_plan.matrix[0].id
-  resources    = var.matrix_backup_resource_arns
+  resources = concat(
+    var.matrix_backup_resource_arns,
+    var.enable_matrix_synapse ? [
+      aws_db_instance.matrix_synapse[0].arn,
+      aws_efs_file_system.matrix_synapse[0].arn,
+    ] : [],
+  )
 }

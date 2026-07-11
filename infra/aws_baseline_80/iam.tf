@@ -29,6 +29,13 @@ data "aws_iam_policy_document" "execution_secrets" {
         aws_secretsmanager_secret.review_access_admin_token.arn,
       ],
       var.enable_clients_postgres ? [aws_db_instance.clients[0].master_user_secret[0].secret_arn] : [],
+      var.enable_matrix_synapse ? [
+        aws_db_instance.matrix_synapse[0].master_user_secret[0].secret_arn,
+        aws_secretsmanager_secret.matrix_homeserver_signing_key.arn,
+        aws_secretsmanager_secret.matrix_macaroon_secret_key.arn,
+        aws_secretsmanager_secret.matrix_registration_shared_secret.arn,
+        aws_secretsmanager_secret.matrix_form_secret.arn,
+      ] : [],
       var.elevenlabs_api_key_secret_arn != "" ? [var.elevenlabs_api_key_secret_arn] : []
     )
   }
@@ -86,6 +93,35 @@ resource "aws_iam_role" "llama_server_task" {
   name               = "${local.name_prefix}-llama-server-task-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
   tags               = local.tags
+}
+
+resource "aws_iam_role" "matrix_synapse_task" {
+  count = var.enable_matrix_synapse ? 1 : 0
+
+  name               = "${local.name_prefix}-matrix-synapse-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  tags               = local.tags
+}
+
+data "aws_iam_policy_document" "matrix_synapse_efs" {
+  count = var.enable_matrix_synapse ? 1 : 0
+
+  statement {
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientWrite",
+      "elasticfilesystem:ClientRootAccess",
+    ]
+    resources = [aws_efs_file_system.matrix_synapse[0].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "matrix_synapse_efs" {
+  count = var.enable_matrix_synapse ? 1 : 0
+
+  name   = "${local.name_prefix}-matrix-synapse-efs"
+  role   = aws_iam_role.matrix_synapse_task[0].id
+  policy = data.aws_iam_policy_document.matrix_synapse_efs[0].json
 }
 
 # Queue task needs elasticfilesystem:ClientMount + ClientWrite to mount EFS.

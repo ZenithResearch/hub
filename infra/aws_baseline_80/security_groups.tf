@@ -30,7 +30,7 @@ resource "aws_security_group" "alb" {
       to_port          = 8448
       protocol         = "tcp"
       cidr_blocks      = var.matrix_federation_allowed_cidr_blocks
-      ipv6_cidr_blocks = var.enable_dual_stack_public_edge ? ["::/0"] : []
+      ipv6_cidr_blocks = var.enable_dual_stack_public_edge ? var.matrix_federation_allowed_ipv6_cidr_blocks : []
     }
   }
 

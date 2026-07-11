@@ -126,6 +126,28 @@ def validate_backup_restore(data: dict[str, Any]) -> str:
     backup_status = status(backup, "backup_restore")
     non_empty_list(backup, "tested_restore_paths", "backup_restore")
     non_empty_list(backup, "unproven_restore_paths", "backup_restore")
+    if backup_status == "accepted":
+        errors: list[str] = []
+        rpo_target = backup.get("rpo_target_hours")
+        rds_age = backup.get("rds_recovery_point_age_hours")
+        efs_age = backup.get("efs_recovery_point_age_hours")
+        rto_target = backup.get("rto_target_minutes")
+        elapsed = backup.get("start_to_usable_minutes")
+        if rpo_target != 24:
+            errors.append("backup_restore RPO target must be 24 hours")
+        if not isinstance(rds_age, (int, float)) or rds_age > 24:
+            errors.append("RDS recovery point must meet the 24-hour RPO")
+        if not isinstance(efs_age, (int, float)) or efs_age > 24:
+            errors.append("EFS recovery point must meet the 24-hour RPO")
+        if rto_target != 120:
+            errors.append("backup_restore RTO target must be 120 minutes")
+        if not isinstance(elapsed, (int, float)) or elapsed > 120:
+            errors.append("restore start-to-usable time must meet the 120-minute RTO")
+        jobs = backup.get("restore_jobs")
+        if not isinstance(jobs, dict) or jobs.get("rds") != "COMPLETED" or jobs.get("efs") != "COMPLETED":
+            errors.append("RDS and EFS restore jobs must both be COMPLETED")
+        if errors:
+            raise EvidenceError("; ".join(errors))
     return backup_status
 
 def validate_downstream(data: dict[str, Any], gates: list[str]) -> str:

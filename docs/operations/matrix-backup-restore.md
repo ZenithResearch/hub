@@ -19,6 +19,8 @@ ISS-P14-005 defines the minimum backup/restore contract before production Synaps
 - Retention: `matrix_backup_retention_days`
 - Restore owner: Hub operator
 - Escalation/contact: the Hub production operator who owns the accepted production Terraform plan/apply for PRP-PR-014
+- **RPO:** at most 24 hours. The selected RDS and EFS recovery points must both be no older than 24 hours when the rehearsal begins.
+- **RTO:** at most 120 minutes start-to-usable for an isolated RDS + EFS restore and private Synapse readiness check.
 
 An empty `matrix_backup_resource_arns` list means the Terraform contract can create the vault/plan without selecting protected resources. That state is contract-only and is not a production backup posture.
 
@@ -28,6 +30,8 @@ An empty `matrix_backup_resource_arns` list means the Terraform contract can cre
 aws backup list-backup-vaults
 aws backup list-recovery-points-by-backup-vault --backup-vault-name <vault>
 aws backup get-backup-plan --backup-plan-id <plan-id>
+aws backup start-restore-job --recovery-point-arn <arn> --iam-role-arn <matrix-backup-role-arn> --metadata file://<reviewed-metadata.json>
+aws backup describe-restore-job --restore-job-id <job-id>
 ```
 
 ## Restore workflow
@@ -35,9 +39,9 @@ aws backup get-backup-plan --backup-plan-id <plan-id>
 Untested restore paths are unproven. This workflow is the explicit operator path to rehearse in non-production before durable production claims.
 
 1. Confirm the restore owner is present and operating under the approved Hub production role/session for the environment being restored.
-2. Use `aws backup list-recovery-points-by-backup-vault --backup-vault-name <vault>` to select a recovery point for the concrete Matrix state resource.
+2. Record the rehearsal start time. Use `aws backup list-recovery-points-by-backup-vault --backup-vault-name <vault>` to select a recovery point for each of RDS and EFS, and record each recovery-point age. Stop if either exceeds the 24-hour RPO.
 3. Verify the restore job role and IAM permissions before starting: missing IAM permissions are a hard stop, not a best-effort restore.
-4. restore to a non-production target first. Do not overwrite production state until the recovery point, account, region, and AZ are confirmed.
+4. Use `aws backup start-restore-job` to restore to a non-production target for both RDS and EFS. Poll each job with `aws backup describe-restore-job` until `COMPLETED`; any terminal non-success state fails the rehearsal. Do not overwrite production state.
 5. restore order:
    1. durable database state / Postgres snapshot or volume;
    2. media store objects or volume;
@@ -45,8 +49,9 @@ Untested restore paths are unproven. This workflow is the explicit operator path
    4. homeserver config, including server name and database/media pointers;
    5. appservice registration and appservice token material from the approved secret backend.
 6. Reconnect the restored Synapse target to the Matrix target group only after config and secret classes are present.
-7. validate `/_matrix/client/versions` on the restored target before calling the restore usable.
+7. Launch a temporary private Synapse task against the restored RDS/EFS resources and validate `/_matrix/client/versions` before calling the restore usable.
 8. Run federation/client smoke checks only after the target is reachable and the ALB/DNS path is intentionally pointed at the restored target.
+9. Record the start-to-usable elapsed minutes. More than 120 minutes fails the RTO acceptance criterion and blocks issue #67 closure.
 
 ## Restore failure and decision boundaries
 
