@@ -28,6 +28,7 @@ This directory contains current architecture/operations docs and older planning 
 ## Operations docs
 
 - `operations/production-rollout.md` — standard clean-source image build and Terraform rollout sequence.
+- `operations/matrix-static-landing-rollout.md` — digest-pinned, Synapse-only landing-page rollout and live smoke procedure.
 - `operations/operator-updates.md` — operator-owned production-state doctrine and update planner boundaries.
 - `operations/production-source-ledger.md` — non-secret source/image/live-state ledger for main-head deployability.
 - `operations/review-case-automaton.md` — review status automaton used by Frank/Gateway status writeback.
