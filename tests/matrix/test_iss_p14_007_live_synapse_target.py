@@ -76,7 +76,7 @@ def test_synapse_runtime_fails_closed_until_enabled_and_secrets_are_populated():
     assert 'aws_efs_mount_target.matrix_synapse' in runtime
     assert 'var.enable_matrix_backup' in runtime
     assert 'var.matrix_synapse_desired_count == 1' in runtime
-    assert 'length(var.matrix_alarm_actions) > 0' in runtime
+    assert 'var.matrix_alarm_email != "" || length(var.matrix_alarm_actions) > 0' in runtime
     assert 'var.matrix_synapse_image' in runtime and 'runtime-grpc@sha256:' in runtime
     assert 'matrix_synapse_image must be a digest-pinned hardened ECR image' in runtime
 
@@ -122,6 +122,7 @@ def test_federation_terminates_at_alb_without_direct_task_ingress():
 def test_synapse_deployment_has_rollback_monitoring_and_capacity_guards():
     runtime = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
     monitoring = read("infra/aws_baseline_80/matrix_synapse_monitoring.tf")
+    alerting = read("infra/aws_baseline_80/matrix_synapse_alerting.tf")
     variables = read("infra/aws_baseline_80/variables.tf")
 
     assert 'deployment_circuit_breaker' in runtime
@@ -140,7 +141,10 @@ def test_synapse_deployment_has_rollback_monitoring_and_capacity_guards():
         "matrix_synapse_efs_burst_credits",
     ]:
         assert f'resource "aws_cloudwatch_metric_alarm" "{alarm}"' in monitoring
-    assert 'alarm_actions' in monitoring and 'var.matrix_alarm_actions' in monitoring
+    assert 'alarm_actions' in monitoring and 'local.matrix_effective_alarm_actions' in monitoring
+    assert 'resource "aws_sns_topic" "matrix_alerts"' in alerting
+    assert 'resource "aws_sns_topic_subscription" "matrix_alert_email"' in alerting
+    assert 'kms_master_key_id = "alias/aws/sns"' in alerting
 
 
 def test_hardened_synapse_image_build_is_non_root_and_scanned():

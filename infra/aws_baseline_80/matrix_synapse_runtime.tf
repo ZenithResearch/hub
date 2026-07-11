@@ -347,8 +347,8 @@ resource "aws_ecs_service" "matrix_synapse" {
     }
 
     precondition {
-      condition     = !var.start_matrix_synapse_service || length(var.matrix_alarm_actions) > 0
-      error_message = "Starting production Synapse requires at least one matrix_alarm_actions incident destination."
+      condition     = !var.start_matrix_synapse_service || var.matrix_alarm_email != "" || length(var.matrix_alarm_actions) > 0
+      error_message = "Starting production Synapse requires matrix_alarm_email or at least one matrix_alarm_actions incident destination."
     }
 
     precondition {

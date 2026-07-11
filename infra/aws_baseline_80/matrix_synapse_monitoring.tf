@@ -15,8 +15,8 @@ resource "aws_cloudwatch_metric_alarm" "matrix_synapse_healthy_hosts" {
   comparison_operator = "LessThanThreshold"
   threshold           = 1
   treat_missing_data  = "breaching"
-  alarm_actions       = var.matrix_alarm_actions
-  ok_actions          = var.matrix_alarm_actions
+  alarm_actions       = local.matrix_effective_alarm_actions
+  ok_actions          = local.matrix_effective_alarm_actions
 
   dimensions = {
     LoadBalancer = aws_lb.gateway.arn_suffix
@@ -40,8 +40,8 @@ resource "aws_cloudwatch_metric_alarm" "matrix_synapse_cpu" {
   comparison_operator = "GreaterThanThreshold"
   threshold           = 80
   treat_missing_data  = "breaching"
-  alarm_actions       = var.matrix_alarm_actions
-  ok_actions          = var.matrix_alarm_actions
+  alarm_actions       = local.matrix_effective_alarm_actions
+  ok_actions          = local.matrix_effective_alarm_actions
 
   dimensions = {
     ClusterName = aws_ecs_cluster.this.name
@@ -65,8 +65,8 @@ resource "aws_cloudwatch_metric_alarm" "matrix_synapse_memory" {
   comparison_operator = "GreaterThanThreshold"
   threshold           = 80
   treat_missing_data  = "breaching"
-  alarm_actions       = var.matrix_alarm_actions
-  ok_actions          = var.matrix_alarm_actions
+  alarm_actions       = local.matrix_effective_alarm_actions
+  ok_actions          = local.matrix_effective_alarm_actions
 
   dimensions = {
     ClusterName = aws_ecs_cluster.this.name
@@ -90,8 +90,8 @@ resource "aws_cloudwatch_metric_alarm" "matrix_synapse_rds_cpu" {
   comparison_operator = "GreaterThanThreshold"
   threshold           = 80
   treat_missing_data  = "breaching"
-  alarm_actions       = var.matrix_alarm_actions
-  ok_actions          = var.matrix_alarm_actions
+  alarm_actions       = local.matrix_effective_alarm_actions
+  ok_actions          = local.matrix_effective_alarm_actions
 
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.matrix_synapse[0].identifier
@@ -114,8 +114,8 @@ resource "aws_cloudwatch_metric_alarm" "matrix_synapse_rds_free_storage" {
   comparison_operator = "LessThanThreshold"
   threshold           = 5368709120
   treat_missing_data  = "breaching"
-  alarm_actions       = var.matrix_alarm_actions
-  ok_actions          = var.matrix_alarm_actions
+  alarm_actions       = local.matrix_effective_alarm_actions
+  ok_actions          = local.matrix_effective_alarm_actions
 
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.matrix_synapse[0].identifier
@@ -138,8 +138,8 @@ resource "aws_cloudwatch_metric_alarm" "matrix_synapse_rds_connections" {
   comparison_operator = "GreaterThanThreshold"
   threshold           = 70
   treat_missing_data  = "breaching"
-  alarm_actions       = var.matrix_alarm_actions
-  ok_actions          = var.matrix_alarm_actions
+  alarm_actions       = local.matrix_effective_alarm_actions
+  ok_actions          = local.matrix_effective_alarm_actions
 
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.matrix_synapse[0].identifier
@@ -162,8 +162,8 @@ resource "aws_cloudwatch_metric_alarm" "matrix_synapse_efs_burst_credits" {
   comparison_operator = "LessThanThreshold"
   threshold           = 1073741824
   treat_missing_data  = "breaching"
-  alarm_actions       = var.matrix_alarm_actions
-  ok_actions          = var.matrix_alarm_actions
+  alarm_actions       = local.matrix_effective_alarm_actions
+  ok_actions          = local.matrix_effective_alarm_actions
 
   dimensions = {
     FileSystemId = aws_efs_file_system.matrix_synapse[0].id

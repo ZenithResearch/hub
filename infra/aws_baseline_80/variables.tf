@@ -591,6 +591,13 @@ variable "matrix_alarm_actions" {
   default     = []
 }
 
+variable "matrix_alarm_email" {
+  description = "Operator email subscribed to the encrypted Matrix production alarm topic. Supply through private production inputs, never committed tfvars."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "matrix_synapse_postgres_engine_version" {
   description = "Postgres engine version for Synapse RDS."
   type        = string

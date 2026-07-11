@@ -69,6 +69,7 @@ start_matrix_synapse_service = false
 enable_matrix_backup  = false
 matrix_synapse_image  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/zenith-hub-prod-runtime-grpc@sha256:<reviewed-hardened-image-digest>"
 matrix_alarm_actions  = ["arn:aws:sns:us-east-1:123456789012:matrix-production-alerts"]
+matrix_alarm_email    = ""
 
 # Include every browser origin that will call Review SDK endpoints directly.
 # Gallery production supports both apex and www origins. Local review/admin
