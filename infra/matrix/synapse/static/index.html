@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zenith Matrix</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 14vh 24px 48px;
+      background: #fff;
+      color: #18201e;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      text-align: center;
+    }
+    main { width: min(100%, 420px); margin: 0 auto; }
+    .mark { display: block; width: 88px; height: 88px; margin: 0 auto 34px; }
+    h1 { margin: 0 0 24px; font-size: 20px; line-height: 1.3; font-weight: 650; }
+    p { margin: 8px 0; }
+    a { color: #087e63; text-underline-offset: 3px; }
+    a:hover { text-decoration-thickness: 2px; }
+    a:focus-visible { outline: 3px solid #02b286; outline-offset: 4px; border-radius: 2px; }
+    .divider { width: 54px; margin: 36px auto 24px; border: 0; border-top: 1px solid #ccd5d2; }
+    footer { color: #65706d; font-size: 13px; }
+    @media (max-width: 320px) {
+      body { padding: 48px 18px 32px; }
+      .mark { width: 72px; height: 72px; margin-bottom: 28px; }
+      h1 { font-size: 19px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <!-- Inline derivative of ZenithResearch/ZenithOS/Resources/ZenithOSIcon.svg,
+         canonical GitHub blob 6d85132c52f1dc9021e124093f20164a64a89dff. -->
+    <svg class="mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="ZenithOS">
+      <defs>
+        <linearGradient id="zenith-aqua-gradient" x1="512" y1="180" x2="512" y2="844" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#9bfbe3"/>
+          <stop offset="1" stop-color="#02b286"/>
+        </linearGradient>
+        <filter id="soft-aqua-glow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="24" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.035 0 0 0 0 0.95 0 0 0 0 0.78 0 0 0 0.48 0"/>
+          <feBlend in="SourceGraphic" mode="screen"/>
+        </filter>
+      </defs>
+      <rect width="1024" height="1024" rx="224" fill="#050807"/>
+      <rect x="56" y="56" width="912" height="912" rx="196" fill="#080d0b" stroke="#193830" stroke-width="2"/>
+      <path d="M164.698 0H98.4224L0 125.778V192.501H98.4224L0 318.283V385H279V335.363H52.4707L164.698 192.501H279V142.863H52.4707L164.698 0Z" fill="url(#zenith-aqua-gradient)" filter="url(#soft-aqua-glow)" transform="translate(260 154) scale(1.8)"/>
+    </svg>
+    <h1>Zenith Matrix is running</h1>
+    <p><strong>synapse.zenith-research.ca</strong> is the Zenith Matrix homeserver.</p>
+    <p>Use a Matrix client to connect and communicate.</p>
+    <p><a href="https://github.com/ZenithResearch/ZenithOS">Get ZenithOS</a></p>
+    <hr class="divider">
+    <footer>Built on <a href="https://matrix.org" target="_blank" rel="noopener noreferrer">Matrix</a></footer>
+  </main>
+</body>
+</html>
