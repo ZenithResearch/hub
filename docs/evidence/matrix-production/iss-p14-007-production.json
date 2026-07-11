@@ -1,0 +1,92 @@
+{
+  "issue": "ISS-P14-007",
+  "source": {
+    "minimum_head": "aa1bd8c",
+    "head": "e62dfd9a7866094dbc56ae593b279fbfc5238a3c",
+    "branch": "main"
+  },
+  "terraform": {
+    "plan": {
+      "status": "accepted",
+      "artifact": "docs/evidence/matrix-production/iss-p14-007-plan-redacted.txt",
+      "reviewed_by": "production operator"
+    },
+    "apply": {
+      "status": "accepted",
+      "artifact": "docs/evidence/matrix-production/iss-p14-007-apply-redacted.txt",
+      "reviewed_by": "production operator"
+    }
+  },
+  "public_smoke": {
+    "status": "accepted",
+    "client_api": {
+      "url": "https://synapse.zenith-research.ca/_matrix/client/versions",
+      "status": 200
+    },
+    "federation_8448": {
+      "host": "synapse.zenith-research.ca",
+      "port": 8448,
+      "status": 200
+    },
+    "outbound_federation": {
+      "remote_host": "matrix.debian.social",
+      "port": 8448,
+      "status": 200,
+      "source": "private Fargate task network"
+    },
+    "tls": {
+      "hostname_valid": true,
+      "chain_valid": true
+    }
+  },
+  "capacity": {
+    "status": "accepted",
+    "requests": 1000,
+    "concurrency": 10,
+    "failures": 0,
+    "error_rate_percent": 0.0,
+    "p95_latency_ms": 173.28,
+    "observation_minutes": 15,
+    "ecs_cpu_max_percent": 2.624,
+    "ecs_memory_max_percent": 7.397,
+    "rds_cpu_max_percent": 5.317,
+    "rds_connections_max": 5,
+    "efs_burst_credits_positive": true
+  },
+  "monitoring": {
+    "status": "accepted",
+    "alarm_count": 7,
+    "actions_enabled": true,
+    "subscription_confirmed": true,
+    "controlled_alarm_delivery_tested": true,
+    "final_alarm_state": "OK"
+  },
+  "backup_restore": {
+    "status": "accepted",
+    "rpo_target_hours": 24,
+    "rds_recovery_point_age_hours": 1.748,
+    "efs_recovery_point_age_hours": 1.747,
+    "rto_target_minutes": 120,
+    "start_to_usable_minutes": 36.75,
+    "restore_jobs": {
+      "rds": "COMPLETED",
+      "efs": "COMPLETED"
+    },
+    "tested_restore_paths": [
+      "PostgreSQL recovery point restored to an isolated private RDS target",
+      "media recovery point restored to an isolated encrypted EFS target",
+      "temporary private Synapse started against both restored targets and returned client versions HTTP 200",
+      "temporary restore resources deleted after acceptance"
+    ],
+    "unproven_restore_paths": [
+      "homeserver signing-key rotation after a disaster",
+      "appservice token rotation during disaster recovery"
+    ]
+  },
+  "downstream": {
+    "p15": {
+      "status": "unlocked",
+      "reason": "reviewed plan/apply, live client and federation smoke, monitoring, capacity, and isolated RDS/EFS restore evidence accepted"
+    }
+  }
+}

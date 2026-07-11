@@ -1,0 +1,23 @@
+ISS-P14-007 production plan evidence — redacted
+Date: 2026-07-10/11 UTC
+Source: main at PR #86, followed by Phase 1 contract fix PR #87
+Review status: accepted before each apply
+
+Phase 1 accepted plan
+- 35 Matrix-specific creates.
+- Two intended updates: ECS execution-secret policy and ALB/Matrix security-group routing.
+- Synapse desired count: zero.
+- No unrelated service rollout, existing task-definition replacement, clients database engine change, or unrelated scale-down.
+- Account-local hardened Synapse image selected by immutable digest.
+
+Phase 2 accepted plan
+- Attach issued Matrix ACM certificate to the existing HTTPS listener.
+- Enable the federation listener on TCP 8448.
+- Enable the reviewed Matrix ingress/egress rules.
+- Raise the monolithic Synapse service from zero to exactly one task.
+- No unrelated changes or replacements.
+
+Safety notes
+- External DNS and ACM validation were verified before activation.
+- SNS subscription, backup coverage, secret versions, and startup gates were verified before activation.
+- Raw plans, private tfvars, credentials, secret values, account identifiers, and session material are intentionally excluded.

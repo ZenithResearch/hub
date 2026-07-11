@@ -21,15 +21,19 @@ scripts/private_artifact_scan.py
 git diff --check
 ```
 
-## Operator-auth status
+## Accepted production status
 
-The PR #68 operator run proved AWS/backend access but correctly rejected apply because there was no live Synapse target. The follow-up PR supplies that target fail-closed by default. It still does not claim production apply acceptance: apply, smoke, and isolated restore evidence occur only after review/merge and an accepted operator plan.
+PR #86 and its Phase 1 correction PR #87 are merged. The two-phase production rollout completed from reviewed `main`: inactive infrastructure first, then DNS/ACM, confirmed alarm routing, populated secret versions, backups, and explicit one-task activation. The redacted accepted artifacts are:
 
-On 2026-07-10, AWS SSO/backend access was re-established and a targeted first-phase plan was generated from PR #86 with current live image tags, the live clients Postgres engine version, `enable_matrix_synapse=true`, `enable_matrix_backup=true`, and `start_matrix_synapse_service=false`. The reviewed plan contains 25 creates and two intended updates only: Matrix/Synapse compute, RDS, EFS, certificate, secret handles, backup resources, IAM, target group/security groups, plus the existing execution-secret policy and ALB egress. It contains no unrelated service rollout, database engine change, task-definition replacement, or service scale-down. The plan was not applied because PR #86 remains under review and unmerged.
+- `iss-p14-007-plan-redacted.txt`
+- `iss-p14-007-apply-redacted.txt`
+- `iss-p14-007-production.json`
+
+Live client/federation smoke, a 1,000-request capacity pass, fifteen-minute infrastructure metrics, both backup jobs, isolated RDS/EFS restore jobs, and a temporary private Synapse readiness check all passed. Temporary restore resources were removed after acceptance. The evidence validator is the source of truth for unlocking P15.
 
 ## Non-claims preserved
 
-- No production deployment is claimed by this PR alone.
+- Production claims are limited to the checks recorded in the validated redacted artifact.
 - No raw Matrix/admin/appservice/AWS/tfvars material is committed.
 - Matrix identity remains provenance/context only, not Hub authority.
-- P15 remains blocked unless the validated evidence artifact records accepted plan/apply/smoke/backup gates.
+- P15 is unlocked by the validated accepted plan/apply/smoke/backup gates; P15 retains its own appservice and delivery acceptance criteria.

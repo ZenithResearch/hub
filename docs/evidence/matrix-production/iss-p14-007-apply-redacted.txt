@@ -1,0 +1,46 @@
+ISS-P14-007 production apply evidence — redacted
+Date: 2026-07-10/11 UTC
+Source head: e62dfd9a7866094dbc56ae593b279fbfc5238a3c
+Status: accepted
+
+Infrastructure and activation
+- Private ECS/Fargate Synapse service deployed with exactly one healthy task.
+- Private PostgreSQL 16.13 RDS, encrypted EFS, target group, ACM/TLS, federation listener, secret handles, backup plan, restore permissions, SNS routing, and seven CloudWatch alarms are active.
+- Hardened account-local image is digest-pinned and runs as UID/GID 991:991.
+- Unrelated live services and image selectors were preserved.
+
+Live verification
+- Client versions endpoint: HTTP 200.
+- Federation version endpoint on port 8448: HTTP 200.
+- ALB target: healthy.
+- TLS hostname and chain: valid.
+- Remote outbound federation from the private task network to a remote homeserver on port 8448: HTTP 200.
+- Current task log sample contained no ERROR or traceback entries.
+
+Capacity verification
+- 1,000 requests at concurrency 10 using persistent connections.
+- Failures: 0; error rate: 0%; p95: 173.28 ms; observed throughput: 55.21 requests/second.
+- 15-minute maxima: ECS CPU 2.624%, ECS memory 7.397%, RDS CPU 5.317%, RDS connections 5.
+- EFS burst-credit balance remained positive and all Matrix alarms returned OK.
+
+Alarm delivery
+- Email subscription confirmed.
+- Direct SNS delivery test published.
+- Controlled CloudWatch alarm transition exercised the configured action and was returned to OK after independently verifying target health.
+
+Backup and isolated restore
+- RDS backup job: COMPLETED.
+- EFS backup job: COMPLETED.
+- RDS isolated restore job: COMPLETED.
+- EFS isolated restore job: COMPLETED.
+- Recovery-point ages at rehearsal start: RDS 1.748 hours; EFS 1.747 hours.
+- Start-to-usable: 36.75 minutes.
+- Temporary private Synapse started against the restored database and media filesystem; its local client versions check returned HTTP 200.
+- Temporary task definition was deregistered; temporary RDS and EFS resources were deleted and independently verified absent.
+
+Operational discoveries
+- The first inactive apply exposed unavailable PostgreSQL 16.6 and premature target-group association assumptions. PR #87 fixed both; no Synapse task started before the fixes and prerequisites were accepted.
+- Initial restore attempts failed closed on provider metadata requirements. Corrected retries removed snapshot-only fields, set PostgreSQL port 5432, omitted DBName, and supplied the EFS KMS key. Only completed restore jobs are accepted as evidence.
+
+Redaction
+- No raw secrets, tokens, credentials, private tfvars, database URLs, access codes, or AWS session material are included.
