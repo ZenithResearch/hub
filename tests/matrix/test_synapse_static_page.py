@@ -46,7 +46,7 @@ def test_static_page_links_are_exact_and_matrix_link_is_isolated():
     links = [attrs for tag, attrs in parser.tags if tag == "a"]
 
     assert {link.get("href") for link in links} == {
-        "https://github.com/ZenithResearch/ZenithOS",
+        "https://castalia.zenith-research.ca",
         "https://matrix.org",
     }
     matrix_link = next(link for link in links if link.get("href") == "https://matrix.org")
