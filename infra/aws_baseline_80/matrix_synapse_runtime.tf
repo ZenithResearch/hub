@@ -325,6 +325,13 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
     }
   ])
 
+  lifecycle {
+    precondition {
+      condition     = var.public_matrix_domain_name == "synapse.zenith-research.ca"
+      error_message = "Production Matrix requires public_matrix_domain_name to be synapse.zenith-research.ca."
+    }
+  }
+
   tags = local.tags
 }
 
