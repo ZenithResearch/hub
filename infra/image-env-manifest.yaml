@@ -28,6 +28,8 @@ services:
       CASES_HTTP_URL: cloudmap:cases
       EVENTBUS_URL: cloudmap:eventbus
       HUBFS_ALLOWED_ROOTS: literal
+      MATRIX_HOMESERVER_URL: terraform:public_matrix_domain_name
+      MATRIX_GATEWAY_BOT_USER_ID: terraform:public_matrix_domain_name
       CORS_ALLOW_ORIGINS: terraform:cors_allow_origins
       MAX_BODY_BYTES: terraform:max_body_bytes
       GATEWAY_GRPC_TIMEOUT_S: literal
