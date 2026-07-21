@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zenith-research.ca/schemas/hermes-cloud-agent-profile-v1.json",
+  "title": "Matrix-only profiled Hermes cloud agent",
+  "description": "Fail-closed configuration contract for the first same-node inference proof. This schema intentionally forbids generic HTTP ingress, public administration, non-E2EE Matrix, host-direct tools, and remote inference fallback.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "matrix",
+    "gateway",
+    "inference",
+    "sandbox",
+    "storage",
+    "operations"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "home"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{2,31}$"
+        },
+        "home": {
+          "type": "string",
+          "pattern": "^/var/lib/hermes/profiles/[a-z0-9][a-z0-9_-]{2,31}$"
+        }
+      }
+    },
+    "matrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "homeserver",
+        "user_id",
+        "access_token_secret_ref",
+        "crypto_store",
+        "e2ee_mode",
+        "allowed_users",
+        "allowed_rooms",
+        "session_scope"
+      ],
+      "properties": {
+        "homeserver": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "user_id": {
+          "type": "string",
+          "pattern": "^@[^: ]+:[^ ]+$"
+        },
+        "access_token_secret_ref": {
+          "type": "string",
+          "pattern": "^aws-secretsmanager:[A-Za-z0-9/_+=.@-]+$"
+        },
+        "crypto_store": {
+          "type": "string",
+          "pattern": "^/var/lib/hermes/profiles/[a-z0-9][a-z0-9_-]{2,31}/matrix-crypto$"
+        },
+        "e2ee_mode": {"const": "required"},
+        "allowed_users": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^@[^: ]+:[^ ]+$"
+          }
+        },
+        "allowed_rooms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^![^: ]+:[^ ]+$"
+          }
+        },
+        "session_scope": {"const": "room"}
+      }
+    },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_server_enabled"],
+      "properties": {
+        "api_server_enabled": {"const": false}
+      }
+    },
+    "inference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "base_url",
+        "model_id",
+        "model_sha256",
+        "fallbacks"
+      ],
+      "properties": {
+        "provider": {"const": "custom"},
+        "base_url": {
+          "type": "string",
+          "pattern": "^http://(127\\.0\\.0\\.1|localhost):[0-9]{2,5}/v1/?$"
+        },
+        "model_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "model_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "fallbacks": {
+          "type": "array",
+          "maxItems": 0
+        }
+      }
+    },
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend"],
+      "properties": {
+        "backend": {"const": "docker"}
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encrypted"],
+      "properties": {
+        "encrypted": {"const": true}
+      }
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "administration",
+        "public_ssh",
+        "public_agent_ingress"
+      ],
+      "properties": {
+        "administration": {"const": "ssm"},
+        "public_ssh": {"const": false},
+        "public_agent_ingress": {"const": false}
+      }
+    }
+  }
+}

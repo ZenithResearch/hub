@@ -12,6 +12,7 @@ This directory contains current architecture/operations docs and older planning 
 | Understand Frank native review execution | `frank-native-case-pipeline.md` and `../services/frank/README.md` |
 | Understand case dispatch / Cases observability | `case-dispatch-review.md`, `frank-native-case-pipeline.md`, `../services/cases/README.md` |
 | Run or roll production | `operations/production-rollout.md`, `operations/operator-updates.md`, `operations/production-source-ledger.md`, `../infra/aws_baseline_80/DEPLOYMENT.md` |
+| Build the first Matrix-only profiled Hermes cloud agent | `issues/hermes-cloud-agent-v0/README.md` and `../infra/hermes_cloud_agent/profile.schema.json` |
 | Understand local runtime-state privacy | `local-runtime-state.md` |
 | Work on ElevenLabs/local Whisper STT | `ops/elevenlabs-stt-rollout.md`, `../services/stt_http/README.md`, `../services/frank/README.md` |
 | Read historical implementation plans | `plans/` |
@@ -22,6 +23,7 @@ This directory contains current architecture/operations docs and older planning 
 - `frank-native-case-pipeline.md` — Frank native case-pipeline runtime and Cases observability contract.
 - `frank-sophia-runtime-transition-layers.md` — Frank/Sophia boundary notes.
 - `case-dispatch-review.md` — case dispatch review notes.
+- `issues/hermes-cloud-agent-v0/` — issue #97 contract, threat boundary, configuration schema, and proof checklist for a Matrix-only profiled cloud agent.
 - `local-runtime-state.md` — tracked vs ignored runtime-state boundary.
 - `hermes-forward-strategy-report-2026-04-29.md` — strategic/background report.
 
