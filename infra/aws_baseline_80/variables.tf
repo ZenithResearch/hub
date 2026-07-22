@@ -735,3 +735,66 @@ variable "matrix_federation_allowed_ipv6_cidr_blocks" {
   type        = list(string)
   default     = []
 }
+
+variable "enable_hermes_cloud_agent" {
+  description = "Create the non-production Matrix-only profiled Hermes EC2 proof node. Disabled by default."
+  type        = bool
+  default     = false
+}
+
+variable "hermes_cloud_agent_ami_id" {
+  description = "Reviewed Linux AMI ID for the Hermes cloud-agent node. Required when enable_hermes_cloud_agent is true."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.hermes_cloud_agent_ami_id == "" || can(regex("^ami-[0-9a-f]+$", var.hermes_cloud_agent_ami_id))
+    error_message = "hermes_cloud_agent_ami_id must be empty or a valid AMI ID."
+  }
+}
+
+variable "hermes_cloud_agent_instance_type" {
+  description = "Initial combined Hermes plus local-inference node size; downsize only from measured evidence."
+  type        = string
+  default     = "m7i.2xlarge"
+}
+
+variable "hermes_cloud_agent_root_volume_size_gib" {
+  description = "Encrypted root volume size for the Hermes cloud-agent node."
+  type        = number
+  default     = 40
+
+  validation {
+    condition     = var.hermes_cloud_agent_root_volume_size_gib >= 20
+    error_message = "hermes_cloud_agent_root_volume_size_gib must be at least 20 GiB."
+  }
+}
+
+variable "hermes_cloud_agent_state_volume_size_gib" {
+  description = "Encrypted persistent profile, Matrix crypto, session, memory, skill, log, and model state volume size."
+  type        = number
+  default     = 200
+
+  validation {
+    condition     = var.hermes_cloud_agent_state_volume_size_gib >= 100
+    error_message = "hermes_cloud_agent_state_volume_size_gib must be at least 100 GiB for profile and model state."
+  }
+}
+
+variable "hermes_cloud_agent_state_kms_key_arn" {
+  description = "Optional customer-managed KMS key ARN for the persistent state volume. Empty uses the AWS-managed EBS key."
+  type        = string
+  default     = ""
+}
+
+variable "hermes_cloud_agent_secret_arns" {
+  description = "Exact Secrets Manager ARNs the node may read at runtime. At least one is required when enabled."
+  type        = list(string)
+  default     = []
+}
+
+variable "hermes_cloud_agent_secret_kms_key_arns" {
+  description = "Exact customer-managed KMS key ARNs needed to decrypt declared runtime secrets. Empty for AWS-managed secret encryption."
+  type        = list(string)
+  default     = []
+}

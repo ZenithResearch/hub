@@ -203,3 +203,18 @@ output "matrix_alb_dns_name" {
   description = "ALB DNS target for the external synapse.zenith-research.ca record."
   value       = aws_lb.gateway.dns_name
 }
+
+output "hermes_cloud_agent_instance_id" {
+  description = "Instance ID for the optional Matrix-only profiled Hermes cloud-agent proof node."
+  value       = var.enable_hermes_cloud_agent ? aws_instance.hermes_cloud_agent[0].id : null
+}
+
+output "hermes_cloud_agent_private_ip" {
+  description = "Private IP for the optional Matrix-only profiled Hermes cloud-agent proof node."
+  value       = var.enable_hermes_cloud_agent ? aws_instance.hermes_cloud_agent[0].private_ip : null
+}
+
+output "hermes_cloud_agent_state_volume_id" {
+  description = "Encrypted persistent state volume ID for the optional Hermes cloud-agent node."
+  value       = var.enable_hermes_cloud_agent ? aws_ebs_volume.hermes_cloud_agent_state[0].id : null
+}
