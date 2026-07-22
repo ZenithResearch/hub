@@ -5,21 +5,25 @@ After=hermes-state-volume.service
 
 [Service]
 Type=simple
-User=hermes
-Group=hermes
+User=hermes-sandbox
+Group=hermes-podman
 RuntimeDirectory=hermes-podman
-RuntimeDirectoryMode=0700
+RuntimeDirectoryMode=0770
 Delegate=yes
-Environment=HOME=/var/lib/hermes
+UMask=0007
+Environment=HOME=/var/lib/hermes/podman
 Environment=XDG_RUNTIME_DIR=/run/hermes-podman
 ExecStart=/usr/bin/podman system service --time=0 unix:///run/hermes-podman/podman.sock
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
+KeyringMode=private
+ProtectProc=invisible
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/hermes /run/hermes-podman
+ReadWritePaths=/var/lib/hermes/podman /run/hermes-podman
+InaccessiblePaths=/var/lib/hermes/profiles
 
 [Install]
 WantedBy=multi-user.target

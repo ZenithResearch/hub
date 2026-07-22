@@ -27,7 +27,11 @@ locals {
       fallbacks    = []
     }
     sandbox = {
-      backend = "docker"
+      backend                = "docker"
+      network                = false
+      host_mounts            = false
+      credential_passthrough = false
+      allowed_toolsets       = ["clarify", "file", "memory", "terminal", "todo"]
     }
     storage = {
       encrypted = true
@@ -39,9 +43,30 @@ locals {
     }
   }
   hermes_cloud_agent_config = {
+    agent = {
+      disabled_toolsets = [
+        "browser",
+        "code_execution",
+        "computer_use",
+        "cronjob",
+        "delegation",
+        "homeassistant",
+        "messaging",
+        "skills",
+      ]
+    }
     group_sessions_per_user = true
+    platform_toolsets = {
+      matrix = ["clarify", "file", "memory", "terminal", "todo"]
+    }
     terminal = {
-      backend = "docker"
+      credential_files              = []
+      docker_env                    = {}
+      docker_forward_env            = []
+      docker_mount_cwd_to_workspace = false
+      docker_network                = false
+      docker_volumes                = []
+      env_type                      = "docker"
     }
     security = {
       redact_secrets = true
@@ -163,16 +188,17 @@ resource "aws_instance" "hermes_cloud_agent" {
   iam_instance_profile        = aws_iam_instance_profile.hermes_cloud_agent[0].name
   user_data_replace_on_change = true
   user_data_base64 = base64encode(templatefile("${path.module}/../hermes_cloud_agent/bootstrap.sh.tftpl", {
-    profile_json_b64    = base64encode(jsonencode(local.hermes_cloud_agent_profile_contract))
-    profile_schema_b64  = filebase64("${path.module}/../hermes_cloud_agent/profile.schema.json")
-    profile_config_b64  = base64encode(yamlencode(local.hermes_cloud_agent_config))
-    state_volume_id     = aws_ebs_volume.hermes_cloud_agent_state[0].id
-    runner_b64          = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-run")
-    mount_script_b64    = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-state-volume-mount")
-    secret_reader_b64   = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-read-matrix-secret")
-    state_service_b64   = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-state-volume.service")
-    podman_service_b64  = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-podman.service")
-    gateway_service_b64 = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-cloud-agent.service")
+    profile_json_b64       = base64encode(jsonencode(local.hermes_cloud_agent_profile_contract))
+    profile_schema_b64     = filebase64("${path.module}/../hermes_cloud_agent/profile.schema.json")
+    profile_config_b64     = base64encode(yamlencode(local.hermes_cloud_agent_config))
+    state_volume_id        = aws_ebs_volume.hermes_cloud_agent_state[0].id
+    runner_b64             = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-run")
+    mount_script_b64       = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-state-volume-mount")
+    secret_reader_b64      = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-read-matrix-secret")
+    matrix_trust_patch_b64 = filebase64("${path.module}/../hermes_cloud_agent/patches/strict-matrix-device-trust.patch")
+    state_service_b64      = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-state-volume.service")
+    podman_service_b64     = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-podman.service")
+    gateway_service_b64    = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-cloud-agent.service")
   }))
 
   root_block_device {
@@ -211,6 +237,11 @@ resource "aws_instance" "hermes_cloud_agent" {
       condition     = can(regex("^[a-f0-9]{64}$", var.hermes_cloud_agent_model_sha256))
       error_message = "A pinned local-model SHA-256 is required when the Hermes cloud agent is enabled."
     }
+
+    precondition {
+      condition     = var.hermes_cloud_agent_state_kms_key_arn != ""
+      error_message = "A dedicated customer-managed KMS key is required for Hermes Matrix state."
+    }
   }
 
   tags = merge(local.tags, {
@@ -222,11 +253,16 @@ resource "aws_instance" "hermes_cloud_agent" {
 resource "aws_ebs_volume" "hermes_cloud_agent_state" {
   count = var.enable_hermes_cloud_agent ? 1 : 0
 
-  availability_zone = aws_subnet.private[0].availability_zone
-  encrypted         = true
-  kms_key_id        = var.hermes_cloud_agent_state_kms_key_arn != "" ? var.hermes_cloud_agent_state_kms_key_arn : null
-  size              = var.hermes_cloud_agent_state_volume_size_gib
-  type              = "gp3"
+  availability_zone    = aws_subnet.private[0].availability_zone
+  encrypted            = true
+  kms_key_id           = var.hermes_cloud_agent_state_kms_key_arn
+  multi_attach_enabled = false
+  size                 = var.hermes_cloud_agent_state_volume_size_gib
+  type                 = "gp3"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 
   tags = merge(local.tags, {
     Name = "${local.name_prefix}-hermes-cloud-agent-state"

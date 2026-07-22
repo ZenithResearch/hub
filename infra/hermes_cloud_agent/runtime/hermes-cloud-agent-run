@@ -27,10 +27,9 @@ secret_payload=$(/opt/hermes/venv/bin/python \
 
 matrix_access_token=$(jq -er '.access_token | strings | select(length > 0)' <<<"$secret_payload")
 matrix_device_id=$(jq -er '.device_id | strings | select(length > 0)' <<<"$secret_payload")
-matrix_recovery_key=$(jq -r '.recovery_key // empty | strings' <<<"$secret_payload")
 unset secret_payload
 
-for value in "$matrix_access_token" "$matrix_device_id" "$matrix_recovery_key"; do
+for value in "$matrix_access_token" "$matrix_device_id"; do
   if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
     echo "Matrix credential fields must be single-line" >&2
     exit 1
@@ -38,6 +37,7 @@ for value in "$matrix_access_token" "$matrix_device_id" "$matrix_recovery_key"; 
 done
 
 export HERMES_HOME="$profile_home"
+export HOME="$profile_home"
 export MATRIX_HOMESERVER="$homeserver"
 export MATRIX_USER_ID="$user_id"
 export MATRIX_ACCESS_TOKEN="$matrix_access_token"
@@ -58,8 +58,5 @@ export WEBHOOK_ENABLED=false
 export TERMINAL_ENV=docker
 export DOCKER_HOST=unix:///run/hermes-podman/podman.sock
 export HERMES_REDACT_SECRETS=true
-if [[ -n "$matrix_recovery_key" ]]; then
-  export MATRIX_RECOVERY_KEY="$matrix_recovery_key"
-fi
 
 exec "$HERMES_BIN" gateway run --external-supervisor

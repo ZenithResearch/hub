@@ -1,0 +1,8 @@
+diff --git a/plugins/platforms/matrix/adapter.py b/plugins/platforms/matrix/adapter.py
+--- a/plugins/platforms/matrix/adapter.py
++++ b/plugins/platforms/matrix/adapter.py
+@@ -1414,2 +1414,2 @@
+-                    olm.share_keys_min_trust = TrustState.UNVERIFIED
+-                    olm.send_keys_min_trust = TrustState.UNVERIFIED
++                    olm.share_keys_min_trust = TrustState.CROSS_SIGNED_TRUSTED
++                    olm.send_keys_min_trust = TrustState.CROSS_SIGNED_TRUSTED

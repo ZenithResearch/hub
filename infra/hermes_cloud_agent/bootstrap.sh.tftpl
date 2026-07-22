@@ -24,14 +24,20 @@ apt-get install -y --no-install-recommends \
   uidmap
 rm -rf /var/lib/apt/lists/*
 
+getent group hermes-podman >/dev/null 2>&1 || groupadd --system hermes-podman
 if ! id hermes >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/hermes --shell /usr/sbin/nologin hermes
 fi
-if ! grep -q '^hermes:' /etc/subuid; then
-  usermod --add-subuids 100000-165535 hermes
+if ! id hermes-sandbox >/dev/null 2>&1; then
+  useradd --system --gid hermes-podman --home-dir /var/lib/hermes/podman \
+    --shell /usr/sbin/nologin hermes-sandbox
 fi
-if ! grep -q '^hermes:' /etc/subgid; then
-  usermod --add-subgids 100000-165535 hermes
+usermod --append --groups hermes-podman hermes
+if ! grep -q '^hermes-sandbox:' /etc/subuid; then
+  usermod --add-subuids 100000-165535 hermes-sandbox
+fi
+if ! grep -q '^hermes-sandbox:' /etc/subgid; then
+  usermod --add-subgids 100000-165535 hermes-sandbox
 fi
 
 install -d -m 0750 /etc/hermes-cloud-agent
@@ -55,9 +61,12 @@ printf '%s' '${runner_b64}' | base64 -d > /usr/local/libexec/hermes-cloud-agent-
 printf '%s' '${mount_script_b64}' | base64 -d > /usr/local/libexec/hermes-state-volume-mount
 # shellcheck disable=SC2016
 printf '%s' '${secret_reader_b64}' | base64 -d > /usr/local/libexec/hermes-read-matrix-secret
+# shellcheck disable=SC2016
+printf '%s' '${matrix_trust_patch_b64}' | base64 -d > /opt/hermes/strict-matrix-device-trust.patch
 chmod 0755 /usr/local/libexec/hermes-cloud-agent-run \
   /usr/local/libexec/hermes-state-volume-mount \
   /usr/local/libexec/hermes-read-matrix-secret
+chmod 0444 /opt/hermes/strict-matrix-device-trust.patch
 
 # shellcheck disable=SC2016
 printf '%s' '${state_service_b64}' | base64 -d > /etc/systemd/system/hermes-state-volume.service
@@ -73,7 +82,10 @@ rm -rf "$HERMES_SOURCE"
 git clone --filter=blob:none --no-checkout "$HERMES_REPO" "$HERMES_SOURCE"
 git -C "$HERMES_SOURCE" fetch --depth 1 origin "$HERMES_COMMIT"
 git -C "$HERMES_SOURCE" checkout --detach FETCH_HEAD
-test "$(git -C "$HERMES_SOURCE" rev-parse HEAD)" = "$HERMES_COMMIT"
+[[ "$(git -C "$HERMES_SOURCE" rev-parse HEAD)" == "$HERMES_COMMIT" ]]
+git -C "$HERMES_SOURCE" apply --unidiff-zero --check /opt/hermes/strict-matrix-device-trust.patch
+git -C "$HERMES_SOURCE" apply --unidiff-zero /opt/hermes/strict-matrix-device-trust.patch
+[[ "$(grep -c 'TrustState.CROSS_SIGNED_TRUSTED' "$HERMES_SOURCE/plugins/platforms/matrix/adapter.py")" == "2" ]]
 
 python3 -m venv "$HERMES_VENV"
 "$HERMES_VENV/bin/pip" install --upgrade 'pip==26.1.1'

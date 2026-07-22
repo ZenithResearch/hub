@@ -90,9 +90,15 @@ The credential class is deliberately different. The E2EE Hermes profile uses a d
 - Systems Manager administration;
 - no public SSH or agent ingress.
 
-The node installs upstream Hermes release `v2026.7.20` at commit `3ef6bbd201263d354fd83ec55b3c306ded2eb72a` with the Matrix E2EE extra. `HERMES_HOME` is the encrypted per-profile directory, so Hermes' native Matrix crypto store resolves to `<profile-home>/platforms/matrix/store`. The Matrix Secrets Manager value is a JSON object with required `access_token` and stable `device_id` fields plus an optional `recovery_key`; the runtime fetches it into process memory and does not write a profile `.env` file.
+The node installs upstream Hermes release `v2026.7.20` at commit `3ef6bbd201263d354fd83ec55b3c306ded2eb72a` with the Matrix E2EE extra. `HERMES_HOME` is the encrypted per-profile directory, so Hermes' native Matrix crypto store resolves to `<profile-home>/platforms/matrix/store`. The Matrix Secrets Manager value must be a JSON object containing exactly `access_token` and stable `device_id`; the runtime rejects recovery keys and unknown fields, fetches the normalized value into process memory, and does not write a profile `.env` file. Device verification or recovery is a separate operator-gated procedure, never a standing runtime credential.
 
-The declared Docker terminal backend is provided through a dedicated rootless Podman compatibility socket owned by the `hermes` service user. The agent is not added to a host Docker group and cannot reach a root-owned Docker socket.
+The pinned Hermes source receives one repo-owned, reviewable patch that raises outbound room-key sharing and encrypted sends from `UNVERIFIED` to `CROSS_SIGNED_TRUSTED`. Unverified Matrix devices therefore fail closed instead of receiving agent-generated room keys. Operators must cross-sign intended human and agent devices before conversational acceptance can pass.
+
+The declared Docker terminal backend is provided through a dedicated rootless Podman compatibility socket owned by a separate `hermes-sandbox` OS principal. The gateway receives group-only access to that socket, while the Podman daemon is denied the Matrix profile path. The agent is not added to a host Docker group and cannot reach a root-owned Docker socket.
+
+Matrix crypto state is owner-only, encrypted with a required customer-managed KMS key, protected from Terraform destruction, and bound on first activation to the exact EBS volume and EC2 instance identity. A snapshot clone, replacement instance, or second activation fails closed until an operator performs the documented recovery transition. Tool containers receive no host volumes, forwarded environment, credentials, working-directory mount, or network access; the Hermes service disables core dumps and runs with a restrictive umask.
+
+Recovery and teardown follow [`state-recovery-runbook.md`](state-recovery-runbook.md); bypassing the activation binding is explicitly outside the first-proof operating contract.
 
 Later remote-inference and secS profiles require a separately reviewed schema version rather than weakening version 1.
 

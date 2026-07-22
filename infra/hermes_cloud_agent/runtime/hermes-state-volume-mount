@@ -48,18 +48,47 @@ elif [[ "$fs_type" != "ext4" ]]; then
   exit 1
 fi
 
-install -d -m 0750 -o hermes -g hermes "$MOUNT_POINT"
+install -d -m 0711 -o root -g root "$MOUNT_POINT"
 mountpoint -q "$MOUNT_POINT" || mount -o nodev,nosuid "$device" "$MOUNT_POINT"
+chown root:root "$MOUNT_POINT"
+chmod 0711 "$MOUNT_POINT"
 
 uuid=$(blkid -s UUID -o value "$device")
 if ! grep -q "UUID=$uuid" /etc/fstab; then
   printf 'UUID=%s %s ext4 defaults,nodev,nosuid,nofail 0 2\n' "$uuid" "$MOUNT_POINT" >> /etc/fstab
 fi
 
-install -d -m 0750 -o hermes -g hermes \
+imds_token=$(curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+  --request PUT \
+  --header 'X-aws-ec2-metadata-token-ttl-seconds: 60' \
+  http://169.254.169.254/latest/api/token)
+instance_id=$(curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+  --header "X-aws-ec2-metadata-token: $imds_token" \
+  http://169.254.169.254/latest/meta-data/instance-id)
+unset imds_token
+if [[ ! "$instance_id" =~ ^i-[0-9a-f]+$ ]]; then
+  echo "invalid EC2 instance identity" >&2
+  exit 1
+fi
+
+binding_file="$MOUNT_POINT/.active-instance"
+expected_binding="$volume_id $instance_id"
+if [[ -e "$binding_file" ]]; then
+  current_binding=$(tr -d '\r\n' < "$binding_file")
+  if [[ "$current_binding" != "$expected_binding" ]]; then
+    echo "refusing cloned or concurrently activated Matrix device state" >&2
+    exit 1
+  fi
+else
+  printf '%s\n' "$expected_binding" | install -m 0600 -o root -g root /dev/stdin "$binding_file"
+fi
+
+install -d -m 0711 -o root -g root "$MOUNT_POINT/profiles"
+install -d -m 0700 -o hermes -g hermes \
   "$MOUNT_POINT/profiles/$profile_id" \
-  "$MOUNT_POINT/profiles/$profile_id/platforms/matrix/store" \
-  "$MOUNT_POINT/models"
-install -m 0640 -o hermes -g hermes \
+  "$MOUNT_POINT/profiles/$profile_id/platforms/matrix/store"
+install -d -m 0700 -o hermes-sandbox -g hermes-podman "$MOUNT_POINT/podman"
+install -d -m 0750 -o hermes -g hermes "$MOUNT_POINT/models"
+install -m 0600 -o hermes -g hermes \
   "$CONFIG_DIR/config.yaml" \
   "$MOUNT_POINT/profiles/$profile_id/config.yaml"

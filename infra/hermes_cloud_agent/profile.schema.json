@@ -127,9 +127,21 @@
     "sandbox": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["backend"],
+      "required": [
+        "backend",
+        "network",
+        "host_mounts",
+        "credential_passthrough",
+        "allowed_toolsets"
+      ],
       "properties": {
-        "backend": {"const": "docker"}
+        "backend": {"const": "docker"},
+        "network": {"const": false},
+        "host_mounts": {"const": false},
+        "credential_passthrough": {"const": false},
+        "allowed_toolsets": {
+          "const": ["clarify", "file", "memory", "terminal", "todo"]
+        }
       }
     },
     "storage": {
