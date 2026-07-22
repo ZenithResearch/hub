@@ -14,6 +14,11 @@ if [[ "${SKIP_PYTHON_TESTS:-0}" != "1" ]]; then
   "$PYTHON_BIN" -m pytest tests -q
 fi
 
+if [[ "${SKIP_PROTO_GENERATION_CHECK:-0}" != "1" ]]; then
+  make proto
+  git diff --exit-code -- libs/common/proto
+fi
+
 if [[ "${SKIP_PRIVATE_ARTIFACT_SCAN:-0}" != "1" ]]; then
   if [[ -n "${PRIVATE_ARTIFACT_SCAN_RANGE:-}" ]]; then
     "$PYTHON_BIN" scripts/private_artifact_scan.py --range "$PRIVATE_ARTIFACT_SCAN_RANGE"

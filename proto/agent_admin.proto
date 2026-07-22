@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package agent.admin.v1;
+
+import "google/protobuf/timestamp.proto";
+
+enum DesiredState {
+  DESIRED_STATE_UNSPECIFIED = 0;
+  DESIRED_STATE_ENABLED = 1;
+  DESIRED_STATE_DISABLED = 2;
+}
+
+enum ObservedState {
+  OBSERVED_STATE_UNSPECIFIED = 0;
+  OBSERVED_STATE_UNKNOWN = 1;
+  OBSERVED_STATE_RUNNING = 2;
+  OBSERVED_STATE_STOPPED = 3;
+  OBSERVED_STATE_DEGRADED = 4;
+}
+
+enum LifecycleAction {
+  LIFECYCLE_ACTION_UNSPECIFIED = 0;
+  LIFECYCLE_ACTION_ENABLE = 1;
+  LIFECYCLE_ACTION_DISABLE = 2;
+  LIFECYCLE_ACTION_RESTART = 3;
+  LIFECYCLE_ACTION_REFRESH_STATUS = 4;
+}
+
+enum OperationState {
+  OPERATION_STATE_UNSPECIFIED = 0;
+  OPERATION_STATE_PENDING = 1;
+  OPERATION_STATE_DISPATCHED = 2;
+  OPERATION_STATE_SUCCEEDED = 3;
+  OPERATION_STATE_FAILED = 4;
+}
+
+message MatrixCredentialReference {
+  string secret_arn = 1;
+  bool configured = 2;
+  bool active = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message Profile {
+  string profile_id = 1;
+  uint64 revision = 2;
+  DesiredState desired_state = 3;
+  ObservedState observed_state = 4;
+  bool ssm_managed = 5;
+  string observed_reason_code = 6;
+  MatrixCredentialReference matrix_credential = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  google.protobuf.Timestamp last_observed_at = 9;
+  bool secrets_printed = 10;
+}
+
+message RegisterProfileRequest {
+  string request_id = 1;
+  string profile_id = 2;
+  string idempotency_key = 3;
+}
+
+message GetProfileRequest {
+  string request_id = 1;
+  string profile_id = 2;
+}
+
+message SetDesiredStateRequest {
+  string request_id = 1;
+  string profile_id = 2;
+  DesiredState desired_state = 3;
+  uint64 expected_revision = 4;
+  string idempotency_key = 5;
+}
+
+message SetMatrixCredentialReferenceRequest {
+  string request_id = 1;
+  string profile_id = 2;
+  string secret_arn = 3;
+  uint64 expected_revision = 4;
+}
+
+message DeactivateMatrixCredentialReferenceRequest {
+  string request_id = 1;
+  string profile_id = 2;
+  uint64 expected_revision = 3;
+}
+
+message RequestLifecycleOperationRequest {
+  string request_id = 1;
+  string profile_id = 2;
+  LifecycleAction action = 3;
+  uint64 expected_revision = 4;
+  string idempotency_key = 5;
+}
+
+message GetLifecycleOperationRequest {
+  string request_id = 1;
+  string profile_id = 2;
+  string operation_id = 3;
+}
+
+message LifecycleOperation {
+  string operation_id = 1;
+  string profile_id = 2;
+  LifecycleAction action = 3;
+  OperationState state = 4;
+  string provider_operation_ref = 5;
+  string reason_code = 6;
+  google.protobuf.Timestamp requested_at = 7;
+  google.protobuf.Timestamp completed_at = 8;
+  bool secrets_printed = 9;
+}
+
+message ListEvidenceRequest {
+  string request_id = 1;
+  string profile_id = 2;
+  uint32 limit = 3;
+}
+
+message EvidenceSummary {
+  string evidence_id = 1;
+  string profile_id = 2;
+  string operation_id = 3;
+  string kind = 4;
+  string outcome = 5;
+  string digest_sha256 = 6;
+  uint64 size_bytes = 7;
+  google.protobuf.Timestamp observed_at = 8;
+}
+
+message ListEvidenceResponse {
+  repeated EvidenceSummary evidence = 1;
+  bool secrets_printed = 2;
+}
+
+service AgentAdmin {
+  rpc RegisterProfile(RegisterProfileRequest) returns (Profile);
+  rpc GetProfile(GetProfileRequest) returns (Profile);
+  rpc SetDesiredState(SetDesiredStateRequest) returns (Profile);
+  rpc SetMatrixCredentialReference(SetMatrixCredentialReferenceRequest) returns (Profile);
+  rpc DeactivateMatrixCredentialReference(DeactivateMatrixCredentialReferenceRequest) returns (Profile);
+  rpc RequestLifecycleOperation(RequestLifecycleOperationRequest) returns (LifecycleOperation);
+  rpc GetLifecycleOperation(GetLifecycleOperationRequest) returns (LifecycleOperation);
+  rpc ListEvidence(ListEvidenceRequest) returns (ListEvidenceResponse);
+}
