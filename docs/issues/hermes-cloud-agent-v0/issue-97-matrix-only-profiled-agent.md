@@ -1,4 +1,4 @@
-# Issue 97: Deploy one Matrix-only profiled Hermes cloud agent
+# Issue 97: Deploy one Matrix-only profiled Hermes cloud agent and private admin control plane
 
 > Issue = PR boundary. Tasks below = commit boundaries inside that PR.
 
@@ -13,9 +13,32 @@
 
 ## Objective
 
-Deploy one isolated non-production Hermes profile on one AWS machine. Matrix is its only remote ingress, llama.cpp inference runs on the same machine, durable profile and Matrix crypto state survive restart, and no generic Hermes HTTP/API control surface is exposed.
+Deploy one isolated non-production Hermes profile on one AWS machine and add the private Hub control-plane seam needed to administer it. Matrix is its only conversational ingress, llama.cpp inference runs on the same machine, durable profile and Matrix crypto state survive restart, and no generic Hermes HTTP/API control surface is exposed.
 
 Matrix remains available for human-agent and agent-to-agent conversation. Consequential machine operations require a later secS boundary and cannot be authorized by Matrix identity, room membership, or message text.
+
+The Hub Agent Admin Service is an operator/resource-control surface, not agent ingress. Its internal gRPC contract sits behind the authenticated Gateway admin HTTP edge and exposes bounded profile registration, desired and observed state, status, restart/disable requests, credential-reference lifecycle, and redacted evidence. It does not accept prompts or arbitrary tool calls, and the generic Hermes HTTP/API control surface remains disabled.
+
+## Architecture boundary
+
+```text
+ZenithOS operator
+  -> authenticated Gateway admin HTTP edge
+  -> Agent Admin Service (internal gRPC)
+  -> desired/observed profile registry + AWS Systems Manager operations
+  -> private profiled cloud node
+
+Humans/agents
+  -> Matrix/Synapse E2EE
+  -> Hermes Matrix adapter
+  -> local llama.cpp inference
+
+Authorized machines (later)
+  -> secS verifier/policy
+  -> one declared bounded handler
+```
+
+Terraform owns the private node, encrypted storage, IAM, networking, and bootstrap resources. The admin service reconciles operational state against that IaC-owned inventory; it does not silently mutate Terraform state or create an alternate provisioning authority.
 
 ## Locked threat boundary
 
@@ -26,6 +49,8 @@ Matrix remains available for human-agent and agent-to-agent conversation. Conseq
 - Dedicated Matrix account/device: conversational identity only.
 - Local llama.cpp listener: inference transport only, bound to loopback or a node-local network.
 - Container sandbox: terminal/file execution boundary.
+- Authenticated Gateway admin edge: operator authentication and HTTP projection only.
+- Agent Admin Service: bounded resource lifecycle and redacted status; no prompt/tool ingress.
 
 ### Untrusted inputs
 
@@ -42,6 +67,13 @@ Matrix remains available for human-agent and agent-to-agent conversation. Conseq
 - Local inference failure cannot select a remote provider or fallback.
 - Host-direct terminal/file execution cannot replace the declared sandbox.
 - Secrets cannot enter Git, Terraform state values, cloud-init output, process arguments, logs, or evidence.
+- Admin status/list operations cannot return raw credential values.
+
+## Matrix credential lifecycle
+
+The first cloud profile follows the Sophia operator pattern already used by ZenithOS: a service identity is separate from the operator's human Matrix account, is shown through an operator-facing setup/status flow, and uses a per-profile credential namespace.
+
+The credential class is deliberately different. The E2EE Hermes profile uses a dedicated Matrix user/device access token and persistent device crypto state, not a Sophia application-service token. Production runtime material is referenced from AWS Secrets Manager. The admin API stores and returns secret references and redacted configuration status, never raw credential values through normal list/status operations.
 
 ## Configuration contract
 
@@ -74,6 +106,10 @@ Add the minimal encrypted persistent volume, least-privilege IAM/SSM role, priva
 
 Add isolated profile materialization, runtime secret injection, current Hermes installation, Matrix E2EE configuration, persistent crypto state, and service supervision with the API server disabled.
 
+### Task 3A: Hub agent administration seam
+
+Add the Agent Admin Service contract and implementation, an authenticated Gateway admin HTTP projection, one-profile desired/observed state, fail-closed AWS Systems Manager operation dispatch, Matrix credential-reference lifecycle, and redacted status/evidence output. This is not generic Hermes ingress and does not expose prompt or arbitrary tool execution.
+
 ### Task 4: Same-node inference
 
 Add checksum-pinned llama.cpp/Qwen provisioning, loopback-only serving, explicit custom-provider binding, readiness, and no-fallback behavior.
@@ -93,6 +129,8 @@ Add and run restart persistence, authorized encrypted Matrix round trip, unautho
 - The security group has no public SSH or agent-interaction ingress.
 - Administration uses Systems Manager.
 - Terminal/file work is sandboxed.
+- ZenithOS-compatible admin routes can register and inspect the first profile without returning raw Matrix credentials.
+- The private admin service can report desired/observed state and request only declared Systems Manager lifecycle operations.
 - No raw credentials or machine-local operator paths appear in committed files or evidence.
 
 ## Evidence checklist
@@ -119,6 +157,8 @@ Add and run restart persistence, authorized encrypted Matrix round trip, unautho
 - [ ] Model checksum matches the declared digest.
 - [ ] Hermes has no configured remote fallback.
 - [ ] Sandbox backend is operational before gateway readiness.
+- [ ] Agent admin status is redacted and contains secret references/configured flags only.
+- [ ] Admin operations are allowlisted and dispatch through AWS Systems Manager rather than public node ingress.
 
 ### Live proof
 
@@ -147,6 +187,6 @@ Stop rather than widen or simulate if:
 - Generic Hermes HTTP ingress
 - secS implementation or exposure
 - Separate-machine or Hub-backed inference
-- Fleet scheduling or multi-profile density
+- Fleet scheduling, autoscaling, or multi-profile density beyond the first profile registry seam
 - Broad Hub cleanup
 - Production traffic or production-readiness claims

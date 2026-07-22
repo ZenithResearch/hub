@@ -9,6 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = ROOT / "infra/hermes_cloud_agent/profile.schema.json"
+ISSUE_SPEC_PATH = ROOT / "docs/issues/hermes-cloud-agent-v0/issue-97-matrix-only-profiled-agent.md"
 
 
 def _schema() -> dict:
@@ -84,3 +85,30 @@ def test_schema_requires_nonempty_matrix_allowlists() -> None:
 
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(config, _schema())
+
+
+def test_issue_spec_separates_private_admin_control_from_agent_ingress() -> None:
+    spec = ISSUE_SPEC_PATH.read_text(encoding="utf-8")
+
+    required = (
+        "Agent Admin Service",
+        "internal gRPC",
+        "authenticated Gateway admin HTTP edge",
+        "desired and observed state",
+        "AWS Systems Manager",
+        "does not accept prompts or arbitrary tool calls",
+        "generic Hermes HTTP/API control surface remains disabled",
+    )
+
+    for phrase in required:
+        assert phrase in spec
+
+
+def test_issue_spec_preserves_sophia_lifecycle_pattern_without_reusing_as_token() -> None:
+    spec = ISSUE_SPEC_PATH.read_text(encoding="utf-8")
+
+    assert "Sophia operator pattern" in spec
+    assert "per-profile credential namespace" in spec
+    assert "Matrix user/device access token" in spec
+    assert "not a Sophia application-service token" in spec
+    assert "raw credential values" in spec
