@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 027
+
+readonly HERMES_REPO="https://github.com/NousResearch/hermes-agent.git"
+readonly HERMES_COMMIT="3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
+readonly HERMES_SOURCE=/opt/hermes/source
+readonly HERMES_VENV=/opt/hermes/venv
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \
+  ca-certificates \
+  curl \
+  fuse-overlayfs \
+  git \
+  jq \
+  libolm-dev \
+  podman \
+  python3 \
+  python3-pip \
+  python3-venv \
+  slirp4netns \
+  uidmap
+rm -rf /var/lib/apt/lists/*
+
+if ! id hermes >/dev/null 2>&1; then
+  useradd --system --create-home --home-dir /var/lib/hermes --shell /usr/sbin/nologin hermes
+fi
+if ! grep -q '^hermes:' /etc/subuid; then
+  usermod --add-subuids 100000-165535 hermes
+fi
+if ! grep -q '^hermes:' /etc/subgid; then
+  usermod --add-subgids 100000-165535 hermes
+fi
+
+install -d -m 0750 /etc/hermes-cloud-agent
+install -d -m 0755 /usr/local/libexec /opt/hermes
+
+# Values below are Terraform template expressions, not shell expansions.
+# shellcheck disable=SC2016
+printf '%s' '${profile_json_b64}' | base64 -d > /etc/hermes-cloud-agent/profile.json
+# shellcheck disable=SC2016
+printf '%s' '${profile_schema_b64}' | base64 -d > /etc/hermes-cloud-agent/profile.schema.json
+# shellcheck disable=SC2016
+printf '%s' '${profile_config_b64}' | base64 -d > /etc/hermes-cloud-agent/config.yaml
+# shellcheck disable=SC2016
+printf '%s\n' '${state_volume_id}' > /etc/hermes-cloud-agent/state-volume-id
+chmod 0640 /etc/hermes-cloud-agent/profile.json /etc/hermes-cloud-agent/profile.schema.json /etc/hermes-cloud-agent/config.yaml
+chmod 0644 /etc/hermes-cloud-agent/state-volume-id
+
+# shellcheck disable=SC2016
+printf '%s' '${runner_b64}' | base64 -d > /usr/local/libexec/hermes-cloud-agent-run
+# shellcheck disable=SC2016
+printf '%s' '${mount_script_b64}' | base64 -d > /usr/local/libexec/hermes-state-volume-mount
+# shellcheck disable=SC2016
+printf '%s' '${secret_reader_b64}' | base64 -d > /usr/local/libexec/hermes-read-matrix-secret
+chmod 0755 /usr/local/libexec/hermes-cloud-agent-run \
+  /usr/local/libexec/hermes-state-volume-mount \
+  /usr/local/libexec/hermes-read-matrix-secret
+
+# shellcheck disable=SC2016
+printf '%s' '${state_service_b64}' | base64 -d > /etc/systemd/system/hermes-state-volume.service
+# shellcheck disable=SC2016
+printf '%s' '${podman_service_b64}' | base64 -d > /etc/systemd/system/hermes-podman.service
+# shellcheck disable=SC2016
+printf '%s' '${gateway_service_b64}' | base64 -d > /etc/systemd/system/hermes-cloud-agent.service
+chmod 0644 /etc/systemd/system/hermes-state-volume.service \
+  /etc/systemd/system/hermes-podman.service \
+  /etc/systemd/system/hermes-cloud-agent.service
+
+rm -rf "$HERMES_SOURCE"
+git clone --filter=blob:none --no-checkout "$HERMES_REPO" "$HERMES_SOURCE"
+git -C "$HERMES_SOURCE" fetch --depth 1 origin "$HERMES_COMMIT"
+git -C "$HERMES_SOURCE" checkout --detach FETCH_HEAD
+test "$(git -C "$HERMES_SOURCE" rev-parse HEAD)" = "$HERMES_COMMIT"
+
+python3 -m venv "$HERMES_VENV"
+"$HERMES_VENV/bin/pip" install --upgrade 'pip==26.1.1'
+(
+  cd "$HERMES_SOURCE"
+  "$HERMES_VENV/bin/pip" install ".[matrix]" 'boto3==1.42.89' 'jsonschema==4.26.0'
+)
+ln -sfn /usr/bin/podman /usr/local/bin/docker
+
+systemctl daemon-reload
+systemctl enable hermes-state-volume.service hermes-podman.service hermes-cloud-agent.service
+systemctl start hermes-state-volume.service
+systemctl start hermes-podman.service

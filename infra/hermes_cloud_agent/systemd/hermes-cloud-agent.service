@@ -1,0 +1,31 @@
+[Unit]
+Description=Matrix-only profiled Hermes cloud agent
+Requires=hermes-state-volume.service hermes-podman.service
+After=network-online.target hermes-state-volume.service hermes-podman.service
+Wants=network-online.target
+ConditionPathExists=/var/lib/hermes/models/READY
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+Environment=HOME=/var/lib/hermes
+ExecStart=/usr/local/libexec/hermes-cloud-agent-run
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=45
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/hermes /run/hermes-podman
+
+[Install]
+WantedBy=multi-user.target

@@ -26,8 +26,11 @@ def _valid_config() -> dict:
         "matrix": {
             "homeserver": "https://synapse.zenith-research.ca",
             "user_id": "@cloudproof:zenith-research.ca",
-            "access_token_secret_ref": "aws-secretsmanager:hermes/cloudproof/matrix-token",
-            "crypto_store": "/var/lib/hermes/profiles/cloudproof/matrix-crypto",
+            "access_token_secret_ref": (
+                "aws-secretsmanager:arn:aws:secretsmanager:us-west-2:123456789012:"
+                "secret:hermes/cloudproof/matrix-token-AbCdEf"
+            ),
+            "crypto_store": "/var/lib/hermes/profiles/cloudproof/platforms/matrix/store",
             "e2ee_mode": "required",
             "allowed_users": ["@operator:zenith-research.ca"],
             "allowed_rooms": ["!proof:zenith-research.ca"],
@@ -85,6 +88,14 @@ def test_schema_requires_nonempty_matrix_allowlists() -> None:
 
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(config, _schema())
+
+
+def test_schema_requires_hermes_native_profile_matrix_store() -> None:
+    config = copy.deepcopy(_valid_config())
+    config["matrix"]["crypto_store"] = "/var/lib/hermes/profiles/cloudproof/matrix-crypto"
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(config, _schema())
 
 
 def test_issue_spec_separates_private_admin_control_from_agent_ingress() -> None:

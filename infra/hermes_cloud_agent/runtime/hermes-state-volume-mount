@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly CONFIG_DIR=/etc/hermes-cloud-agent
+readonly MOUNT_POINT=/var/lib/hermes
+readonly VOLUME_ID_FILE="$CONFIG_DIR/state-volume-id"
+readonly PROFILE_FILE="$CONFIG_DIR/profile.json"
+
+volume_id=$(tr -d '[:space:]' < "$VOLUME_ID_FILE")
+volume_serial=${volume_id//-/}
+profile_id=$(jq -er '.profile.id' "$PROFILE_FILE")
+
+if [[ ! "$volume_id" =~ ^vol-[0-9a-f]+$ ]]; then
+  echo "invalid state volume id" >&2
+  exit 1
+fi
+if [[ ! "$profile_id" =~ ^[a-z0-9][a-z0-9_-]{2,31}$ ]]; then
+  echo "invalid profile id" >&2
+  exit 1
+fi
+
+device=""
+for _ in $(seq 1 120); do
+  candidate="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${volume_serial}"
+  if [[ -b "$candidate" ]]; then
+    device="$candidate"
+    break
+  fi
+  for candidate in /dev/xvdf /dev/sdf; do
+    if [[ -b "$candidate" ]]; then
+      device="$candidate"
+      break 2
+    fi
+  done
+  sleep 5
+done
+
+if [[ -z "$device" ]]; then
+  echo "declared state volume did not attach" >&2
+  exit 1
+fi
+
+fs_type=$(blkid -s TYPE -o value "$device" 2>/dev/null || true)
+if [[ -z "$fs_type" ]]; then
+  mkfs.ext4 -F -L hermes-state "$device"
+elif [[ "$fs_type" != "ext4" ]]; then
+  echo "state volume filesystem must be ext4" >&2
+  exit 1
+fi
+
+install -d -m 0750 -o hermes -g hermes "$MOUNT_POINT"
+mountpoint -q "$MOUNT_POINT" || mount -o nodev,nosuid "$device" "$MOUNT_POINT"
+
+uuid=$(blkid -s UUID -o value "$device")
+if ! grep -q "UUID=$uuid" /etc/fstab; then
+  printf 'UUID=%s %s ext4 defaults,nodev,nosuid,nofail 0 2\n' "$uuid" "$MOUNT_POINT" >> /etc/fstab
+fi
+
+install -d -m 0750 -o hermes -g hermes \
+  "$MOUNT_POINT/profiles/$profile_id" \
+  "$MOUNT_POINT/profiles/$profile_id/platforms/matrix/store" \
+  "$MOUNT_POINT/models"
+install -m 0640 -o hermes -g hermes \
+  "$CONFIG_DIR/config.yaml" \
+  "$MOUNT_POINT/profiles/$profile_id/config.yaml"

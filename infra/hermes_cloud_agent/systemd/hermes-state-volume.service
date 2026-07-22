@@ -1,0 +1,13 @@
+[Unit]
+Description=Prepare encrypted Hermes profile state volume
+After=local-fs.target
+Before=hermes-podman.service hermes-cloud-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/hermes-state-volume-mount
+RemainAfterExit=true
+TimeoutStartSec=650
+
+[Install]
+WantedBy=multi-user.target

@@ -90,6 +90,10 @@ The credential class is deliberately different. The E2EE Hermes profile uses a d
 - Systems Manager administration;
 - no public SSH or agent ingress.
 
+The node installs upstream Hermes release `v2026.7.20` at commit `3ef6bbd201263d354fd83ec55b3c306ded2eb72a` with the Matrix E2EE extra. `HERMES_HOME` is the encrypted per-profile directory, so Hermes' native Matrix crypto store resolves to `<profile-home>/platforms/matrix/store`. The Matrix Secrets Manager value is a JSON object with required `access_token` and stable `device_id` fields plus an optional `recovery_key`; the runtime fetches it into process memory and does not write a profile `.env` file.
+
+The declared Docker terminal backend is provided through a dedicated rootless Podman compatibility socket owned by the `hermes` service user. The agent is not added to a host Docker group and cannot reach a root-owned Docker socket.
+
 Later remote-inference and secS profiles require a separately reviewed schema version rather than weakening version 1.
 
 ## Tasks — commit boundaries

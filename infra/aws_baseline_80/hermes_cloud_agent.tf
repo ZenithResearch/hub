@@ -1,3 +1,54 @@
+locals {
+  hermes_cloud_agent_profile_home = "/var/lib/hermes/profiles/${var.hermes_cloud_agent_profile_id}"
+  hermes_cloud_agent_profile_contract = {
+    schema_version = 1
+    profile = {
+      id   = var.hermes_cloud_agent_profile_id
+      home = local.hermes_cloud_agent_profile_home
+    }
+    matrix = {
+      homeserver              = var.hermes_cloud_agent_matrix_homeserver
+      user_id                 = var.hermes_cloud_agent_matrix_user_id
+      access_token_secret_ref = "aws-secretsmanager:${var.hermes_cloud_agent_matrix_secret_arn}"
+      crypto_store            = "${local.hermes_cloud_agent_profile_home}/platforms/matrix/store"
+      e2ee_mode               = "required"
+      allowed_users           = var.hermes_cloud_agent_matrix_allowed_users
+      allowed_rooms           = var.hermes_cloud_agent_matrix_allowed_rooms
+      session_scope           = "room"
+    }
+    gateway = {
+      api_server_enabled = false
+    }
+    inference = {
+      provider     = "custom"
+      base_url     = "http://127.0.0.1:8080/v1"
+      model_id     = var.hermes_cloud_agent_model_id
+      model_sha256 = var.hermes_cloud_agent_model_sha256
+      fallbacks    = []
+    }
+    sandbox = {
+      backend = "docker"
+    }
+    storage = {
+      encrypted = true
+    }
+    operations = {
+      administration       = "ssm"
+      public_ssh           = false
+      public_agent_ingress = false
+    }
+  }
+  hermes_cloud_agent_config = {
+    group_sessions_per_user = true
+    terminal = {
+      backend = "docker"
+    }
+    security = {
+      redact_secrets = true
+    }
+  }
+}
+
 resource "aws_security_group" "hermes_cloud_agent" {
   count = var.enable_hermes_cloud_agent ? 1 : 0
 
@@ -110,6 +161,19 @@ resource "aws_instance" "hermes_cloud_agent" {
   vpc_security_group_ids      = [aws_security_group.hermes_cloud_agent[0].id]
   associate_public_ip_address = false
   iam_instance_profile        = aws_iam_instance_profile.hermes_cloud_agent[0].name
+  user_data_replace_on_change = true
+  user_data_base64 = base64encode(templatefile("${path.module}/../hermes_cloud_agent/bootstrap.sh.tftpl", {
+    profile_json_b64    = base64encode(jsonencode(local.hermes_cloud_agent_profile_contract))
+    profile_schema_b64  = filebase64("${path.module}/../hermes_cloud_agent/profile.schema.json")
+    profile_config_b64  = base64encode(yamlencode(local.hermes_cloud_agent_config))
+    state_volume_id     = aws_ebs_volume.hermes_cloud_agent_state[0].id
+    runner_b64          = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-run")
+    mount_script_b64    = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-state-volume-mount")
+    secret_reader_b64   = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-read-matrix-secret")
+    state_service_b64   = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-state-volume.service")
+    podman_service_b64  = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-podman.service")
+    gateway_service_b64 = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-cloud-agent.service")
+  }))
 
   root_block_device {
     encrypted   = true
@@ -129,8 +193,23 @@ resource "aws_instance" "hermes_cloud_agent" {
     }
 
     precondition {
-      condition     = length(var.hermes_cloud_agent_secret_arns) > 0
-      error_message = "At least one declared runtime secret ARN is required when the Hermes cloud agent is enabled."
+      condition     = var.hermes_cloud_agent_matrix_secret_arn != "" && contains(var.hermes_cloud_agent_secret_arns, var.hermes_cloud_agent_matrix_secret_arn)
+      error_message = "The Matrix secret ARN must be set and included in hermes_cloud_agent_secret_arns when the agent is enabled."
+    }
+
+    precondition {
+      condition     = can(regex("^@[^: ]+:[^ ]+$", var.hermes_cloud_agent_matrix_user_id))
+      error_message = "A dedicated Matrix user ID is required when the Hermes cloud agent is enabled."
+    }
+
+    precondition {
+      condition     = length(var.hermes_cloud_agent_matrix_allowed_users) > 0 && length(var.hermes_cloud_agent_matrix_allowed_rooms) > 0
+      error_message = "Non-empty Matrix user and room allowlists are required when the Hermes cloud agent is enabled."
+    }
+
+    precondition {
+      condition     = can(regex("^[a-f0-9]{64}$", var.hermes_cloud_agent_model_sha256))
+      error_message = "A pinned local-model SHA-256 is required when the Hermes cloud agent is enabled."
     }
   }
 
@@ -143,7 +222,7 @@ resource "aws_instance" "hermes_cloud_agent" {
 resource "aws_ebs_volume" "hermes_cloud_agent_state" {
   count = var.enable_hermes_cloud_agent ? 1 : 0
 
-  availability_zone = aws_instance.hermes_cloud_agent[0].availability_zone
+  availability_zone = aws_subnet.private[0].availability_zone
   encrypted         = true
   kms_key_id        = var.hermes_cloud_agent_state_kms_key_arn != "" ? var.hermes_cloud_agent_state_kms_key_arn : null
   size              = var.hermes_cloud_agent_state_volume_size_gib

@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added pinned Hermes Matrix profile bootstrap and hardened systemd supervision for Issue 97 — preserves E2EE/device state on encrypted storage, loads credentials only at runtime, and provides sandboxed tools through a rootless Podman socket without exposing generic Hermes ingress.
 - Documented the digest-pinned Synapse landing rollout and issue boundary — keeps publication, Synapse-only deployment, API/federation smoke, browser QA, and rollback evidence explicit without claiming deployment.
 - Added dynamic Synapse static-path installation and image-byte verification — avoids Python site-packages assumptions and proves the hardened image contains the reviewed landing-page bytes.
 - Added the self-contained Zenith Synapse landing page and source contract tests — gives visitors a sparse, accessible route to ZenithOS without adding scripts, tracking, remote assets, or authority claims.

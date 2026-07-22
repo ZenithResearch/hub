@@ -57,11 +57,11 @@
         },
         "access_token_secret_ref": {
           "type": "string",
-          "pattern": "^aws-secretsmanager:[A-Za-z0-9/_+=.@-]+$"
+          "pattern": "^aws-secretsmanager:arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]+$"
         },
         "crypto_store": {
           "type": "string",
-          "pattern": "^/var/lib/hermes/profiles/[a-z0-9][a-z0-9_-]{2,31}/matrix-crypto$"
+          "pattern": "^/var/lib/hermes/profiles/[a-z0-9][a-z0-9_-]{2,31}/platforms/matrix/store$"
         },
         "e2ee_mode": {"const": "required"},
         "allowed_users": {

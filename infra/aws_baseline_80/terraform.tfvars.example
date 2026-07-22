@@ -62,6 +62,14 @@ hermes_cloud_agent_state_volume_size_gib = 200
 hermes_cloud_agent_state_kms_key_arn     = ""
 hermes_cloud_agent_secret_arns           = []
 hermes_cloud_agent_secret_kms_key_arns   = []
+hermes_cloud_agent_profile_id             = "cloudproof"
+hermes_cloud_agent_matrix_homeserver      = "https://synapse.zenith-research.ca"
+hermes_cloud_agent_matrix_user_id         = ""
+hermes_cloud_agent_matrix_allowed_users   = []
+hermes_cloud_agent_matrix_allowed_rooms   = []
+hermes_cloud_agent_matrix_secret_arn      = ""
+hermes_cloud_agent_model_id               = "qwen3.5-9b-q4-k-m"
+hermes_cloud_agent_model_sha256           = ""
 
 image_tag = "v0.1.0"
 

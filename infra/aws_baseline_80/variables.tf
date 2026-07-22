@@ -798,3 +798,66 @@ variable "hermes_cloud_agent_secret_kms_key_arns" {
   type        = list(string)
   default     = []
 }
+
+variable "hermes_cloud_agent_profile_id" {
+  description = "Stable Hermes profile identifier for the first cloud-agent proof."
+  type        = string
+  default     = "cloudproof"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9_-]{2,31}$", var.hermes_cloud_agent_profile_id))
+    error_message = "hermes_cloud_agent_profile_id must be a 3-32 character lowercase profile identifier."
+  }
+}
+
+variable "hermes_cloud_agent_matrix_homeserver" {
+  description = "HTTPS Matrix homeserver used by the dedicated cloud-agent identity."
+  type        = string
+  default     = "https://synapse.zenith-research.ca"
+
+  validation {
+    condition     = can(regex("^https://", var.hermes_cloud_agent_matrix_homeserver))
+    error_message = "hermes_cloud_agent_matrix_homeserver must use HTTPS."
+  }
+}
+
+variable "hermes_cloud_agent_matrix_user_id" {
+  description = "Dedicated Matrix user ID for the cloud-agent profile. Required when enabled."
+  type        = string
+  default     = ""
+}
+
+variable "hermes_cloud_agent_matrix_allowed_users" {
+  description = "Exact Matrix user IDs allowed to trigger the cloud-agent profile."
+  type        = list(string)
+  default     = []
+}
+
+variable "hermes_cloud_agent_matrix_allowed_rooms" {
+  description = "Exact Matrix room IDs allowed to trigger the cloud-agent profile."
+  type        = list(string)
+  default     = []
+}
+
+variable "hermes_cloud_agent_matrix_secret_arn" {
+  description = "Secrets Manager ARN containing JSON access_token and device_id fields for the dedicated Matrix device."
+  type        = string
+  default     = ""
+}
+
+variable "hermes_cloud_agent_model_id" {
+  description = "Pinned local llama.cpp model identifier exposed to Hermes."
+  type        = string
+  default     = "qwen3.5-9b-q4-k-m"
+}
+
+variable "hermes_cloud_agent_model_sha256" {
+  description = "Expected lowercase SHA-256 for the local GGUF artifact. Required when enabled."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.hermes_cloud_agent_model_sha256 == "" || can(regex("^[a-f0-9]{64}$", var.hermes_cloud_agent_model_sha256))
+    error_message = "hermes_cloud_agent_model_sha256 must be empty or a lowercase SHA-256 digest."
+  }
+}
