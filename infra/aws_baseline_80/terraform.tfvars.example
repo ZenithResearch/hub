@@ -70,6 +70,11 @@ hermes_cloud_agent_matrix_allowed_rooms   = []
 hermes_cloud_agent_matrix_secret_arn      = ""
 hermes_cloud_agent_model_id               = "qwen3.5-9b-q4-k-m"
 hermes_cloud_agent_model_sha256           = ""
+# Preferred bootstrap: apply once with enable_hermes_cloud_agent=false, populate the
+# created Agent Admin secret out-of-band, then enable the agent and set the
+# readiness attestation. Setting the raw value stores it in Terraform state.
+agent_admin_bearer_token                   = ""
+agent_admin_bearer_token_secret_ready      = false
 
 image_tag = "v0.1.0"
 

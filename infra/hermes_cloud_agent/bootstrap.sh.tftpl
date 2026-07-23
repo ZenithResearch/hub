@@ -60,10 +60,13 @@ printf '%s' '${runner_b64}' | base64 -d > /usr/local/libexec/hermes-cloud-agent-
 # shellcheck disable=SC2016
 printf '%s' '${mount_script_b64}' | base64 -d > /usr/local/libexec/hermes-state-volume-mount
 # shellcheck disable=SC2016
+printf '%s' '${control_helper_b64}' | base64 -d > /usr/local/libexec/hermes-cloud-agent-control
+# shellcheck disable=SC2016
 printf '%s' '${secret_reader_b64}' | base64 -d > /usr/local/libexec/hermes-read-matrix-secret
 # shellcheck disable=SC2016
 printf '%s' '${matrix_trust_patch_b64}' | base64 -d > /opt/hermes/strict-matrix-device-trust.patch
 chmod 0755 /usr/local/libexec/hermes-cloud-agent-run \
+  /usr/local/libexec/hermes-cloud-agent-control \
   /usr/local/libexec/hermes-state-volume-mount \
   /usr/local/libexec/hermes-read-matrix-secret
 chmod 0444 /opt/hermes/strict-matrix-device-trust.patch

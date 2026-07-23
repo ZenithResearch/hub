@@ -23,6 +23,9 @@ class GatewaySettings(BaseServiceSettings):
     runtime_grpc_target: str = Field(
         default="runtime-grpc:50051", alias="RUNTIME_GRPC_TARGET"
     )
+    agent_admin_grpc_target: str = Field(
+        default="agent-admin:50054", alias="AGENT_ADMIN_GRPC_TARGET"
+    )
     cors_allow_origins: str = Field(
         default="http://localhost:3000", alias="CORS_ALLOW_ORIGINS"
     )
@@ -39,6 +42,7 @@ class GatewaySettings(BaseServiceSettings):
     clients_pg_password: str = Field(default="", alias="CLIENTS_PG_PASSWORD")
     review_session_ttl_seconds: int = Field(default=86_400, alias="REVIEW_SESSION_TTL_SECONDS")
     review_access_admin_token: str = Field(default="", alias="REVIEW_ACCESS_ADMIN_TOKEN")
+    agent_admin_bearer_token: str = Field(default="", alias="AGENT_ADMIN_BEARER_TOKEN")
     hermes_session_roots: str = Field(default="", alias="HERMES_SESSION_ROOTS")
     hub_config_secrets_path: str = Field(default="/data/hub-config-secrets.env", alias="HUB_CONFIG_SECRETS_PATH")
     model_profiles_path: str = Field(default="infra/model-profiles.yaml", alias="MODEL_PROFILES_PATH")
@@ -79,6 +83,20 @@ class RuntimeSettings(BaseServiceSettings):
     qdrant_collection: str = Field(default="kb_documents", alias="QDRANT_COLLECTION")
 
     grpc_client_timeout_s: float = Field(default=5.0, alias="RUNTIME_GRPC_CLIENT_TIMEOUT_S")
+
+
+class AgentAdminSettings(BaseServiceSettings):
+    bind_addr: str = Field(default="0.0.0.0:50054", alias="AGENT_ADMIN_GRPC_BIND")
+    db_path: str = Field(default="/data/agent-admin.db", alias="AGENT_ADMIN_DB_PATH")
+    profile_id: str = Field(default="", alias="AGENT_ADMIN_PROFILE_ID")
+    instance_id: str = Field(default="", alias="AGENT_ADMIN_INSTANCE_ID")
+    ssm_document_name: str = Field(default="", alias="AGENT_ADMIN_SSM_DOCUMENT_NAME")
+    allowed_matrix_secret_arns: str = Field(
+        default="", alias="AGENT_ADMIN_ALLOWED_MATRIX_SECRET_ARNS"
+    )
+
+    def matrix_secret_arn_allowlist(self) -> set[str]:
+        return {value.strip() for value in self.allowed_matrix_secret_arns.split(",") if value.strip()}
 
 
 class ToolSandboxSettings(BaseServiceSettings):

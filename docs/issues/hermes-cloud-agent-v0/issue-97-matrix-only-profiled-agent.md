@@ -22,7 +22,7 @@ The Hub Agent Admin Service is an operator/resource-control surface, not agent i
 ## Architecture boundary
 
 ```text
-ZenithOS operator
+Authorized Hub operator or administrative client
   -> authenticated Gateway admin HTTP edge
   -> Agent Admin Service (internal gRPC)
   -> desired/observed profile registry + AWS Systems Manager operations
@@ -71,9 +71,9 @@ Terraform owns the private node, encrypted storage, IAM, networking, and bootstr
 
 ## Matrix credential lifecycle
 
-The first cloud profile follows the Sophia operator pattern already used by ZenithOS: a service identity is separate from the operator's human Matrix account, is shown through an operator-facing setup/status flow, and uses a per-profile credential namespace.
+The first cloud profile uses a dedicated normal Matrix account and stable device, separate from every human operator account, with a per-profile credential namespace and persistent E2EE state.
 
-The credential class is deliberately different. The E2EE Hermes profile uses a dedicated Matrix user/device access token and persistent device crypto state, not a Sophia application-service token. Production runtime material is referenced from AWS Secrets Manager. The admin API stores and returns secret references and redacted configuration status, never raw credential values through normal list/status operations.
+The E2EE Hermes profile uses that account's narrowly scoped Matrix user/device access token, not an application-service or namespace-impersonation token. Production runtime material is referenced from AWS Secrets Manager. The admin API stores and returns secret references and redacted configuration status, never raw credential values through normal list/status operations.
 
 ## Configuration contract
 
@@ -96,7 +96,9 @@ The pinned Hermes source receives one repo-owned, reviewable patch that raises o
 
 The declared Docker terminal backend is provided through a dedicated rootless Podman compatibility socket owned by a separate `hermes-sandbox` OS principal. The gateway receives group-only access to that socket, while the Podman daemon is denied the Matrix profile path. The agent is not added to a host Docker group and cannot reach a root-owned Docker socket.
 
-Matrix crypto state is owner-only, encrypted with a required customer-managed KMS key, protected from Terraform destruction, and bound on first activation to the exact EBS volume and EC2 instance identity. A snapshot clone, replacement instance, or second activation fails closed until an operator performs the documented recovery transition. Tool containers receive no host volumes, forwarded environment, credentials, working-directory mount, or network access; the Hermes service disables core dumps and runs with a restrictive umask.
+Matrix crypto state is owner-only, encrypted with a validated customer-managed KMS key, protected from Terraform destruction, and bound on first activation to the exact EBS volume, EC2 instance, normalized homeserver, Matrix user, and device identity. Startup also requires `/account/whoami` to confirm the configured user/device tuple before opening the existing crypto store. A snapshot clone, replacement instance, credential substitution, or second activation fails closed until an operator performs the documented recovery transition. Exact room allowlists apply to DMs as well as group rooms. Tool containers receive no host volumes, forwarded environment, credentials, working-directory mount, or network access; the Hermes service disables core dumps and uses private keyring/process visibility controls.
+
+The first-proof host still requires outbound HTTPS for Matrix sync and AWS control-plane calls. Broad TCP/443 egress is therefore an explicit unresolved deployment gate: production-readiness evidence must replace it with AWS VPC endpoints plus a destination-allowlisting Matrix/artifact egress path, rather than treating sandbox network denial as host-level exfiltration protection.
 
 Recovery and teardown follow [`state-recovery-runbook.md`](state-recovery-runbook.md); bypassing the activation binding is explicitly outside the first-proof operating contract.
 
@@ -120,6 +122,12 @@ Add isolated profile materialization, runtime secret injection, current Hermes i
 
 Add the Agent Admin Service contract and implementation, an authenticated Gateway admin HTTP projection, one-profile desired/observed state, fail-closed AWS Systems Manager operation dispatch, Matrix credential-reference lifecycle, and redacted status/evidence output. This is not generic Hermes ingress and does not expose prompt or arbitrary tool execution.
 
+The implementation uses a private single-replica gRPC task, destruction-protected customer-managed-KMS EFS-backed SQLite state with revision checks, a Gateway-only security-group path, and a custom SSM document whose sole parameter is an enum of `enable`, `disable`, `restart`, or `status`. Its ECS task role can dispatch only that document to the exact Terraform-owned instance through private SSM, ECR, Logs, and S3 VPC endpoints. The dedicated bearer secret is created while the feature is disabled; after populating an `AWSCURRENT` version out-of-band, the operator must set a separate readiness attestation before enablement. Provider stdout/stderr and raw secret values are excluded; operation finalization, observed state, and bounded SHA-256 evidence commit atomically. Exact lifecycle requests replay before current-state validation, transient observation failures remain dispatched, helper-reported postconditions must match the requested action, and a recovered pre-dispatch crash window fails closed as `dispatch_state_unknown` rather than risking a duplicate command.
+
+The HTTP projection uses a dedicated `AGENT_ADMIN_BEARER_TOKEN`, injected into Gateway from its own Secrets Manager entry and compared in constant time. Review-access credentials do not authorize Agent Admin routes. Hub, the private Agent Admin service, AWS SSM, and Zenith Synapse define the operational architecture.
+
+Agent Admin EFS removal is deliberately not an ordinary feature-disable operation. An operator must first disable the profile, verify the node is stopped, create and verify a backup, obtain the destructive-change approval, and then land a reviewed change that explicitly lifts `prevent_destroy`; Terraform must not bypass that sequence.
+
 ### Task 4: Same-node inference
 
 Add checksum-pinned llama.cpp/Qwen provisioning, loopback-only serving, explicit custom-provider binding, readiness, and no-fallback behavior.
@@ -139,7 +147,7 @@ Add and run restart persistence, authorized encrypted Matrix round trip, unautho
 - The security group has no public SSH or agent-interaction ingress.
 - Administration uses Systems Manager.
 - Terminal/file work is sandboxed.
-- ZenithOS-compatible admin routes can register and inspect the first profile without returning raw Matrix credentials.
+- Dedicated Hub Agent Admin routes can register and inspect the first profile without returning raw Matrix credentials.
 - The private admin service can report desired/observed state and request only declared Systems Manager lifecycle operations.
 - No raw credentials or machine-local operator paths appear in committed files or evidence.
 

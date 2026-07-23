@@ -125,11 +125,11 @@ def test_issue_spec_separates_private_admin_control_from_agent_ingress() -> None
         assert phrase in spec
 
 
-def test_issue_spec_preserves_sophia_lifecycle_pattern_without_reusing_as_token() -> None:
+def test_issue_spec_requires_a_dedicated_matrix_user_device_without_appservice_authority() -> None:
     spec = ISSUE_SPEC_PATH.read_text(encoding="utf-8")
 
-    assert "Sophia operator pattern" in spec
+    assert "dedicated normal Matrix account and stable device" in spec
     assert "per-profile credential namespace" in spec
     assert "Matrix user/device access token" in spec
-    assert "not a Sophia application-service token" in spec
+    assert "not an application-service or namespace-impersonation token" in spec
     assert "raw credential values" in spec

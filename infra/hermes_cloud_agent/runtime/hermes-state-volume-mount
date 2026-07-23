@@ -9,6 +9,9 @@ readonly PROFILE_FILE="$CONFIG_DIR/profile.json"
 volume_id=$(tr -d '[:space:]' < "$VOLUME_ID_FILE")
 volume_serial=${volume_id//-/}
 profile_id=$(jq -er '.profile.id' "$PROFILE_FILE")
+homeserver=$(jq -er '.matrix.homeserver | sub("/+$"; "")' "$PROFILE_FILE")
+user_id=$(jq -er '.matrix.user_id' "$PROFILE_FILE")
+secret_ref=$(jq -er '.matrix.access_token_secret_ref' "$PROFILE_FILE")
 
 if [[ ! "$volume_id" =~ ^vol-[0-9a-f]+$ ]]; then
   echo "invalid state volume id" >&2
@@ -26,12 +29,6 @@ for _ in $(seq 1 120); do
     device="$candidate"
     break
   fi
-  for candidate in /dev/xvdf /dev/sdf; do
-    if [[ -b "$candidate" ]]; then
-      device="$candidate"
-      break 2
-    fi
-  done
   sleep 5
 done
 
@@ -71,8 +68,22 @@ if [[ ! "$instance_id" =~ ^i-[0-9a-f]+$ ]]; then
   exit 1
 fi
 
+[[ "$secret_ref" == aws-secretsmanager:arn:* ]]
+secret_arn=${secret_ref#aws-secretsmanager:}
+secret_payload=$(/opt/hermes/venv/bin/python \
+  /usr/local/libexec/hermes-read-matrix-secret \
+  "$secret_arn")
+device_id=$(jq -er '.device_id | strings | select(length > 0)' <<<"$secret_payload")
+unset secret_payload
+
 binding_file="$MOUNT_POINT/.active-instance"
-expected_binding="$volume_id $instance_id"
+expected_binding=$(jq -cn \
+  --arg volume_id "$volume_id" \
+  --arg instance_id "$instance_id" \
+  --arg homeserver "$homeserver" \
+  --arg user_id "$user_id" \
+  --arg device_id "$device_id" \
+  '{version:1, volume_id:$volume_id, instance_id:$instance_id, homeserver:$homeserver, user_id:$user_id, device_id:$device_id}')
 if [[ -e "$binding_file" ]]; then
   current_binding=$(tr -d '\r\n' < "$binding_file")
   if [[ "$current_binding" != "$expected_binding" ]]; then
@@ -82,6 +93,7 @@ if [[ -e "$binding_file" ]]; then
 else
   printf '%s\n' "$expected_binding" | install -m 0600 -o root -g root /dev/stdin "$binding_file"
 fi
+unset device_id expected_binding current_binding
 
 install -d -m 0711 -o root -g root "$MOUNT_POINT/profiles"
 install -d -m 0700 -o hermes -g hermes \

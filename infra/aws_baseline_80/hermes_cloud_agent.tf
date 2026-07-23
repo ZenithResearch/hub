@@ -74,6 +74,12 @@ locals {
   }
 }
 
+data "aws_kms_key" "hermes_cloud_agent_state" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  key_id = var.hermes_cloud_agent_state_kms_key_arn
+}
+
 resource "aws_security_group" "hermes_cloud_agent" {
   count = var.enable_hermes_cloud_agent ? 1 : 0
 
@@ -146,7 +152,7 @@ data "aws_iam_policy_document" "hermes_cloud_agent_secrets" {
     sid       = "ReadDeclaredRuntimeSecrets"
     effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = var.hermes_cloud_agent_secret_arns
+    resources = [var.hermes_cloud_agent_matrix_secret_arn]
   }
 
   dynamic "statement" {
@@ -157,6 +163,18 @@ data "aws_iam_policy_document" "hermes_cloud_agent_secrets" {
       effect    = "Allow"
       actions   = ["kms:Decrypt"]
       resources = var.hermes_cloud_agent_secret_kms_key_arns
+
+      condition {
+        test     = "StringEquals"
+        variable = "kms:ViaService"
+        values   = ["secretsmanager.${var.aws_region}.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "kms:EncryptionContext:SecretARN"
+        values   = [var.hermes_cloud_agent_matrix_secret_arn]
+      }
     }
   }
 }
@@ -194,6 +212,7 @@ resource "aws_instance" "hermes_cloud_agent" {
     state_volume_id        = aws_ebs_volume.hermes_cloud_agent_state[0].id
     runner_b64             = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-run")
     mount_script_b64       = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-state-volume-mount")
+    control_helper_b64     = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-control")
     secret_reader_b64      = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-read-matrix-secret")
     matrix_trust_patch_b64 = filebase64("${path.module}/../hermes_cloud_agent/patches/strict-matrix-device-trust.patch")
     state_service_b64      = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-state-volume.service")
@@ -219,8 +238,8 @@ resource "aws_instance" "hermes_cloud_agent" {
     }
 
     precondition {
-      condition     = var.hermes_cloud_agent_matrix_secret_arn != "" && contains(var.hermes_cloud_agent_secret_arns, var.hermes_cloud_agent_matrix_secret_arn)
-      error_message = "The Matrix secret ARN must be set and included in hermes_cloud_agent_secret_arns when the agent is enabled."
+      condition     = var.hermes_cloud_agent_matrix_secret_arn != ""
+      error_message = "The Matrix secret ARN must be set when the agent is enabled."
     }
 
     precondition {
@@ -241,6 +260,15 @@ resource "aws_instance" "hermes_cloud_agent" {
     precondition {
       condition     = var.hermes_cloud_agent_state_kms_key_arn != ""
       error_message = "A dedicated customer-managed KMS key is required for Hermes Matrix state."
+    }
+
+    precondition {
+      condition = (
+        data.aws_kms_key.hermes_cloud_agent_state[0].key_manager == "CUSTOMER" &&
+        data.aws_kms_key.hermes_cloud_agent_state[0].enabled &&
+        startswith(data.aws_kms_key.hermes_cloud_agent_state[0].arn, "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/")
+      )
+      error_message = "Hermes Matrix state requires an enabled customer-managed KMS key in this account and region."
     }
   }
 
@@ -276,4 +304,34 @@ resource "aws_volume_attachment" "hermes_cloud_agent_state" {
   device_name = "/dev/sdf"
   volume_id   = aws_ebs_volume.hermes_cloud_agent_state[0].id
   instance_id = aws_instance.hermes_cloud_agent[0].id
+}
+
+resource "aws_ssm_document" "hermes_cloud_agent_control" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  name          = "${local.name_prefix}-hermes-agent-control"
+  document_type = "Command"
+  content = jsonencode({
+    schemaVersion = "2.2"
+    description   = "Bounded lifecycle control for the Matrix-only Hermes agent"
+    parameters = {
+      Action = {
+        type          = "String"
+        allowedValues = ["enable", "disable", "restart", "status"]
+      }
+    }
+    mainSteps = [
+      {
+        action = "aws:runShellScript"
+        name   = "ControlHermesAgent"
+        inputs = {
+          runCommand = [
+            "/usr/local/libexec/hermes-cloud-agent-control '{{ Action }}'",
+          ]
+        }
+      },
+    ]
+  })
+
+  tags = local.tags
 }

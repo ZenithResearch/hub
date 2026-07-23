@@ -36,6 +36,32 @@ for value in "$matrix_access_token" "$matrix_device_id"; do
   fi
 done
 
+homeserver=${homeserver%/}
+whoami_payload=$(printf '%s' "$matrix_access_token" | /opt/hermes/venv/bin/python -c '
+import json
+import sys
+import urllib.request
+
+homeserver = sys.argv[1]
+token = sys.stdin.read()
+request = urllib.request.Request(
+    f"{homeserver}/_matrix/client/v3/account/whoami",
+    headers={"Authorization": f"Bearer {token}"},
+)
+with urllib.request.urlopen(request, timeout=10) as response:
+    payload = response.read(16385)
+if len(payload) > 16384:
+    raise ValueError("Matrix whoami response is too large")
+parsed = json.loads(payload)
+print(json.dumps(parsed, separators=(",", ":")))
+' "$homeserver")
+whoami_user_id=$(jq -er '.user_id | strings' <<<"$whoami_payload")
+whoami_device_id=$(jq -er '.device_id | strings' <<<"$whoami_payload")
+unset whoami_payload
+[[ "$whoami_user_id" == "$user_id" ]]
+[[ "$whoami_device_id" == "$matrix_device_id" ]]
+unset whoami_user_id whoami_device_id
+
 export HERMES_HOME="$profile_home"
 export HOME="$profile_home"
 export MATRIX_HOMESERVER="$homeserver"

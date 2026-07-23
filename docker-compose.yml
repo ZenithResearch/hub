@@ -96,6 +96,29 @@ services:
     cap_drop:
       - ALL
 
+  agent-admin:
+    build: .
+    command: ["python", "-m", "services.agent_admin.main"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      AWS_REGION: ${AWS_REGION:-us-west-2}
+      AGENT_ADMIN_GRPC_BIND: ${AGENT_ADMIN_GRPC_BIND:-0.0.0.0:50054}
+      AGENT_ADMIN_DB_PATH: /data/agent-admin.db
+      AGENT_ADMIN_PROFILE_ID: ${AGENT_ADMIN_PROFILE_ID:-cloudproof}
+      AGENT_ADMIN_INSTANCE_ID: ${AGENT_ADMIN_INSTANCE_ID:-i-00000000000000000}
+      AGENT_ADMIN_SSM_DOCUMENT_NAME: ${AGENT_ADMIN_SSM_DOCUMENT_NAME:-local-hermes-agent-control}
+      AGENT_ADMIN_ALLOWED_MATRIX_SECRET_ARNS: ${AGENT_ADMIN_ALLOWED_MATRIX_SECRET_ARNS:-arn:aws:secretsmanager:us-west-2:000000000000:secret:matrix}
+    expose:
+      - "50054"
+    volumes:
+      - agent_admin_data:/data
+    networks:
+      - agentnet
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
   process-indexer:
     build: .
     command: ["python", "-m", "services.process_indexer.main"]
@@ -152,6 +175,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_PORT: ${HTTP_PORT:-8080}
       RUNTIME_GRPC_TARGET: ${RUNTIME_GRPC_TARGET:-runtime-grpc:50051}
+      AGENT_ADMIN_GRPC_TARGET: ${AGENT_ADMIN_GRPC_TARGET:-agent-admin:50054}
+      AGENT_ADMIN_BEARER_TOKEN: ${AGENT_ADMIN_BEARER_TOKEN:-local-agent-admin-token-change-me-32chars}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:3000}
       MAX_BODY_BYTES: ${MAX_BODY_BYTES:-262144}
       GATEWAY_GRPC_TIMEOUT_S: ${GATEWAY_GRPC_TIMEOUT_S:-5.0}
@@ -440,3 +465,4 @@ volumes:
   feeds_data:
   cases_data:
   reviews_data:
+  agent_admin_data:

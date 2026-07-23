@@ -477,6 +477,19 @@ variable "review_access_admin_token" {
   default     = ""
 }
 
+variable "agent_admin_bearer_token" {
+  description = "Dedicated bearer token for the Issue 97 Agent Admin Gateway projection. Prefer populating the always-created managed secret out-of-band before enabling the agent; enablement requires an operator readiness attestation. If set here, the token is stored in Terraform state."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "agent_admin_bearer_token_secret_ready" {
+  description = "Operator attestation that the managed Agent Admin bearer secret has an AWSCURRENT version populated out-of-band. Required for agent enablement when the raw token is not supplied to Terraform."
+  type        = bool
+  default     = false
+}
+
 variable "cors_allow_origins" {
   description = "CORS_ALLOW_ORIGINS for gateway-http."
   type        = string
@@ -782,9 +795,14 @@ variable "hermes_cloud_agent_state_volume_size_gib" {
 }
 
 variable "hermes_cloud_agent_state_kms_key_arn" {
-  description = "Optional customer-managed KMS key ARN for the persistent state volume. Empty uses the AWS-managed EBS key."
+  description = "Dedicated customer-managed KMS key ARN for the persistent Matrix state volume."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.hermes_cloud_agent_state_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]+$", var.hermes_cloud_agent_state_kms_key_arn))
+    error_message = "hermes_cloud_agent_state_kms_key_arn must be a KMS key ARN, not an alias."
+  }
 }
 
 variable "hermes_cloud_agent_secret_arns" {
@@ -860,4 +878,39 @@ variable "hermes_cloud_agent_model_sha256" {
     condition     = var.hermes_cloud_agent_model_sha256 == "" || can(regex("^[a-f0-9]{64}$", var.hermes_cloud_agent_model_sha256))
     error_message = "hermes_cloud_agent_model_sha256 must be empty or a lowercase SHA-256 digest."
   }
+}
+
+variable "agent_admin_task_cpu" {
+  description = "CPU units for the private Agent Admin gRPC task."
+  type        = number
+  default     = 256
+}
+
+variable "agent_admin_task_memory" {
+  description = "Memory in MiB for the private Agent Admin gRPC task."
+  type        = number
+  default     = 512
+}
+
+variable "agent_admin_desired_count" {
+  description = "Agent Admin replicas. SQLite persistence requires exactly one writer."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.agent_admin_desired_count == 1
+    error_message = "agent_admin_desired_count must remain 1 while SQLite-backed."
+  }
+}
+
+variable "agent_admin_db_path" {
+  description = "Agent Admin SQLite database path on encrypted EFS."
+  type        = string
+  default     = "/data/agent-admin.db"
+}
+
+variable "agent_admin_image_tag" {
+  description = "Optional Agent Admin image tag override; defaults to the Gateway image tag."
+  type        = string
+  default     = ""
 }

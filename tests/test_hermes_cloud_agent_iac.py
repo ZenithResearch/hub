@@ -46,7 +46,7 @@ def test_cloud_agent_is_disabled_and_incomplete_configuration_fails_closed() -> 
     assert 'variable "hermes_cloud_agent_ami_id"' in variables
     assert 'condition     = var.hermes_cloud_agent_ami_id != ""' in terraform
     assert 'variable "hermes_cloud_agent_secret_arns"' in variables
-    assert "contains(var.hermes_cloud_agent_secret_arns" in terraform
+    assert 'condition     = var.hermes_cloud_agent_matrix_secret_arn != ""' in terraform
     assert "var.hermes_cloud_agent_matrix_secret_arn" in terraform
     assert "count = var.enable_hermes_cloud_agent ? 1 : 0" in terraform
     assert "enable_hermes_cloud_agent = false" in tfvars_example
@@ -56,7 +56,7 @@ def test_cloud_agent_iam_secret_access_is_explicitly_scoped() -> None:
     terraform = (IAC / "hermes_cloud_agent.tf").read_text(encoding="utf-8")
 
     assert 'actions   = ["secretsmanager:GetSecretValue"]' in terraform
-    assert "resources = var.hermes_cloud_agent_secret_arns" in terraform
+    assert "resources = [var.hermes_cloud_agent_matrix_secret_arn]" in terraform
     assert 'actions   = ["kms:Decrypt"]' in terraform
     assert "resources = var.hermes_cloud_agent_secret_kms_key_arns" in terraform
     assert "secretsmanager:*" not in terraform
@@ -257,3 +257,43 @@ def test_matrix_room_keys_are_shared_only_with_cross_signed_trusted_devices() ->
     assert trust_patch.count("TrustState.CROSS_SIGNED_TRUSTED") == 2
     assert "olm.share_keys_min_trust = TrustState.UNVERIFIED" in trust_patch
     assert "olm.send_keys_min_trust = TrustState.UNVERIFIED" in trust_patch
+
+
+def test_state_volume_identity_has_no_unsafe_device_name_fallback() -> None:
+    mount_script = (ROOT / "infra/hermes_cloud_agent/runtime/hermes-state-volume-mount").read_text()
+
+    assert "nvme-Amazon_Elastic_Block_Store_${volume_serial}" in mount_script
+    assert "/dev/xvdf" not in mount_script
+    assert "/dev/sdf" not in mount_script
+
+
+def test_matrix_store_binding_includes_identity_and_whoami_is_verified() -> None:
+    mount_script = (ROOT / "infra/hermes_cloud_agent/runtime/hermes-state-volume-mount").read_text()
+    runner = (ROOT / "infra/hermes_cloud_agent/runtime/hermes-cloud-agent-run").read_text()
+
+    for field in ("volume_id", "instance_id", "homeserver", "user_id", "device_id"):
+        assert field in mount_script
+    assert "/_matrix/client/v3/account/whoami" in runner
+    assert '[[ "$whoami_user_id" == "$user_id" ]]' in runner
+    assert '[[ "$whoami_device_id" == "$matrix_device_id" ]]' in runner
+
+
+def test_matrix_secret_and_kms_permissions_are_context_bounded() -> None:
+    terraform = (IAC / "hermes_cloud_agent.tf").read_text()
+    variables = (IAC / "variables.tf").read_text()
+
+    assert "resources = [var.hermes_cloud_agent_matrix_secret_arn]" in terraform
+    assert 'variable = "kms:ViaService"' in terraform
+    assert 'variable = "kms:EncryptionContext:SecretARN"' in terraform
+    assert 'data "aws_kms_key" "hermes_cloud_agent_state"' in terraform
+    assert 'key_manager == "CUSTOMER"' in terraform
+    assert "Optional customer-managed KMS key ARN" not in variables
+
+
+def test_matrix_allowed_rooms_apply_to_direct_messages() -> None:
+    trust_patch = (
+        ROOT / "infra/hermes_cloud_agent/patches/strict-matrix-device-trust.patch"
+    ).read_text()
+
+    assert "room_id not in self._allowed_rooms" in trust_patch
+    assert "DMs are not exempt" in trust_patch

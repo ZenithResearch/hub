@@ -36,6 +36,7 @@ data "aws_iam_policy_document" "execution_secrets" {
         aws_secretsmanager_secret.matrix_registration_shared_secret.arn,
         aws_secretsmanager_secret.matrix_form_secret.arn,
       ] : [],
+      var.enable_hermes_cloud_agent ? [aws_secretsmanager_secret.agent_admin_bearer_token.arn] : [],
       var.elevenlabs_api_key_secret_arn != "" ? [var.elevenlabs_api_key_secret_arn] : []
     )
   }
@@ -265,4 +266,57 @@ resource "aws_iam_role_policy" "gateway_efs" {
 
 # Least privilege baseline: task roles have no permissions by default.
 # (Runtime reads QDRANT_API_KEY via env var injected by the ECS agent.)
+
+resource "aws_iam_role" "agent_admin_task" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  name               = "${local.name_prefix}-agent-admin-task"
+  assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
+  tags               = local.tags
+}
+
+data "aws_iam_policy_document" "agent_admin_task" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  statement {
+    sid     = "DispatchBoundedAgentControl"
+    effect  = "Allow"
+    actions = ["ssm:SendCommand"]
+    resources = [
+      aws_ssm_document.hermes_cloud_agent_control[0].arn,
+      aws_instance.hermes_cloud_agent[0].arn,
+    ]
+  }
+
+  statement {
+    sid       = "ObserveOwnAgentControl"
+    effect    = "Allow"
+    actions   = ["ssm:GetCommandInvocation"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "MountAgentAdminState"
+    effect = "Allow"
+    actions = [
+      "elasticfilesystem:ClientMount",
+      "elasticfilesystem:ClientWrite",
+    ]
+    resources = [aws_efs_file_system.agent_admin[0].arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "elasticfilesystem:AccessPointArn"
+      values   = [aws_efs_access_point.agent_admin[0].arn]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "agent_admin_task" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  name   = "${local.name_prefix}-agent-admin-task"
+  role   = aws_iam_role.agent_admin_task[0].id
+  policy = data.aws_iam_policy_document.agent_admin_task[0].json
+}
 

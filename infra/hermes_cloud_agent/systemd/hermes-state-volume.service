@@ -1,6 +1,7 @@
 [Unit]
 Description=Prepare encrypted Hermes profile state volume
-After=local-fs.target
+After=local-fs.target network-online.target
+Wants=network-online.target
 Before=hermes-podman.service hermes-cloud-agent.service
 
 [Service]

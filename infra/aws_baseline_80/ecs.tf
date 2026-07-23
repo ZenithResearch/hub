@@ -64,6 +64,7 @@ resource "aws_ecs_task_definition" "gateway" {
         { name = "LOG_LEVEL", value = "info" },
         { name = "HTTP_PORT", value = "8080" },
         { name = "RUNTIME_GRPC_TARGET", value = local.runtime_target },
+        { name = "AGENT_ADMIN_GRPC_TARGET", value = local.agent_admin_target },
         { name = "CLIENTS_DB_BACKEND", value = var.enable_clients_postgres ? "postgres" : "sqlite" },
         { name = "CLIENTS_DB_PATH", value = var.gateway_clients_db_path },
         { name = "CLIENTS_PG_HOST", value = var.enable_clients_postgres ? aws_db_instance.clients[0].address : "" },
@@ -96,7 +97,13 @@ resource "aws_ecs_task_definition" "gateway" {
             name      = "REVIEW_ACCESS_ADMIN_TOKEN"
             valueFrom = aws_secretsmanager_secret.review_access_admin_token.arn
           }
-        ]
+        ],
+        var.enable_hermes_cloud_agent ? [
+          {
+            name      = "AGENT_ADMIN_BEARER_TOKEN"
+            valueFrom = aws_secretsmanager_secret.agent_admin_bearer_token.arn
+          }
+        ] : []
       )
       mountPoints = [
         {
@@ -122,6 +129,17 @@ resource "aws_ecs_task_definition" "gateway" {
   ])
 
   tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition = (
+        !var.enable_hermes_cloud_agent ||
+        var.agent_admin_bearer_token != "" ||
+        var.agent_admin_bearer_token_secret_ready
+      )
+      error_message = "Populate the managed Agent Admin bearer secret out-of-band and attest readiness before enabling the Hermes cloud agent."
+    }
+  }
 }
 
 resource "aws_ecs_task_definition" "runtime" {
@@ -937,4 +955,103 @@ ls -lh "$${TARGET}"
   ])
 
   tags = merge(local.tags, { Purpose = "llama-model-preload" })
+}
+
+resource "aws_ecs_task_definition" "agent_admin" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  family                   = "${local.name_prefix}-agent-admin"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = tostring(var.agent_admin_task_cpu)
+  memory                   = tostring(var.agent_admin_task_memory)
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  task_role_arn            = aws_iam_role.agent_admin_task[0].arn
+
+  volume {
+    name = "agent-admin-data"
+
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.agent_admin[0].id
+      root_directory     = "/"
+      transit_encryption = "ENABLED"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.agent_admin[0].id
+        iam             = "ENABLED"
+      }
+    }
+  }
+
+  container_definitions = jsonencode([
+    {
+      name                   = "app"
+      image                  = "${aws_ecr_repository.gateway.repository_url}:${local.agent_admin_image_tag}"
+      essential              = true
+      command                = ["python", "-m", "services.agent_admin.main"]
+      readonlyRootFilesystem = true
+      user                   = "1000:1000"
+      portMappings = [
+        { containerPort = 50054, protocol = "tcp" }
+      ]
+      environment = [
+        { name = "LOG_LEVEL", value = "info" },
+        { name = "AWS_REGION", value = var.aws_region },
+        { name = "AGENT_ADMIN_GRPC_BIND", value = "0.0.0.0:50054" },
+        { name = "AGENT_ADMIN_DB_PATH", value = var.agent_admin_db_path },
+        { name = "AGENT_ADMIN_PROFILE_ID", value = var.hermes_cloud_agent_profile_id },
+        { name = "AGENT_ADMIN_INSTANCE_ID", value = aws_instance.hermes_cloud_agent[0].id },
+        { name = "AGENT_ADMIN_SSM_DOCUMENT_NAME", value = aws_ssm_document.hermes_cloud_agent_control[0].name },
+        { name = "AGENT_ADMIN_ALLOWED_MATRIX_SECRET_ARNS", value = var.hermes_cloud_agent_matrix_secret_arn }
+      ]
+      mountPoints = [
+        {
+          sourceVolume  = "agent-admin-data"
+          containerPath = "/data"
+          readOnly      = false
+        }
+      ]
+      linuxParameters = {
+        capabilities = { drop = ["ALL"] }
+      }
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.agent_admin[0].name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "agent_admin" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  name            = "${local.name_prefix}-agent-admin"
+  cluster         = aws_ecs_cluster.this.id
+  task_definition = aws_ecs_task_definition.agent_admin[0].arn
+  desired_count   = var.start_ecs_services ? var.agent_admin_desired_count : 0
+  launch_type     = "FARGATE"
+
+  enable_execute_command = false
+
+  network_configuration {
+    subnets          = aws_subnet.private[*].id
+    security_groups  = [aws_security_group.agent_admin[0].id]
+    assign_public_ip = false
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.agent_admin[0].arn
+  }
+
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  depends_on = [aws_efs_mount_target.agent_admin]
+  tags       = local.tags
 }

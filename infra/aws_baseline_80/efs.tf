@@ -278,3 +278,69 @@ resource "aws_security_group" "efs_gateway" {
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-efs-gateway-sg" })
 }
+
+resource "aws_efs_file_system" "agent_admin" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  creation_token   = "${local.name_prefix}-agent-admin-data"
+  encrypted        = true
+  kms_key_id       = var.hermes_cloud_agent_state_kms_key_arn
+  performance_mode = "generalPurpose"
+  throughput_mode  = "bursting"
+
+  lifecycle_policy {
+    transition_to_ia = "AFTER_30_DAYS"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-agent-admin-efs" })
+}
+
+resource "aws_efs_access_point" "agent_admin" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  file_system_id = aws_efs_file_system.agent_admin[0].id
+
+  posix_user {
+    uid = 1000
+    gid = 1000
+  }
+
+  root_directory {
+    path = "/agent-admin"
+    creation_info {
+      owner_uid   = 1000
+      owner_gid   = 1000
+      permissions = "0700"
+    }
+  }
+}
+
+resource "aws_efs_mount_target" "agent_admin" {
+  count = var.enable_hermes_cloud_agent ? length(aws_subnet.private) : 0
+
+  file_system_id  = aws_efs_file_system.agent_admin[0].id
+  subnet_id       = aws_subnet.private[count.index].id
+  security_groups = [aws_security_group.efs_agent_admin[0].id]
+}
+
+resource "aws_security_group" "efs_agent_admin" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  name        = "${local.name_prefix}-efs-agent-admin-sg"
+  description = "Encrypted Agent Admin EFS ingress from its private task only"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description     = "nfs_from_agent_admin"
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.agent_admin[0].id]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-efs-agent-admin-sg" })
+}
