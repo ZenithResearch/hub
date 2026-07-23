@@ -90,6 +90,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Ordered Gateway task-definition creation behind Terraform-managed Agent Admin secret-version creation — prevents the supported inline-token bootstrap path from racing ECS startup before `AWSCURRENT` exists.
 - Closed the final Agent Admin review blockers around verified lifecycle postconditions, transactional terminal evidence, exact idempotency replay, transient SSM observation, Fargate control-plane endpoints, secret readiness, and EFS destruction protection — prevents false-success state, duplicate actions, partial audit records, undeployable private tasks, and accidental authority-state loss.
 - Pinned the protobuf generator used by the checked-in stubs — keeps Agent Admin and runtime protobuf drift checks reproducible across local and hosted CI environments.
 - Made Agent Admin lifecycle recovery fail closed and SSM polling eventual-consistency-safe — prevents duplicate command dispatch after ambiguous crashes and avoids misclassifying newly dispatched commands as failed.

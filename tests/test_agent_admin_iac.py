@@ -104,4 +104,5 @@ def test_agent_admin_gateway_auth_is_dedicated_from_review_access() -> None:
     assert 'variable "agent_admin_bearer_token_secret_ready"' in variables
     assert "var.agent_admin_bearer_token_secret_ready" in ecs
     assert "Populate the managed Agent Admin bearer secret out-of-band" in ecs
+    assert "depends_on = [aws_secretsmanager_secret_version.agent_admin_bearer_token]" in ecs
     assert 'data "aws_secretsmanager_secret_version"' not in secrets

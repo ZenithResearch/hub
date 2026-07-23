@@ -140,6 +140,8 @@ resource "aws_ecs_task_definition" "gateway" {
       error_message = "Populate the managed Agent Admin bearer secret out-of-band and attest readiness before enabling the Hermes cloud agent."
     }
   }
+
+  depends_on = [aws_secretsmanager_secret_version.agent_admin_bearer_token]
 }
 
 resource "aws_ecs_task_definition" "runtime" {
