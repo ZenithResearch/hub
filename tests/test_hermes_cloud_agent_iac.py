@@ -84,6 +84,41 @@ def test_cloud_agent_profile_is_bound_to_the_exact_artifact_lock() -> None:
     assert "qwen3.5" not in cloud_agent_variables.lower()
 
 
+def test_cloud_agent_prepares_only_exact_s3_artifact_versions() -> None:
+    terraform = (IAC / "hermes_cloud_agent.tf").read_text(encoding="utf-8")
+    bootstrap = (IAC.parent / "hermes_cloud_agent/bootstrap.sh.tftpl").read_text(
+        encoding="utf-8"
+    )
+    prepare_service = (
+        IAC.parent / "hermes_cloud_agent/systemd/hermes-inference-prepare.service"
+    ).read_text(encoding="utf-8")
+
+    assert 'actions   = ["s3:GetObjectVersion"]' in terraform
+    assert terraform.count('variable = "s3:VersionId"') == 2
+    assert "local.local_inference_lock.desired.llama_cpp.s3_key" in terraform
+    assert "local.local_inference_lock.desired.model.s3_key" in terraform
+    assert '"s3:GetObject"' not in terraform
+    assert '"s3:ListBucket"' not in terraform
+    for template_value in (
+        "inference_lock_b64",
+        "inference_lock_schema_b64",
+        "inference_preparer_b64",
+        "inference_prepare_service_b64",
+    ):
+        assert template_value in terraform
+        assert f"${{{template_value}}}" in bootstrap
+    assert "hermes-prepare-local-inference" in bootstrap
+    assert "hermes-inference-prepare.service" in bootstrap
+    assert "Before=hermes-cloud-agent.service" in prepare_service
+    assert "Requires=hermes-state-volume.service" in prepare_service
+    assert "Type=oneshot" in prepare_service
+    assert "RemainAfterExit=yes" in prepare_service
+    assert "ExecStart=/opt/hermes/venv/bin/python /usr/local/libexec/hermes-prepare-local-inference" in prepare_service
+    assert "NoNewPrivileges=true" in prepare_service
+    assert "ProtectSystem=strict" in prepare_service
+    assert "ReadWritePaths=/opt/hermes/inference /var/lib/hermes/models /var/lib/hermes/inference" in prepare_service
+
+
 def test_cloud_agent_iam_secret_access_is_explicitly_scoped() -> None:
     terraform = (IAC / "hermes_cloud_agent.tf").read_text(encoding="utf-8")
 
@@ -121,7 +156,7 @@ def test_cloud_agent_bootstrap_pins_hermes_and_materializes_profile_service() ->
     assert "WEBHOOK_ENABLED=false" in runner
     assert "TERMINAL_ENV=docker" in runner
     assert "gateway run --external-supervisor" in runner
-    assert "ConditionPathExists=/var/lib/hermes/models/READY" in service
+    assert "ConditionPathExists=/var/lib/hermes/inference/READY.json" in service
     assert "NoNewPrivileges=true" in service
 
 

@@ -100,7 +100,9 @@ install -d -m 0700 -o hermes -g hermes \
   "$MOUNT_POINT/profiles/$profile_id" \
   "$MOUNT_POINT/profiles/$profile_id/platforms/matrix/store"
 install -d -m 0700 -o hermes-sandbox -g hermes-podman "$MOUNT_POINT/podman"
-install -d -m 0750 -o hermes -g hermes "$MOUNT_POINT/models"
+install -d -m 0750 -o root -g hermes-inference \
+  "$MOUNT_POINT/models" \
+  "$MOUNT_POINT/inference"
 install -m 0600 -o hermes -g hermes \
   "$CONFIG_DIR/config.yaml" \
   "$MOUNT_POINT/profiles/$profile_id/config.yaml"

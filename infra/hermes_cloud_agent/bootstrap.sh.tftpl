@@ -32,6 +32,11 @@ if ! id hermes-sandbox >/dev/null 2>&1; then
   useradd --system --gid hermes-podman --home-dir /var/lib/hermes/podman \
     --shell /usr/sbin/nologin hermes-sandbox
 fi
+getent group hermes-inference >/dev/null 2>&1 || groupadd --system hermes-inference
+if ! id hermes-inference >/dev/null 2>&1; then
+  useradd --system --gid hermes-inference --home-dir /nonexistent \
+    --shell /usr/sbin/nologin hermes-inference
+fi
 usermod --append --groups hermes-podman hermes
 if ! grep -q '^hermes-sandbox:' /etc/subuid; then
   usermod --add-subuids 100000-165535 hermes-sandbox
@@ -51,8 +56,14 @@ printf '%s' '${profile_schema_b64}' | base64 -d > /etc/hermes-cloud-agent/profil
 # shellcheck disable=SC2016
 printf '%s' '${profile_config_b64}' | base64 -d > /etc/hermes-cloud-agent/config.yaml
 # shellcheck disable=SC2016
+printf '%s' '${inference_lock_b64}' | base64 -d > /etc/hermes-cloud-agent/local-inference.lock.json
+# shellcheck disable=SC2016
+printf '%s' '${inference_lock_schema_b64}' | base64 -d > /etc/hermes-cloud-agent/local-inference-lock.schema.json
+# shellcheck disable=SC2016
 printf '%s\n' '${state_volume_id}' > /etc/hermes-cloud-agent/state-volume-id
 chmod 0640 /etc/hermes-cloud-agent/profile.json /etc/hermes-cloud-agent/profile.schema.json /etc/hermes-cloud-agent/config.yaml
+chmod 0444 /etc/hermes-cloud-agent/local-inference.lock.json \
+  /etc/hermes-cloud-agent/local-inference-lock.schema.json
 chmod 0644 /etc/hermes-cloud-agent/state-volume-id
 
 # shellcheck disable=SC2016
@@ -64,11 +75,14 @@ printf '%s' '${control_helper_b64}' | base64 -d > /usr/local/libexec/hermes-clou
 # shellcheck disable=SC2016
 printf '%s' '${secret_reader_b64}' | base64 -d > /usr/local/libexec/hermes-read-matrix-secret
 # shellcheck disable=SC2016
+printf '%s' '${inference_preparer_b64}' | base64 -d > /usr/local/libexec/hermes-prepare-local-inference
+# shellcheck disable=SC2016
 printf '%s' '${matrix_trust_patch_b64}' | base64 -d > /opt/hermes/strict-matrix-device-trust.patch
 chmod 0755 /usr/local/libexec/hermes-cloud-agent-run \
   /usr/local/libexec/hermes-cloud-agent-control \
   /usr/local/libexec/hermes-state-volume-mount \
-  /usr/local/libexec/hermes-read-matrix-secret
+  /usr/local/libexec/hermes-read-matrix-secret \
+  /usr/local/libexec/hermes-prepare-local-inference
 chmod 0444 /opt/hermes/strict-matrix-device-trust.patch
 
 # shellcheck disable=SC2016
@@ -76,9 +90,12 @@ printf '%s' '${state_service_b64}' | base64 -d > /etc/systemd/system/hermes-stat
 # shellcheck disable=SC2016
 printf '%s' '${podman_service_b64}' | base64 -d > /etc/systemd/system/hermes-podman.service
 # shellcheck disable=SC2016
+printf '%s' '${inference_prepare_service_b64}' | base64 -d > /etc/systemd/system/hermes-inference-prepare.service
+# shellcheck disable=SC2016
 printf '%s' '${gateway_service_b64}' | base64 -d > /etc/systemd/system/hermes-cloud-agent.service
 chmod 0644 /etc/systemd/system/hermes-state-volume.service \
   /etc/systemd/system/hermes-podman.service \
+  /etc/systemd/system/hermes-inference-prepare.service \
   /etc/systemd/system/hermes-cloud-agent.service
 
 rm -rf "$HERMES_SOURCE"
@@ -99,6 +116,7 @@ python3 -m venv "$HERMES_VENV"
 ln -sfn /usr/bin/podman /usr/local/bin/docker
 
 systemctl daemon-reload
-systemctl enable hermes-state-volume.service hermes-podman.service hermes-cloud-agent.service
+systemctl enable hermes-state-volume.service hermes-podman.service \
+  hermes-inference-prepare.service hermes-cloud-agent.service
 systemctl start hermes-state-volume.service
 systemctl start hermes-podman.service

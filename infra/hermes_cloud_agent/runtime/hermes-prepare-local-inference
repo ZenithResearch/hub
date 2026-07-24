@@ -1,0 +1,456 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import grp
+import hashlib
+import json
+import os
+import shutil
+import tarfile
+import tempfile
+import uuid
+from pathlib import Path, PurePosixPath
+from typing import Any, BinaryIO
+
+import boto3
+import jsonschema
+
+CHUNK_SIZE = 8 * 1024 * 1024
+MAX_RUNTIME_FILES = 4096
+MAX_RUNTIME_EXPANDED_BYTES = 1024 * 1024 * 1024
+
+
+class PreparationError(RuntimeError):
+    """A bounded, secret-free local-inference preparation failure."""
+
+
+def _canonical_json(value: Any) -> bytes:
+    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+
+def generation_id(generation: dict[str, Any]) -> str:
+    return hashlib.sha256(_canonical_json(generation)).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_json(path: Path, value: dict[str, Any], *, mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(_canonical_json(value) + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _stream_to_file(body: BinaryIO, destination: Path, expected_size: int) -> str:
+    digest = hashlib.sha256()
+    written = 0
+    with destination.open("xb") as output:
+        while True:
+            chunk = body.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > expected_size:
+                raise PreparationError("artifact verification failed")
+            output.write(chunk)
+            digest.update(chunk)
+        output.flush()
+        os.fsync(output.fileno())
+    if written != expected_size:
+        raise PreparationError("artifact verification failed")
+    return digest.hexdigest()
+
+
+def _download_exact(
+    artifact: dict[str, Any],
+    destination: Path,
+    *,
+    digest_field: str,
+    s3_client: Any,
+) -> None:
+    try:
+        response = s3_client.get_object(
+            Bucket=artifact["s3_bucket"],
+            Key=artifact["s3_key"],
+            VersionId=artifact["s3_version_id"],
+        )
+        if response.get("VersionId") != artifact["s3_version_id"]:
+            raise PreparationError("artifact verification failed")
+        if response.get("ContentLength") != artifact["size_bytes"]:
+            raise PreparationError("artifact verification failed")
+        body = response["Body"]
+        try:
+            actual_digest = _stream_to_file(body, destination, artifact["size_bytes"])
+        finally:
+            close = getattr(body, "close", None)
+            if close is not None:
+                close()
+    except PreparationError:
+        raise
+    except Exception as exc:
+        raise PreparationError("artifact retrieval failed") from exc
+    if actual_digest != artifact[digest_field]:
+        raise PreparationError("artifact verification failed")
+
+
+def _safe_runtime_members(archive: tarfile.TarFile, expected_root: str) -> list[tarfile.TarInfo]:
+    members = archive.getmembers()
+    if not members or len(members) > MAX_RUNTIME_FILES:
+        raise PreparationError("unsafe runtime archive")
+    expanded_bytes = 0
+    for member in members:
+        path = PurePosixPath(member.name)
+        if (
+            path.is_absolute()
+            or not path.parts
+            or ".." in path.parts
+            or path.parts[0] != expected_root
+            or not (member.isdir() or member.isreg())
+        ):
+            raise PreparationError("unsafe runtime archive")
+        expanded_bytes += member.size
+        if expanded_bytes > MAX_RUNTIME_EXPANDED_BYTES:
+            raise PreparationError("unsafe runtime archive")
+    return members
+
+
+def _install_runtime(archive_path: Path, artifact: dict[str, Any], runtime_root: Path) -> None:
+    commit = artifact["commit"]
+    expected_root = f"llama-{artifact['release']}"
+    target = runtime_root / commit
+    temporary = runtime_root / f".{commit}.prepare-{uuid.uuid4().hex}"
+    displaced = runtime_root / f".{commit}.invalid-{uuid.uuid4().hex}"
+    temporary.mkdir(mode=0o755)
+    try:
+        try:
+            with tarfile.open(archive_path, mode="r:gz") as archive:
+                members = _safe_runtime_members(archive, expected_root)
+                archive.extractall(temporary, members=members, filter="data")
+        except PreparationError:
+            raise
+        except (OSError, tarfile.TarError) as exc:
+            raise PreparationError("unsafe runtime archive") from exc
+
+        server = temporary / expected_root / "llama-server"
+        if not server.is_file() or server.is_symlink():
+            raise PreparationError("unsafe runtime archive")
+        os.chmod(server, 0o755)
+        manifest = {
+            "schema_version": 1,
+            "commit": commit,
+            "release": artifact["release"],
+            "archive_sha256": artifact["archive_sha256"],
+            "size_bytes": artifact["size_bytes"],
+            "s3_version_id": artifact["s3_version_id"],
+        }
+        _atomic_json(temporary / "RUNTIME.json", manifest)
+        if target.exists():
+            os.replace(target, displaced)
+        os.replace(temporary, target)
+        _fsync_directory(runtime_root)
+        shutil.rmtree(displaced, ignore_errors=True)
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+        shutil.rmtree(displaced, ignore_errors=True)
+
+
+def _runtime_installed(artifact: dict[str, Any], runtime_root: Path) -> bool:
+    target = runtime_root / artifact["commit"]
+    expected_root = f"llama-{artifact['release']}"
+    server = target / expected_root / "llama-server"
+    manifest_path = target / "RUNTIME.json"
+    if not server.is_file() or server.is_symlink() or not os.access(server, os.X_OK):
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return manifest == {
+        "schema_version": 1,
+        "commit": artifact["commit"],
+        "release": artifact["release"],
+        "archive_sha256": artifact["archive_sha256"],
+        "size_bytes": artifact["size_bytes"],
+        "s3_version_id": artifact["s3_version_id"],
+    }
+
+
+def _model_installed(artifact: dict[str, Any], model_root: Path) -> bool:
+    path = model_root / f"{artifact['sha256']}.gguf"
+    return (
+        path.is_file()
+        and not path.is_symlink()
+        and path.stat().st_size == artifact["size_bytes"]
+        and _sha256_file(path) == artifact["sha256"]
+    )
+
+
+def _secure_model_permissions(path: Path) -> None:
+    os.chmod(path, 0o440)
+    if os.geteuid() == 0:
+        os.chown(path, 0, grp.getgrnam("hermes-inference").gr_gid)
+
+
+def _prepare_generation(
+    generation: dict[str, Any],
+    *,
+    runtime_root: Path,
+    model_root: Path,
+    state_root: Path,
+    s3_client: Any,
+) -> None:
+    runtime = generation["llama_cpp"]
+    model = generation["model"]
+    temporary_root = state_root / ".downloads"
+    temporary_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    if not _runtime_installed(runtime, runtime_root):
+        descriptor, runtime_name = tempfile.mkstemp(prefix="runtime-", dir=temporary_root)
+        os.close(descriptor)
+        runtime_download = Path(runtime_name)
+        runtime_download.unlink()
+        try:
+            _download_exact(
+                runtime,
+                runtime_download,
+                digest_field="archive_sha256",
+                s3_client=s3_client,
+            )
+            _install_runtime(runtime_download, runtime, runtime_root)
+        finally:
+            runtime_download.unlink(missing_ok=True)
+
+    if not _model_installed(model, model_root):
+        descriptor, model_name = tempfile.mkstemp(prefix="model-", dir=model_root)
+        os.close(descriptor)
+        model_download = Path(model_name)
+        model_download.unlink()
+        try:
+            _download_exact(
+                model,
+                model_download,
+                digest_field="sha256",
+                s3_client=s3_client,
+            )
+            model_target = model_root / f"{model['sha256']}.gguf"
+            _secure_model_permissions(model_download)
+            os.replace(model_download, model_target)
+            _fsync_directory(model_root)
+        finally:
+            model_download.unlink(missing_ok=True)
+
+    if not _runtime_installed(runtime, runtime_root) or not _model_installed(model, model_root):
+        raise PreparationError("artifact verification failed")
+
+
+def _ready_payload(
+    generation: dict[str, Any],
+    *,
+    lock_sha256: str,
+    active_role: str,
+    failed_desired_generation_id: str | None = None,
+) -> dict[str, Any]:
+    runtime = generation["llama_cpp"]
+    model = generation["model"]
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "active_role": active_role,
+        "generation_id": generation_id(generation),
+        "lock_sha256": lock_sha256,
+        "runtime": {
+            "commit": runtime["commit"],
+            "archive_sha256": runtime["archive_sha256"],
+            "size_bytes": runtime["size_bytes"],
+            "s3_version_id": runtime["s3_version_id"],
+        },
+        "model": {
+            "model_id": model["model_id"],
+            "sha256": model["sha256"],
+            "size_bytes": model["size_bytes"],
+            "s3_version_id": model["s3_version_id"],
+        },
+    }
+    if failed_desired_generation_id is not None:
+        payload["failed_desired_generation_id"] = failed_desired_generation_id
+    return payload
+
+
+def _valid_ready_marker(existing: Any, generation: dict[str, Any]) -> bool:
+    if not isinstance(existing, dict):
+        return False
+    base_keys = {
+        "schema_version",
+        "active_role",
+        "generation_id",
+        "lock_sha256",
+        "runtime",
+        "model",
+    }
+    keys = set(existing)
+    if keys not in (base_keys, base_keys | {"failed_desired_generation_id"}):
+        return False
+    active_role = existing.get("active_role")
+    if active_role not in {"desired", "rollback"}:
+        return False
+    failed_generation = existing.get("failed_desired_generation_id")
+    if (active_role == "desired" and failed_generation is not None) or (
+        active_role == "rollback"
+        and (
+            not isinstance(failed_generation, str)
+            or len(failed_generation) != 64
+            or any(character not in "0123456789abcdef" for character in failed_generation)
+        )
+    ):
+        return False
+    lock_digest = existing.get("lock_sha256")
+    if (
+        not isinstance(lock_digest, str)
+        or len(lock_digest) != 64
+        or any(character not in "0123456789abcdef" for character in lock_digest)
+    ):
+        return False
+    expected = _ready_payload(
+        generation,
+        lock_sha256=lock_digest,
+        active_role=active_role,
+        failed_desired_generation_id=failed_generation,
+    )
+    return existing == expected
+
+
+def _select_rollback(
+    lock: dict[str, Any],
+    *,
+    lock_sha256: str,
+    runtime_root: Path,
+    model_root: Path,
+    state_root: Path,
+) -> dict[str, Any]:
+    rollback = lock.get("rollback")
+    ready_path = state_root / "READY.json"
+    if not isinstance(rollback, dict):
+        raise PreparationError("no valid declared rollback")
+    try:
+        existing = json.loads(ready_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PreparationError("no valid declared rollback") from exc
+    if not _valid_ready_marker(existing, rollback):
+        raise PreparationError("no valid declared rollback")
+    if not _runtime_installed(rollback["llama_cpp"], runtime_root) or not _model_installed(
+        rollback["model"], model_root
+    ):
+        raise PreparationError("no valid declared rollback")
+    ready = _ready_payload(
+        rollback,
+        lock_sha256=lock_sha256,
+        active_role="rollback",
+        failed_desired_generation_id=generation_id(lock["desired"]),
+    )
+    _atomic_json(ready_path, ready)
+    return ready
+
+
+def prepare_local_inference(
+    *,
+    lock_path: Path,
+    schema_path: Path,
+    runtime_root: Path,
+    model_root: Path,
+    state_root: Path,
+    s3_client: Any,
+) -> dict[str, Any]:
+    try:
+        lock_bytes = lock_path.read_bytes()
+        lock = json.loads(lock_bytes)
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.validate(lock, schema)
+    except (OSError, json.JSONDecodeError, jsonschema.ValidationError) as exc:
+        raise PreparationError("invalid artifact lock") from exc
+
+    runtime_root.mkdir(mode=0o755, parents=True, exist_ok=True)
+    model_root.mkdir(mode=0o750, parents=True, exist_ok=True)
+    state_root.mkdir(mode=0o750, parents=True, exist_ok=True)
+    lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
+    try:
+        _prepare_generation(
+            lock["desired"],
+            runtime_root=runtime_root,
+            model_root=model_root,
+            state_root=state_root,
+            s3_client=s3_client,
+        )
+    except PreparationError as exc:
+        try:
+            return _select_rollback(
+                lock,
+                lock_sha256=lock_sha256,
+                runtime_root=runtime_root,
+                model_root=model_root,
+                state_root=state_root,
+            )
+        except PreparationError as rollback_exc:
+            raise PreparationError(f"{exc}; no valid declared rollback") from rollback_exc
+
+    ready = _ready_payload(lock["desired"], lock_sha256=lock_sha256, active_role="desired")
+    _atomic_json(state_root / "READY.json", ready)
+    return ready
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Prepare exact local inference artifacts")
+    parser.add_argument(
+        "--lock", type=Path, default=Path("/etc/hermes-cloud-agent/local-inference.lock.json")
+    )
+    parser.add_argument(
+        "--schema",
+        type=Path,
+        default=Path("/etc/hermes-cloud-agent/local-inference-lock.schema.json"),
+    )
+    parser.add_argument("--runtime-root", type=Path, default=Path("/opt/hermes/inference"))
+    parser.add_argument("--model-root", type=Path, default=Path("/var/lib/hermes/models"))
+    parser.add_argument(
+        "--state-root", type=Path, default=Path("/var/lib/hermes/inference")
+    )
+    args = parser.parse_args()
+    try:
+        ready = prepare_local_inference(
+            lock_path=args.lock,
+            schema_path=args.schema,
+            runtime_root=args.runtime_root,
+            model_root=args.model_root,
+            state_root=args.state_root,
+            s3_client=boto3.client("s3"),
+        )
+    except PreparationError as exc:
+        print(str(exc), file=os.sys.stderr)
+        return 1
+    print(f"local inference generation ready: {ready['active_role']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
