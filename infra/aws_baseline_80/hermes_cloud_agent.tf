@@ -261,8 +261,10 @@ resource "aws_instance" "hermes_cloud_agent" {
         can(regex("^[a-f0-9]{64}$", local.local_inference_lock.desired.model.sha256)) &&
         local.local_inference_lock.desired.llama_cpp.s3_version_id != "" &&
         local.local_inference_lock.desired.llama_cpp.s3_version_id != "null" &&
+        local.local_inference_lock.desired.llama_cpp.s3_version_id != "latest" &&
         local.local_inference_lock.desired.model.s3_version_id != "" &&
-        local.local_inference_lock.desired.model.s3_version_id != "null"
+        local.local_inference_lock.desired.model.s3_version_id != "null" &&
+        local.local_inference_lock.desired.model.s3_version_id != "latest"
       )
       error_message = "Exact versioned runtime and model artifacts with pinned SHA-256 digests are required when the Hermes cloud agent is enabled."
     }

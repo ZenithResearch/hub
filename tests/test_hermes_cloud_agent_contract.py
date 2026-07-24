@@ -114,6 +114,7 @@ def test_local_inference_lock_pins_exact_staged_artifacts() -> None:
         ("llama_cpp", "release", "latest"),
         ("llama_cpp", "archive_sha256", "A" * 64),
         ("llama_cpp", "s3_version_id", "null"),
+        ("llama_cpp", "s3_version_id", "latest"),
         ("llama_cpp", "s3_key", "hermes-cloud-agent/runtime/*"),
         ("model", "revision", "main"),
         ("model", "s3_key", "../Qwen3-8B-Q4_K_M.gguf"),

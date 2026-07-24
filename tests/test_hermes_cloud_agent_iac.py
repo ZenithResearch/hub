@@ -80,6 +80,7 @@ def test_cloud_agent_profile_is_bound_to_the_exact_artifact_lock() -> None:
     )
     assert "local.local_inference_lock.desired.llama_cpp.s3_version_id" in terraform
     assert "local.local_inference_lock.desired.model.s3_version_id" in terraform
+    assert terraform.count('s3_version_id != "latest"') == 2
     assert "qwen3.5" not in cloud_agent_variables.lower()
 
 

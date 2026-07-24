@@ -29,7 +29,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 1024,
-      "not": {"const": "null"},
+      "not": {"enum": ["null", "latest"]},
       "pattern": "^[A-Za-z0-9._-]+$"
     },
     "llamaCpp": {
