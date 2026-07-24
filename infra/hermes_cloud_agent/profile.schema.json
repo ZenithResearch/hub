@@ -101,13 +101,14 @@
         "base_url",
         "model_id",
         "model_sha256",
+        "artifact_lock_sha256",
         "fallbacks"
       ],
       "properties": {
         "provider": {"const": "custom"},
         "base_url": {
           "type": "string",
-          "pattern": "^http://(127\\.0\\.0\\.1|localhost):[0-9]{2,5}/v1/?$"
+          "pattern": "^http://127\\.0\\.0\\.1:[0-9]{2,5}/v1/?$"
         },
         "model_id": {
           "type": "string",
@@ -115,6 +116,10 @@
           "maxLength": 128
         },
         "model_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "artifact_lock_sha256": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
         },

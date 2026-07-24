@@ -863,23 +863,6 @@ variable "hermes_cloud_agent_matrix_secret_arn" {
   default     = ""
 }
 
-variable "hermes_cloud_agent_model_id" {
-  description = "Pinned local llama.cpp model identifier exposed to Hermes."
-  type        = string
-  default     = "qwen3.5-9b-q4-k-m"
-}
-
-variable "hermes_cloud_agent_model_sha256" {
-  description = "Expected lowercase SHA-256 for the local GGUF artifact. Required when enabled."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.hermes_cloud_agent_model_sha256 == "" || can(regex("^[a-f0-9]{64}$", var.hermes_cloud_agent_model_sha256))
-    error_message = "hermes_cloud_agent_model_sha256 must be empty or a lowercase SHA-256 digest."
-  }
-}
-
 variable "agent_admin_task_cpu" {
   description = "CPU units for the private Agent Admin gRPC task."
   type        = number

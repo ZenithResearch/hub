@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added an immutable, schema-validated local-inference artifact lock bound into the Issue 97 profile — pins independently verified `llama.cpp` and Qwen GGUF bytes to exact private-S3 object versions and removes the placeholder model identity before node installation can proceed.
 - Added the private Issue 97 Agent Admin service, customer-managed-KMS single-writer state, private SSM endpoint, fixed-action dispatcher, least-privilege ECS/IAM boundary, and authenticated Gateway projection — enables bounded profile lifecycle administration without creating prompt, tool, arbitrary-command, raw-secret, or public agent ingress.
 - Added a separate typed Agent Admin gRPC contract and generated-stub drift gate for Issue 97 — keeps lifecycle, desired state, credential references, and redacted evidence structurally isolated from prompt, tool, arbitrary-command, and raw-secret APIs.
 - Added pinned Hermes Matrix profile bootstrap and hardened systemd supervision for Issue 97 — preserves E2EE/device state on encrypted storage, loads credentials only at runtime, and provides sandboxed tools through a rootless Podman socket without exposing generic Hermes ingress.

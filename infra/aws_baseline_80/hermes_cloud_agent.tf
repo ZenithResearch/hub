@@ -1,5 +1,7 @@
 locals {
   hermes_cloud_agent_profile_home = "/var/lib/hermes/profiles/${var.hermes_cloud_agent_profile_id}"
+  local_inference_lock            = jsondecode(file("${path.module}/../hermes_cloud_agent/artifacts/local-inference.lock.json"))
+  local_inference_lock_sha256     = filesha256("${path.module}/../hermes_cloud_agent/artifacts/local-inference.lock.json")
   hermes_cloud_agent_profile_contract = {
     schema_version = 1
     profile = {
@@ -20,11 +22,12 @@ locals {
       api_server_enabled = false
     }
     inference = {
-      provider     = "custom"
-      base_url     = "http://127.0.0.1:8080/v1"
-      model_id     = var.hermes_cloud_agent_model_id
-      model_sha256 = var.hermes_cloud_agent_model_sha256
-      fallbacks    = []
+      provider             = "custom"
+      base_url             = "http://127.0.0.1:8080/v1"
+      model_id             = local.local_inference_lock.desired.model.model_id
+      model_sha256         = local.local_inference_lock.desired.model.sha256
+      artifact_lock_sha256 = local.local_inference_lock_sha256
+      fallbacks            = []
     }
     sandbox = {
       backend                = "docker"
@@ -253,8 +256,15 @@ resource "aws_instance" "hermes_cloud_agent" {
     }
 
     precondition {
-      condition     = can(regex("^[a-f0-9]{64}$", var.hermes_cloud_agent_model_sha256))
-      error_message = "A pinned local-model SHA-256 is required when the Hermes cloud agent is enabled."
+      condition = (
+        can(regex("^[a-f0-9]{64}$", local.local_inference_lock.desired.llama_cpp.archive_sha256)) &&
+        can(regex("^[a-f0-9]{64}$", local.local_inference_lock.desired.model.sha256)) &&
+        local.local_inference_lock.desired.llama_cpp.s3_version_id != "" &&
+        local.local_inference_lock.desired.llama_cpp.s3_version_id != "null" &&
+        local.local_inference_lock.desired.model.s3_version_id != "" &&
+        local.local_inference_lock.desired.model.s3_version_id != "null"
+      )
+      error_message = "Exact versioned runtime and model artifacts with pinned SHA-256 digests are required when the Hermes cloud agent is enabled."
     }
 
     precondition {

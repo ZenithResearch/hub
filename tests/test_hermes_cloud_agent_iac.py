@@ -52,6 +52,37 @@ def test_cloud_agent_is_disabled_and_incomplete_configuration_fails_closed() -> 
     assert "enable_hermes_cloud_agent = false" in tfvars_example
 
 
+def test_cloud_agent_profile_is_bound_to_the_exact_artifact_lock() -> None:
+    terraform = (IAC / "hermes_cloud_agent.tf").read_text(encoding="utf-8")
+    variables = (IAC / "variables.tf").read_text(encoding="utf-8")
+    cloud_agent_variables = variables.split(
+        'variable "enable_hermes_cloud_agent"', 1
+    )[1]
+
+    assert re.search(
+        r'local_inference_lock\s+= jsondecode\(file\("\$\{path\.module\}/\.\./hermes_cloud_agent/artifacts/local-inference\.lock\.json"\)\)',
+        terraform,
+    )
+    assert re.search(
+        r'local_inference_lock_sha256\s+= filesha256\("\$\{path\.module\}/\.\./hermes_cloud_agent/artifacts/local-inference\.lock\.json"\)',
+        terraform,
+    )
+    assert re.search(
+        r"model_id\s+= local\.local_inference_lock\.desired\.model\.model_id",
+        terraform,
+    )
+    assert re.search(
+        r"model_sha256\s+= local\.local_inference_lock\.desired\.model\.sha256",
+        terraform,
+    )
+    assert re.search(
+        r"artifact_lock_sha256\s+= local\.local_inference_lock_sha256", terraform
+    )
+    assert "local.local_inference_lock.desired.llama_cpp.s3_version_id" in terraform
+    assert "local.local_inference_lock.desired.model.s3_version_id" in terraform
+    assert "qwen3.5" not in cloud_agent_variables.lower()
+
+
 def test_cloud_agent_iam_secret_access_is_explicitly_scoped() -> None:
     terraform = (IAC / "hermes_cloud_agent.tf").read_text(encoding="utf-8")
 
