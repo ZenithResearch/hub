@@ -50,12 +50,14 @@ def _load_preparer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
-def _runtime_archive(*, unsafe_name: str | None = None) -> bytes:
+def _runtime_archive(
+    *, unsafe_name: str | None = None, library_payload: bytes = b"runtime-library"
+) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
         entries = {
             unsafe_name or "llama-b10000/llama-server": b"#!/bin/sh\nexit 0\n",
-            "llama-b10000/libllama.so": b"runtime-library",
+            "llama-b10000/libllama.so": library_payload,
         }
         for name, payload in entries.items():
             info = tarfile.TarInfo(name)
@@ -155,7 +157,12 @@ def test_prepare_fetches_exact_versions_and_publishes_ready_last(
             "VersionId": lock["desired"]["model"]["s3_version_id"],
         },
     ]
-    runtime_dir = tmp_path / "runtime" / lock["desired"]["llama_cpp"]["commit"]
+    runtime_dir = (
+        tmp_path
+        / "runtime"
+        / lock["desired"]["llama_cpp"]["commit"]
+        / lock["desired"]["llama_cpp"]["archive_sha256"]
+    )
     server = runtime_dir / "llama-b10000" / "llama-server"
     assert server.read_bytes() == b"#!/bin/sh\nexit 0\n"
     assert stat.S_IMODE(server.stat().st_mode) == 0o755
@@ -220,6 +227,41 @@ def test_failed_update_selects_only_explicit_validated_rollback(
     assert ready["failed_desired_generation_id"] == module.generation_id(
         update_lock["desired"]
     )
+
+
+def test_failed_update_preserves_rollback_runtime_with_same_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_preparer(monkeypatch)
+    accepted_runtime = _runtime_archive(library_payload=b"accepted-runtime")
+    desired_runtime = _runtime_archive(library_payload=b"new-runtime")
+    model = b"rollback-model"
+    accepted_lock, accepted_objects = _lock(accepted_runtime, model)
+    accepted_ready = _prepare(
+        module, tmp_path, accepted_lock, FakeS3(accepted_objects)
+    )
+
+    update_lock, update_objects = _lock(desired_runtime, model)
+    update_lock["rollback"] = copy.deepcopy(accepted_lock["desired"])
+    update_lock["desired"]["model"]["sha256"] = "0" * 64
+    update_lock["desired"]["model"]["s3_key"] = "models/bad/model.gguf"
+    update_lock["desired"]["model"]["s3_version_id"] = "bad-version"
+    update_objects.update(accepted_objects)
+    update_objects[("example-private-artifacts", "models/bad/model.gguf", "bad-version")] = model
+
+    ready = _prepare(module, tmp_path, update_lock, FakeS3(update_objects))
+
+    assert ready["active_role"] == "rollback"
+    assert ready["generation_id"] == accepted_ready["generation_id"]
+    accepted_runtime_path = (
+        tmp_path
+        / "runtime"
+        / accepted_lock["desired"]["llama_cpp"]["commit"]
+        / accepted_lock["desired"]["llama_cpp"]["archive_sha256"]
+        / "llama-b10000"
+        / "llama-server"
+    )
+    assert accepted_runtime_path.is_file()
 
 
 def test_failed_update_without_declared_rollback_fails_closed(

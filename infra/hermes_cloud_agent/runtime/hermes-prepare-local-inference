@@ -140,10 +140,13 @@ def _safe_runtime_members(archive: tarfile.TarFile, expected_root: str) -> list[
 
 def _install_runtime(archive_path: Path, artifact: dict[str, Any], runtime_root: Path) -> None:
     commit = artifact["commit"]
+    archive_sha256 = artifact["archive_sha256"]
     expected_root = f"llama-{artifact['release']}"
-    target = runtime_root / commit
-    temporary = runtime_root / f".{commit}.prepare-{uuid.uuid4().hex}"
-    displaced = runtime_root / f".{commit}.invalid-{uuid.uuid4().hex}"
+    commit_root = runtime_root / commit
+    commit_root.mkdir(mode=0o755, parents=True, exist_ok=True)
+    target = commit_root / archive_sha256
+    temporary = commit_root / f".{archive_sha256}.prepare-{uuid.uuid4().hex}"
+    displaced = commit_root / f".{archive_sha256}.invalid-{uuid.uuid4().hex}"
     temporary.mkdir(mode=0o755)
     try:
         try:
@@ -171,7 +174,7 @@ def _install_runtime(archive_path: Path, artifact: dict[str, Any], runtime_root:
         if target.exists():
             os.replace(target, displaced)
         os.replace(temporary, target)
-        _fsync_directory(runtime_root)
+        _fsync_directory(commit_root)
         shutil.rmtree(displaced, ignore_errors=True)
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
@@ -179,7 +182,7 @@ def _install_runtime(archive_path: Path, artifact: dict[str, Any], runtime_root:
 
 
 def _runtime_installed(artifact: dict[str, Any], runtime_root: Path) -> bool:
-    target = runtime_root / artifact["commit"]
+    target = runtime_root / artifact["commit"] / artifact["archive_sha256"]
     expected_root = f"llama-{artifact['release']}"
     server = target / expected_root / "llama-server"
     manifest_path = target / "RUNTIME.json"
