@@ -23,19 +23,26 @@ LOCK_SCHEMA = (
 
 
 class FakeS3:
-    def __init__(self, objects: dict[tuple[str, str, str], bytes]) -> None:
+    def __init__(
+        self,
+        objects: dict[tuple[str, str, str], bytes],
+        response_overrides: dict[tuple[str, str, str], dict[str, Any]] | None = None,
+    ) -> None:
         self.objects = objects
+        self.response_overrides = response_overrides or {}
         self.calls: list[dict[str, str]] = []
 
     def get_object(self, **kwargs: str) -> dict[str, Any]:
         self.calls.append(kwargs)
         identity = (kwargs["Bucket"], kwargs["Key"], kwargs["VersionId"])
         payload = self.objects[identity]
-        return {
+        response = {
             "Body": io.BytesIO(payload),
             "ContentLength": len(payload),
             "VersionId": kwargs["VersionId"],
         }
+        response.update(self.response_overrides.get(identity, {}))
+        return response
 
 
 def _load_preparer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
@@ -51,7 +58,10 @@ def _load_preparer(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 def _runtime_archive(
-    *, unsafe_name: str | None = None, library_payload: bytes = b"runtime-library"
+    *,
+    unsafe_name: str | None = None,
+    unsafe_type: str | None = None,
+    library_payload: bytes = b"runtime-library",
 ) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
@@ -64,6 +74,21 @@ def _runtime_archive(
             info.mode = 0o755 if name.endswith("llama-server") else 0o644
             info.size = len(payload)
             archive.addfile(info, io.BytesIO(payload))
+        if unsafe_type is not None:
+            info = tarfile.TarInfo("llama-b10000/unsafe-member")
+            if unsafe_type == "symlink":
+                info.type = tarfile.SYMTYPE
+                info.linkname = "llama-server"
+            elif unsafe_type == "hardlink":
+                info.type = tarfile.LNKTYPE
+                info.linkname = "llama-b10000/llama-server"
+            elif unsafe_type == "device":
+                info.type = tarfile.CHRTYPE
+                info.devmajor = 1
+                info.devminor = 3
+            else:
+                raise AssertionError(f"unsupported test archive member: {unsafe_type}")
+            archive.addfile(info)
     return buffer.getvalue()
 
 
@@ -203,6 +228,122 @@ def test_prepare_rejects_archive_traversal(
     assert not (tmp_path / "state" / "READY.json").exists()
 
 
+@pytest.mark.parametrize("unsafe_type", ["symlink", "hardlink", "device"])
+def test_prepare_rejects_non_regular_archive_members(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsafe_type: str
+) -> None:
+    module = _load_preparer(monkeypatch)
+    runtime = _runtime_archive(unsafe_type=unsafe_type)
+    lock, objects = _lock(runtime, b"model")
+
+    with pytest.raises(module.PreparationError, match="unsafe runtime archive"):
+        _prepare(module, tmp_path, lock, FakeS3(objects))
+
+    assert not (tmp_path / "state" / "READY.json").exists()
+
+
+@pytest.mark.parametrize("stream_shape", ["truncated", "oversized"])
+def test_prepare_rejects_streams_that_disagree_with_declared_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream_shape: str
+) -> None:
+    module = _load_preparer(monkeypatch)
+    runtime = _runtime_archive()
+    model = b"declared-model"
+    lock, objects = _lock(runtime, model)
+    model_artifact = lock["desired"]["model"]
+    identity = (
+        model_artifact["s3_bucket"],
+        model_artifact["s3_key"],
+        model_artifact["s3_version_id"],
+    )
+    objects[identity] = model[:-1] if stream_shape == "truncated" else model + b"x"
+    overrides = {identity: {"ContentLength": len(model)}}
+
+    with pytest.raises(module.PreparationError, match="artifact verification failed"):
+        _prepare(module, tmp_path, lock, FakeS3(objects, overrides))
+
+    assert not (tmp_path / "state" / "READY.json").exists()
+
+
+def test_prepare_rejects_a_different_returned_s3_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_preparer(monkeypatch)
+    runtime = _runtime_archive()
+    lock, objects = _lock(runtime, b"model")
+    runtime_artifact = lock["desired"]["llama_cpp"]
+    identity = (
+        runtime_artifact["s3_bucket"],
+        runtime_artifact["s3_key"],
+        runtime_artifact["s3_version_id"],
+    )
+    body = io.BytesIO(objects[identity])
+
+    with pytest.raises(module.PreparationError, match="artifact verification failed"):
+        _prepare(
+            module,
+            tmp_path,
+            lock,
+            FakeS3(
+                objects,
+                {identity: {"VersionId": "different-version", "Body": body}},
+            ),
+        )
+
+    assert body.closed
+    assert not (tmp_path / "state" / "READY.json").exists()
+
+
+def test_prepare_is_idempotent_without_redownloading_installed_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_preparer(monkeypatch)
+    runtime = _runtime_archive()
+    lock, objects = _lock(runtime, b"model")
+    first = _prepare(module, tmp_path, lock, FakeS3(objects))
+    second_s3 = FakeS3({})
+
+    second = _prepare(module, tmp_path, lock, second_s3)
+
+    assert second == first
+    assert second_s3.calls == []
+
+
+def test_prepare_grants_the_inference_group_access_to_model_and_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_preparer(monkeypatch)
+    runtime = _runtime_archive()
+    model = b"model"
+    lock, objects = _lock(runtime, model)
+    ownership_changes: list[tuple[Path, int, int]] = []
+    monkeypatch.setattr(module.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        module.grp, "getgrnam", lambda _name: SimpleNamespace(gr_gid=4242)
+    )
+    monkeypatch.setattr(
+        module.os,
+        "chown",
+        lambda path, uid, gid: ownership_changes.append((Path(path), uid, gid)),
+    )
+
+    _prepare(module, tmp_path, lock, FakeS3(objects))
+
+    model_root = tmp_path / "models"
+    state_root = tmp_path / "state"
+    assert stat.S_IMODE(model_root.stat().st_mode) == 0o750
+    assert stat.S_IMODE(state_root.stat().st_mode) == 0o750
+    assert (model_root, 0, 4242) in ownership_changes
+    assert (state_root, 0, 4242) in ownership_changes
+    assert any(
+        path.parent == model_root
+        and path.name.startswith("model-")
+        and uid == 0
+        and gid == 4242
+        for path, uid, gid in ownership_changes
+    )
+
+
 def test_failed_update_selects_only_explicit_validated_rollback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -262,6 +403,143 @@ def test_failed_update_preserves_rollback_runtime_with_same_commit(
         / "llama-server"
     )
     assert accepted_runtime_path.is_file()
+
+
+def test_rollback_rejects_post_install_runtime_corruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_preparer(monkeypatch)
+    runtime = _runtime_archive()
+    model = b"accepted-model"
+    accepted_lock, accepted_objects = _lock(runtime, model)
+    _prepare(module, tmp_path, accepted_lock, FakeS3(accepted_objects))
+    runtime_root = (
+        tmp_path
+        / "runtime"
+        / accepted_lock["desired"]["llama_cpp"]["commit"]
+        / accepted_lock["desired"]["llama_cpp"]["archive_sha256"]
+    )
+    (runtime_root / "llama-b10000" / "libllama.so").write_bytes(b"corrupt")
+
+    update_lock = copy.deepcopy(accepted_lock)
+    update_lock["rollback"] = copy.deepcopy(accepted_lock["desired"])
+    update_lock["desired"]["model"]["sha256"] = "0" * 64
+    model_artifact = accepted_lock["desired"]["model"]
+    model_identity = (
+        model_artifact["s3_bucket"],
+        model_artifact["s3_key"],
+        model_artifact["s3_version_id"],
+    )
+
+    with pytest.raises(module.PreparationError, match="no valid declared rollback"):
+        _prepare(
+            module,
+            tmp_path,
+            update_lock,
+            FakeS3({model_identity: accepted_objects[model_identity]}),
+        )
+
+
+def test_interrupted_runtime_promotion_keeps_the_previous_generation_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_preparer(monkeypatch)
+    accepted_runtime = _runtime_archive(library_payload=b"accepted-runtime")
+    desired_runtime = _runtime_archive(library_payload=b"desired-runtime")
+    model = b"accepted-model"
+    accepted_lock, accepted_objects = _lock(accepted_runtime, model)
+    accepted_ready = _prepare(
+        module, tmp_path, accepted_lock, FakeS3(accepted_objects)
+    )
+    update_lock, update_objects = _lock(desired_runtime, model)
+    update_lock["rollback"] = copy.deepcopy(accepted_lock["desired"])
+    update_objects.update(accepted_objects)
+    desired_target = (
+        tmp_path
+        / "runtime"
+        / update_lock["desired"]["llama_cpp"]["commit"]
+        / update_lock["desired"]["llama_cpp"]["archive_sha256"]
+    )
+    real_replace = module.os.replace
+
+    def interrupt_runtime(source: str | Path, destination: str | Path) -> None:
+        source_path = Path(source)
+        if Path(destination) == desired_target and ".prepare-" in source_path.name:
+            raise OSError("simulated interrupted runtime promotion")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(module.os, "replace", interrupt_runtime)
+
+    ready = _prepare(module, tmp_path, update_lock, FakeS3(update_objects))
+
+    assert ready["active_role"] == "rollback"
+    assert ready["generation_id"] == accepted_ready["generation_id"]
+    assert not desired_target.exists()
+
+
+def test_interrupted_model_promotion_keeps_the_previous_generation_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_preparer(monkeypatch)
+    runtime = _runtime_archive()
+    accepted_model = b"accepted-model"
+    desired_model = b"desired-model"
+    accepted_lock, accepted_objects = _lock(runtime, accepted_model)
+    accepted_ready = _prepare(
+        module, tmp_path, accepted_lock, FakeS3(accepted_objects)
+    )
+    update_lock, update_objects = _lock(runtime, desired_model)
+    update_lock["rollback"] = copy.deepcopy(accepted_lock["desired"])
+    update_objects.update(accepted_objects)
+    desired_target = (
+        tmp_path
+        / "models"
+        / f"{update_lock['desired']['model']['sha256']}.gguf"
+    )
+    real_replace = module.os.replace
+
+    def interrupt_model(source: str | Path, destination: str | Path) -> None:
+        source_path = Path(source)
+        if Path(destination) == desired_target and source_path.name.startswith("model-"):
+            raise OSError("simulated interrupted model promotion")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(module.os, "replace", interrupt_model)
+
+    ready = _prepare(module, tmp_path, update_lock, FakeS3(update_objects))
+
+    assert ready["active_role"] == "rollback"
+    assert ready["generation_id"] == accepted_ready["generation_id"]
+    assert not desired_target.exists()
+
+
+@pytest.mark.parametrize("drift_part", ["commit_root", "target", "runtime_tree"])
+def test_rollback_rejects_runtime_directory_permission_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drift_part: str
+) -> None:
+    module = _load_preparer(monkeypatch)
+    accepted_runtime = _runtime_archive(library_payload=b"accepted-runtime")
+    desired_runtime = _runtime_archive(library_payload=b"desired-runtime")
+    model = b"accepted-model"
+    accepted_lock, accepted_objects = _lock(accepted_runtime, model)
+    _prepare(module, tmp_path, accepted_lock, FakeS3(accepted_objects))
+    commit_root = (
+        tmp_path / "runtime" / accepted_lock["desired"]["llama_cpp"]["commit"]
+    )
+    target = commit_root / accepted_lock["desired"]["llama_cpp"]["archive_sha256"]
+    paths = {
+        "commit_root": commit_root,
+        "target": target,
+        "runtime_tree": target / "llama-b10000",
+    }
+    drift_path = paths[drift_part]
+    assert stat.S_IMODE(drift_path.stat().st_mode) == 0o755
+    drift_path.chmod(0o700)
+    update_lock, _ = _lock(desired_runtime, model)
+    update_lock["rollback"] = copy.deepcopy(accepted_lock["desired"])
+
+    with pytest.raises(module.PreparationError, match="no valid declared rollback"):
+        _prepare(module, tmp_path, update_lock, FakeS3({}))
 
 
 def test_failed_update_without_declared_rollback_fails_closed(

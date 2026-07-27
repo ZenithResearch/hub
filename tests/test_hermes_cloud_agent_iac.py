@@ -92,7 +92,9 @@ def test_cloud_agent_prepares_only_exact_s3_artifact_versions() -> None:
     prepare_service = (
         IAC.parent / "hermes_cloud_agent/systemd/hermes-inference-prepare.service"
     ).read_text(encoding="utf-8")
-
+    gateway_service = (
+        IAC.parent / "hermes_cloud_agent/systemd/hermes-cloud-agent.service"
+    ).read_text(encoding="utf-8")
     assert 'actions   = ["s3:GetObjectVersion"]' in terraform
     assert terraform.count('variable = "s3:VersionId"') == 2
     assert "local.local_inference_lock.desired.llama_cpp.s3_key" in terraform
@@ -111,6 +113,14 @@ def test_cloud_agent_prepares_only_exact_s3_artifact_versions() -> None:
     assert "hermes-inference-prepare.service" in bootstrap
     assert "Before=hermes-cloud-agent.service" in prepare_service
     assert "Requires=hermes-state-volume.service" in prepare_service
+    assert (
+        "Requires=hermes-state-volume.service hermes-podman.service "
+        "hermes-inference-prepare.service" in gateway_service
+    )
+    assert (
+        "After=network-online.target hermes-state-volume.service "
+        "hermes-podman.service hermes-inference-prepare.service" in gateway_service
+    )
     assert "Type=oneshot" in prepare_service
     assert "RemainAfterExit=yes" in prepare_service
     assert "ExecStart=/opt/hermes/venv/bin/python /usr/local/libexec/hermes-prepare-local-inference" in prepare_service

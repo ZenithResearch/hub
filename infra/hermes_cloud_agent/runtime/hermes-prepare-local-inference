@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import tarfile
 import tempfile
 import uuid
@@ -92,27 +93,28 @@ def _download_exact(
     digest_field: str,
     s3_client: Any,
 ) -> None:
+    body: BinaryIO | None = None
     try:
         response = s3_client.get_object(
             Bucket=artifact["s3_bucket"],
             Key=artifact["s3_key"],
             VersionId=artifact["s3_version_id"],
         )
+        body = response["Body"]
         if response.get("VersionId") != artifact["s3_version_id"]:
             raise PreparationError("artifact verification failed")
         if response.get("ContentLength") != artifact["size_bytes"]:
             raise PreparationError("artifact verification failed")
-        body = response["Body"]
-        try:
-            actual_digest = _stream_to_file(body, destination, artifact["size_bytes"])
-        finally:
-            close = getattr(body, "close", None)
-            if close is not None:
-                close()
+        actual_digest = _stream_to_file(body, destination, artifact["size_bytes"])
     except PreparationError:
         raise
     except Exception as exc:
         raise PreparationError("artifact retrieval failed") from exc
+    finally:
+        if body is not None:
+            close = getattr(body, "close", None)
+            if close is not None:
+                close()
     if actual_digest != artifact[digest_field]:
         raise PreparationError("artifact verification failed")
 
@@ -138,12 +140,60 @@ def _safe_runtime_members(archive: tarfile.TarFile, expected_root: str) -> list[
     return members
 
 
+def _normalize_runtime_tree(root: Path, server: Path) -> None:
+    for path in [root, *sorted(root.rglob("*"))]:
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode):
+            raise PreparationError("runtime integrity verification failed")
+        if stat.S_ISDIR(metadata.st_mode):
+            os.chmod(path, 0o755)
+        elif stat.S_ISREG(metadata.st_mode):
+            os.chmod(path, 0o755 if path == server else 0o644)
+        else:
+            raise PreparationError("runtime integrity verification failed")
+
+
+def _runtime_file_manifest(root: Path) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for path in [root, *sorted(root.rglob("*"))]:
+        relative = "." if path == root else path.relative_to(root).as_posix()
+        if relative == "RUNTIME.json":
+            continue
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode):
+            raise PreparationError("runtime integrity verification failed")
+        if stat.S_ISDIR(metadata.st_mode):
+            entries.append(
+                {
+                    "path": relative,
+                    "type": "directory",
+                    "mode": stat.S_IMODE(metadata.st_mode),
+                }
+            )
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            raise PreparationError("runtime integrity verification failed")
+        entries.append(
+            {
+                "path": relative,
+                "type": "file",
+                "sha256": _sha256_file(path),
+                "size_bytes": metadata.st_size,
+                "mode": stat.S_IMODE(metadata.st_mode),
+            }
+        )
+    if len(entries) < 2:
+        raise PreparationError("runtime integrity verification failed")
+    return entries
+
+
 def _install_runtime(archive_path: Path, artifact: dict[str, Any], runtime_root: Path) -> None:
     commit = artifact["commit"]
     archive_sha256 = artifact["archive_sha256"]
     expected_root = f"llama-{artifact['release']}"
     commit_root = runtime_root / commit
     commit_root.mkdir(mode=0o755, parents=True, exist_ok=True)
+    os.chmod(commit_root, 0o755)
     target = commit_root / archive_sha256
     temporary = commit_root / f".{archive_sha256}.prepare-{uuid.uuid4().hex}"
     displaced = commit_root / f".{archive_sha256}.invalid-{uuid.uuid4().hex}"
@@ -161,7 +211,7 @@ def _install_runtime(archive_path: Path, artifact: dict[str, Any], runtime_root:
         server = temporary / expected_root / "llama-server"
         if not server.is_file() or server.is_symlink():
             raise PreparationError("unsafe runtime archive")
-        os.chmod(server, 0o755)
+        _normalize_runtime_tree(temporary, server)
         manifest = {
             "schema_version": 1,
             "commit": commit,
@@ -169,30 +219,48 @@ def _install_runtime(archive_path: Path, artifact: dict[str, Any], runtime_root:
             "archive_sha256": artifact["archive_sha256"],
             "size_bytes": artifact["size_bytes"],
             "s3_version_id": artifact["s3_version_id"],
+            "files": _runtime_file_manifest(temporary),
         }
         _atomic_json(temporary / "RUNTIME.json", manifest)
-        if target.exists():
-            os.replace(target, displaced)
-        os.replace(temporary, target)
-        _fsync_directory(commit_root)
-        shutil.rmtree(displaced, ignore_errors=True)
+        try:
+            if target.exists():
+                os.replace(target, displaced)
+            os.replace(temporary, target)
+            _fsync_directory(commit_root)
+            shutil.rmtree(displaced, ignore_errors=True)
+        except OSError as exc:
+            if displaced.exists() and not target.exists():
+                os.replace(displaced, target)
+                _fsync_directory(commit_root)
+            raise PreparationError("runtime installation failed") from exc
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
         shutil.rmtree(displaced, ignore_errors=True)
 
 
 def _runtime_installed(artifact: dict[str, Any], runtime_root: Path) -> bool:
-    target = runtime_root / artifact["commit"] / artifact["archive_sha256"]
+    commit_root = runtime_root / artifact["commit"]
+    target = commit_root / artifact["archive_sha256"]
     expected_root = f"llama-{artifact['release']}"
     server = target / expected_root / "llama-server"
     manifest_path = target / "RUNTIME.json"
-    if not server.is_file() or server.is_symlink() or not os.access(server, os.X_OK):
+    if (
+        commit_root.is_symlink()
+        or not commit_root.is_dir()
+        or stat.S_IMODE(commit_root.stat().st_mode) != 0o755
+        or target.is_symlink()
+        or not target.is_dir()
+        or manifest_path.is_symlink()
+        or not server.is_file()
+        or server.is_symlink()
+        or not os.access(server, os.X_OK)
+    ):
         return False
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
-    return manifest == {
+    expected_metadata = {
         "schema_version": 1,
         "commit": artifact["commit"],
         "release": artifact["release"],
@@ -200,16 +268,28 @@ def _runtime_installed(artifact: dict[str, Any], runtime_root: Path) -> bool:
         "size_bytes": artifact["size_bytes"],
         "s3_version_id": artifact["s3_version_id"],
     }
+    if not isinstance(manifest, dict) or set(manifest) != set(expected_metadata) | {"files"}:
+        return False
+    expected_files = manifest.pop("files", None)
+    if manifest != expected_metadata or not isinstance(expected_files, list):
+        return False
+    try:
+        return expected_files == _runtime_file_manifest(target)
+    except (OSError, PreparationError):
+        return False
 
 
 def _model_installed(artifact: dict[str, Any], model_root: Path) -> bool:
     path = model_root / f"{artifact['sha256']}.gguf"
-    return (
-        path.is_file()
-        and not path.is_symlink()
-        and path.stat().st_size == artifact["size_bytes"]
-        and _sha256_file(path) == artifact["sha256"]
-    )
+    try:
+        return (
+            path.is_file()
+            and not path.is_symlink()
+            and path.stat().st_size == artifact["size_bytes"]
+            and _sha256_file(path) == artifact["sha256"]
+        )
+    except OSError:
+        return False
 
 
 def _secure_model_permissions(path: Path) -> None:
@@ -261,8 +341,11 @@ def _prepare_generation(
             )
             model_target = model_root / f"{model['sha256']}.gguf"
             _secure_model_permissions(model_download)
-            os.replace(model_download, model_target)
-            _fsync_directory(model_root)
+            try:
+                os.replace(model_download, model_target)
+                _fsync_directory(model_root)
+            except OSError as exc:
+                raise PreparationError("model installation failed") from exc
         finally:
             model_download.unlink(missing_ok=True)
 
@@ -397,6 +480,13 @@ def prepare_local_inference(
     runtime_root.mkdir(mode=0o755, parents=True, exist_ok=True)
     model_root.mkdir(mode=0o750, parents=True, exist_ok=True)
     state_root.mkdir(mode=0o750, parents=True, exist_ok=True)
+    os.chmod(runtime_root, 0o755)
+    os.chmod(model_root, 0o750)
+    os.chmod(state_root, 0o750)
+    if os.geteuid() == 0:
+        inference_group = grp.getgrnam("hermes-inference").gr_gid
+        os.chown(model_root, 0, inference_group)
+        os.chown(state_root, 0, inference_group)
     lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
     try:
         _prepare_generation(
