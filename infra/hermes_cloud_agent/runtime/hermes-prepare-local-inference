@@ -50,7 +50,13 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _atomic_json(path: Path, value: dict[str, Any], *, mode: int = 0o644) -> None:
+def _atomic_json(
+    path: Path,
+    value: dict[str, Any],
+    *,
+    mode: int = 0o644,
+    group_gid: int | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
@@ -60,6 +66,8 @@ def _atomic_json(path: Path, value: dict[str, Any], *, mode: int = 0o644) -> Non
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temporary, mode)
+        if group_gid is not None:
+            os.chown(temporary, 0, group_gid)
         os.replace(temporary, path)
         _fsync_directory(path.parent)
     finally:
@@ -435,6 +443,7 @@ def _select_rollback(
     runtime_root: Path,
     model_root: Path,
     state_root: Path,
+    ready_group_gid: int | None,
 ) -> dict[str, Any]:
     rollback = lock.get("rollback")
     ready_path = state_root / "READY.json"
@@ -456,7 +465,7 @@ def _select_rollback(
         active_role="rollback",
         failed_desired_generation_id=generation_id(lock["desired"]),
     )
-    _atomic_json(ready_path, ready)
+    _atomic_json(ready_path, ready, mode=0o640, group_gid=ready_group_gid)
     return ready
 
 
@@ -483,10 +492,11 @@ def prepare_local_inference(
     os.chmod(runtime_root, 0o755)
     os.chmod(model_root, 0o750)
     os.chmod(state_root, 0o750)
+    ready_group_gid: int | None = None
     if os.geteuid() == 0:
-        inference_group = grp.getgrnam("hermes-inference").gr_gid
-        os.chown(model_root, 0, inference_group)
-        os.chown(state_root, 0, inference_group)
+        ready_group_gid = grp.getgrnam("hermes-inference").gr_gid
+        os.chown(model_root, 0, ready_group_gid)
+        os.chown(state_root, 0, ready_group_gid)
     lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
     try:
         _prepare_generation(
@@ -504,12 +514,18 @@ def prepare_local_inference(
                 runtime_root=runtime_root,
                 model_root=model_root,
                 state_root=state_root,
+                ready_group_gid=ready_group_gid,
             )
         except PreparationError as rollback_exc:
             raise PreparationError(f"{exc}; no valid declared rollback") from rollback_exc
 
     ready = _ready_payload(lock["desired"], lock_sha256=lock_sha256, active_role="desired")
-    _atomic_json(state_root / "READY.json", ready)
+    _atomic_json(
+        state_root / "READY.json",
+        ready,
+        mode=0o640,
+        group_gid=ready_group_gid,
+    )
     return ready
 
 

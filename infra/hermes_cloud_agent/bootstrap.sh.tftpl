@@ -11,11 +11,13 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates \
+  bpftool \
   curl \
   fuse-overlayfs \
   git \
   jq \
   libolm-dev \
+  nftables \
   podman \
   python3 \
   python3-pip \
@@ -25,8 +27,10 @@ apt-get install -y --no-install-recommends \
 rm -rf /var/lib/apt/lists/*
 
 getent group hermes-podman >/dev/null 2>&1 || groupadd --system hermes-podman
+getent group hermes >/dev/null 2>&1 || groupadd --system hermes
 if ! id hermes >/dev/null 2>&1; then
-  useradd --system --create-home --home-dir /var/lib/hermes --shell /usr/sbin/nologin hermes
+  useradd --system --gid hermes --create-home --home-dir /var/lib/hermes \
+    --shell /usr/sbin/nologin hermes
 fi
 if ! id hermes-sandbox >/dev/null 2>&1; then
   useradd --system --gid hermes-podman --home-dir /var/lib/hermes/podman \
@@ -45,7 +49,7 @@ if ! grep -q '^hermes-sandbox:' /etc/subgid; then
   usermod --add-subgids 100000-165535 hermes-sandbox
 fi
 
-install -d -m 0750 /etc/hermes-cloud-agent
+install -d -m 0751 -o root -g root /etc/hermes-cloud-agent
 install -d -m 0755 /usr/local/libexec /opt/hermes
 
 # Values below are Terraform template expressions, not shell expansions.
@@ -61,8 +65,15 @@ printf '%s' '${inference_lock_b64}' | base64 -d > /etc/hermes-cloud-agent/local-
 printf '%s' '${inference_lock_schema_b64}' | base64 -d > /etc/hermes-cloud-agent/local-inference-lock.schema.json
 # shellcheck disable=SC2016
 printf '%s\n' '${state_volume_id}' > /etc/hermes-cloud-agent/state-volume-id
-chmod 0640 /etc/hermes-cloud-agent/profile.json /etc/hermes-cloud-agent/profile.schema.json /etc/hermes-cloud-agent/config.yaml
-chmod 0444 /etc/hermes-cloud-agent/local-inference.lock.json \
+chown root:hermes /etc/hermes-cloud-agent/profile.json \
+  /etc/hermes-cloud-agent/profile.schema.json \
+  /etc/hermes-cloud-agent/config.yaml
+chmod 0640 /etc/hermes-cloud-agent/profile.json \
+  /etc/hermes-cloud-agent/profile.schema.json \
+  /etc/hermes-cloud-agent/config.yaml
+chown root:hermes-inference /etc/hermes-cloud-agent/local-inference.lock.json \
+  /etc/hermes-cloud-agent/local-inference-lock.schema.json
+chmod 0440 /etc/hermes-cloud-agent/local-inference.lock.json \
   /etc/hermes-cloud-agent/local-inference-lock.schema.json
 chmod 0644 /etc/hermes-cloud-agent/state-volume-id
 
@@ -77,12 +88,18 @@ printf '%s' '${secret_reader_b64}' | base64 -d > /usr/local/libexec/hermes-read-
 # shellcheck disable=SC2016
 printf '%s' '${inference_preparer_b64}' | base64 -d > /usr/local/libexec/hermes-prepare-local-inference
 # shellcheck disable=SC2016
+printf '%s' '${inference_supervisor_b64}' | base64 -d > /usr/local/libexec/hermes-inference-supervisor
+# shellcheck disable=SC2016
+printf '%s' '${inference_network_preflight_b64}' | base64 -d > /usr/local/libexec/hermes-inference-network-preflight
+# shellcheck disable=SC2016
 printf '%s' '${matrix_trust_patch_b64}' | base64 -d > /opt/hermes/strict-matrix-device-trust.patch
 chmod 0755 /usr/local/libexec/hermes-cloud-agent-run \
   /usr/local/libexec/hermes-cloud-agent-control \
   /usr/local/libexec/hermes-state-volume-mount \
   /usr/local/libexec/hermes-read-matrix-secret \
-  /usr/local/libexec/hermes-prepare-local-inference
+  /usr/local/libexec/hermes-prepare-local-inference \
+  /usr/local/libexec/hermes-inference-supervisor \
+  /usr/local/libexec/hermes-inference-network-preflight
 chmod 0444 /opt/hermes/strict-matrix-device-trust.patch
 
 # shellcheck disable=SC2016
@@ -92,10 +109,13 @@ printf '%s' '${podman_service_b64}' | base64 -d > /etc/systemd/system/hermes-pod
 # shellcheck disable=SC2016
 printf '%s' '${inference_prepare_service_b64}' | base64 -d > /etc/systemd/system/hermes-inference-prepare.service
 # shellcheck disable=SC2016
+printf '%s' '${inference_service_b64}' | base64 -d > /etc/systemd/system/hermes-inference.service
+# shellcheck disable=SC2016
 printf '%s' '${gateway_service_b64}' | base64 -d > /etc/systemd/system/hermes-cloud-agent.service
 chmod 0644 /etc/systemd/system/hermes-state-volume.service \
   /etc/systemd/system/hermes-podman.service \
   /etc/systemd/system/hermes-inference-prepare.service \
+  /etc/systemd/system/hermes-inference.service \
   /etc/systemd/system/hermes-cloud-agent.service
 
 rm -rf "$HERMES_SOURCE"

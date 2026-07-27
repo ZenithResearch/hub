@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$(id -u)" != "0" ]]; then
+  echo "inference network-policy preflight requires root" >&2
+  exit 1
+fi
+if [[ ! -r /sys/fs/cgroup/cgroup.controllers ]]; then
+  echo "inference network-policy preflight requires unified cgroup v2" >&2
+  exit 1
+fi
+if ! command -v bpftool >/dev/null 2>&1; then
+  echo "inference network-policy preflight requires bpftool" >&2
+  exit 1
+fi
+
+report=$(LC_ALL=C bpftool feature probe kernel 2>/dev/null) || {
+  echo "inference network-policy kernel probe failed" >&2
+  exit 1
+}
+for requirement in \
+  "CONFIG_BPF_SYSCALL is set to y" \
+  "CONFIG_CGROUP_BPF is set to y" \
+  "eBPF program_type cgroup_skb is available" \
+  "eBPF program_type cgroup_sock_addr is available"
+do
+  if ! grep -Fq "$requirement" <<<"$report"; then
+    echo "required inference network-policy support is unavailable" >&2
+    exit 1
+  fi
+done
+unset report
+
+if ! command -v nft >/dev/null 2>&1; then
+  echo "inference network-policy preflight requires nftables" >&2
+  exit 1
+fi
+inference_uid=$(id -u hermes-inference)
+if [[ ! "$inference_uid" =~ ^[0-9]+$ ]]; then
+  echo "inference network-policy identity is unavailable" >&2
+  exit 1
+fi
+if nft list table inet hermes_inference >/dev/null 2>&1; then
+  nft delete table inet hermes_inference
+fi
+printf '%s\n' \
+  'table inet hermes_inference {' \
+  '  chain output {' \
+  '    type filter hook output priority -10; policy accept;' \
+  "    meta skuid $inference_uid ct direction reply ct original ip daddr 127.0.0.1 meta l4proto tcp ct original proto-dst 8080 accept" \
+  "    meta skuid $inference_uid ip daddr 127.0.0.1 tcp dport 8080 accept" \
+  "    meta skuid $inference_uid reject" \
+  '  }' \
+  '}' | nft -f -
+nft list chain inet hermes_inference output >/dev/null

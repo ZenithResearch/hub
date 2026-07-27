@@ -3,7 +3,7 @@ Description=Prepare exact local-inference artifacts for Hermes
 Requires=hermes-state-volume.service
 After=network-online.target hermes-state-volume.service
 Wants=network-online.target
-Before=hermes-cloud-agent.service
+Before=hermes-inference.service hermes-cloud-agent.service
 
 [Service]
 Type=oneshot
@@ -14,8 +14,8 @@ ExecStart=/opt/hermes/venv/bin/python /usr/local/libexec/hermes-prepare-local-in
 RemainAfterExit=yes
 TimeoutStartSec=30min
 NoNewPrivileges=true
-CapabilityBoundingSet=
-AmbientCapabilities=
+CapabilityBoundingSet=CAP_CHOWN
+AmbientCapabilities=CAP_CHOWN
 LockPersonality=true
 PrivateTmp=true
 PrivateDevices=true

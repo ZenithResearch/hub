@@ -1,9 +1,9 @@
 [Unit]
 Description=Matrix-only profiled Hermes cloud agent
-Requires=hermes-state-volume.service hermes-podman.service hermes-inference-prepare.service
-After=network-online.target hermes-state-volume.service hermes-podman.service hermes-inference-prepare.service
+Requires=hermes-state-volume.service hermes-podman.service hermes-inference-prepare.service hermes-inference.service
+After=network-online.target hermes-state-volume.service hermes-podman.service hermes-inference-prepare.service hermes-inference.service
+BindsTo=hermes-inference.service
 Wants=network-online.target
-ConditionPathExists=/var/lib/hermes/inference/READY.json
 
 [Service]
 Type=simple

@@ -331,13 +331,22 @@ def test_prepare_grants_the_inference_group_access_to_model_and_state(
 
     model_root = tmp_path / "models"
     state_root = tmp_path / "state"
+    ready_path = state_root / "READY.json"
     assert stat.S_IMODE(model_root.stat().st_mode) == 0o750
     assert stat.S_IMODE(state_root.stat().st_mode) == 0o750
+    assert stat.S_IMODE(ready_path.stat().st_mode) == 0o640
     assert (model_root, 0, 4242) in ownership_changes
     assert (state_root, 0, 4242) in ownership_changes
     assert any(
         path.parent == model_root
         and path.name.startswith("model-")
+        and uid == 0
+        and gid == 4242
+        for path, uid, gid in ownership_changes
+    )
+    assert any(
+        path.parent == state_root
+        and path.name.startswith(".READY.json.")
         and uid == 0
         and gid == 4242
         for path, uid, gid in ownership_changes

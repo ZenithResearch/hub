@@ -1,0 +1,642 @@
+#!/usr/bin/env python3
+"""Validate, start, and health-supervise the pinned local llama.cpp service."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import signal
+import socket
+import stat
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any, BinaryIO, Callable, NamedTuple
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, OpenerDirector, ProxyHandler, Request, build_opener
+
+import jsonschema
+
+LOCK_PATH = Path("/etc/hermes-cloud-agent/local-inference.lock.json")
+SCHEMA_PATH = Path("/etc/hermes-cloud-agent/local-inference-lock.schema.json")
+READY_PATH = Path("/var/lib/hermes/inference/READY.json")
+RUNTIME_ROOT = Path("/opt/hermes/inference")
+MODEL_ROOT = Path("/var/lib/hermes/models")
+BASE_URL = "http://127.0.0.1:8080"
+MODEL_ALIAS = "qwen3-8b-q4-k-m"
+STOP_SIGNALS = {signal.SIGINT, signal.SIGTERM}
+MAX_LOCK_BYTES = 64 * 1024
+MAX_SCHEMA_BYTES = 64 * 1024
+MAX_READY_BYTES = 16 * 1024
+MAX_RESPONSE_BYTES = 64 * 1024
+MAX_RUNTIME_MANIFEST_BYTES = 1024 * 1024
+MAX_RUNTIME_ENTRIES = 4096
+HASH_CHUNK_SIZE = 1024 * 1024
+MAX_PROC_TCP_BYTES = 256 * 1024
+MAX_PROC_TCP_LINES = 4096
+MAX_PROC_TCP_LINE_BYTES = 512
+HTTP_TIMEOUT_SECONDS = 10
+STARTUP_TIMEOUT_SECONDS = 20 * 60
+STARTUP_POLL_SECONDS = 2
+PROCESS_POLL_MAX_SECONDS = 10
+SHUTDOWN_TIMEOUT_SECONDS = 20
+
+
+class InferenceServiceError(RuntimeError):
+    """The local inference service contract was not satisfied."""
+
+
+class InferenceNotReady(InferenceServiceError):
+    """The pinned server has not become ready yet."""
+
+
+class InferenceGeneration(NamedTuple):
+    active_role: str
+    generation_id: str
+    model_alias: str
+    server: Path
+    model: Path
+
+
+def _read_bounded(path: Path, maximum: int) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise InferenceServiceError("invalid local inference state")
+    try:
+        with path.open("rb") as source:
+            payload = source.read(maximum + 1)
+    except OSError as exc:
+        raise InferenceServiceError("invalid local inference state") from exc
+    if len(payload) > maximum:
+        raise InferenceServiceError("invalid local inference state")
+    return payload
+
+
+def _read_bounded_json(path: Path, maximum: int) -> tuple[bytes, Any]:
+    payload = _read_bounded(path, maximum)
+    try:
+        return payload, json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise InferenceServiceError("invalid local inference state") from exc
+
+
+def _generation_id(generation: dict[str, Any]) -> str:
+    canonical = json.dumps(generation, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _ready_payload(
+    generation: dict[str, Any],
+    *,
+    lock_sha256: str,
+    active_role: str,
+    failed_desired_generation_id: str | None = None,
+) -> dict[str, Any]:
+    runtime = generation["llama_cpp"]
+    model = generation["model"]
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "active_role": active_role,
+        "generation_id": _generation_id(generation),
+        "lock_sha256": lock_sha256,
+        "runtime": {
+            "commit": runtime["commit"],
+            "archive_sha256": runtime["archive_sha256"],
+            "size_bytes": runtime["size_bytes"],
+            "s3_version_id": runtime["s3_version_id"],
+        },
+        "model": {
+            "model_id": model["model_id"],
+            "sha256": model["sha256"],
+            "size_bytes": model["size_bytes"],
+            "s3_version_id": model["s3_version_id"],
+        },
+    }
+    if failed_desired_generation_id is not None:
+        payload["failed_desired_generation_id"] = failed_desired_generation_id
+    return payload
+
+
+def _require_path(path: Path, root: Path, *, mode: int, size: int | None = None) -> None:
+    try:
+        resolved_root = root.resolve(strict=True)
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(resolved_root)
+        current = path
+        while True:
+            metadata = current.lstat()
+            if stat.S_ISLNK(metadata.st_mode):
+                raise InferenceServiceError("invalid local inference state")
+            if current == root:
+                break
+            current = current.parent
+        metadata = path.stat()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise InferenceServiceError("invalid local inference state") from exc
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != mode:
+        raise InferenceServiceError("invalid local inference state")
+    if size is not None and metadata.st_size != size:
+        raise InferenceServiceError("invalid local inference state")
+    if not os.access(path, os.R_OK) or (mode & 0o111 and not os.access(path, os.X_OK)):
+        raise InferenceServiceError("invalid local inference state")
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(HASH_CHUNK_SIZE), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise InferenceServiceError("invalid local inference state") from exc
+    return digest.hexdigest()
+
+
+def _runtime_file_manifest(root: Path) -> list[dict[str, Any]]:
+    try:
+        paths = [root]
+        for path in root.rglob("*"):
+            paths.append(path)
+            if len(paths) > MAX_RUNTIME_ENTRIES:
+                raise InferenceServiceError("invalid local inference state")
+        paths[1:] = sorted(paths[1:])
+        entries: list[dict[str, Any]] = []
+        for path in paths:
+            relative = "." if path == root else path.relative_to(root).as_posix()
+            if relative == "RUNTIME.json":
+                continue
+            metadata = path.lstat()
+            if stat.S_ISLNK(metadata.st_mode):
+                raise InferenceServiceError("invalid local inference state")
+            if stat.S_ISDIR(metadata.st_mode):
+                entries.append(
+                    {
+                        "path": relative,
+                        "type": "directory",
+                        "mode": stat.S_IMODE(metadata.st_mode),
+                    }
+                )
+            elif stat.S_ISREG(metadata.st_mode):
+                entries.append(
+                    {
+                        "path": relative,
+                        "type": "file",
+                        "sha256": _sha256_file(path),
+                        "size_bytes": metadata.st_size,
+                        "mode": stat.S_IMODE(metadata.st_mode),
+                    }
+                )
+            else:
+                raise InferenceServiceError("invalid local inference state")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise InferenceServiceError("invalid local inference state") from exc
+    if len(entries) < 2:
+        raise InferenceServiceError("invalid local inference state")
+    return entries
+
+
+def _verify_runtime(runtime: dict[str, Any], server: Path) -> None:
+    target = server.parent.parent
+    _, manifest = _read_bounded_json(
+        target / "RUNTIME.json", MAX_RUNTIME_MANIFEST_BYTES
+    )
+    expected_metadata = {
+        "schema_version": 1,
+        "commit": runtime["commit"],
+        "release": runtime["release"],
+        "archive_sha256": runtime["archive_sha256"],
+        "size_bytes": runtime["size_bytes"],
+        "s3_version_id": runtime["s3_version_id"],
+    }
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != set(expected_metadata) | {"files"}
+        or not isinstance(manifest.get("files"), list)
+    ):
+        raise InferenceServiceError("invalid local inference state")
+    declared_files = manifest["files"]
+    metadata = {key: value for key, value in manifest.items() if key != "files"}
+    if metadata != expected_metadata or declared_files != _runtime_file_manifest(target):
+        raise InferenceServiceError("invalid local inference state")
+
+
+def load_generation(
+    *,
+    lock_path: Path = LOCK_PATH,
+    schema_path: Path = SCHEMA_PATH,
+    ready_path: Path = READY_PATH,
+    runtime_root: Path = RUNTIME_ROOT,
+    model_root: Path = MODEL_ROOT,
+) -> InferenceGeneration:
+    lock_bytes, lock = _read_bounded_json(lock_path, MAX_LOCK_BYTES)
+    _, schema = _read_bounded_json(schema_path, MAX_SCHEMA_BYTES)
+    _, ready = _read_bounded_json(ready_path, MAX_READY_BYTES)
+    try:
+        jsonschema.validate(lock, schema)
+    except jsonschema.ValidationError as exc:
+        raise InferenceServiceError("invalid local inference state") from exc
+    if not isinstance(lock, dict) or not isinstance(ready, dict):
+        raise InferenceServiceError("invalid local inference state")
+
+    active_role = ready.get("active_role")
+    if active_role not in {"desired", "rollback"}:
+        raise InferenceServiceError("invalid local inference state")
+    generation = lock.get(active_role)
+    if not isinstance(generation, dict):
+        raise InferenceServiceError("invalid local inference state")
+    lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
+    failed_generation: str | None = None
+    if active_role == "rollback":
+        rollback = lock.get("rollback")
+        if generation != rollback or not isinstance(lock.get("desired"), dict):
+            raise InferenceServiceError("invalid local inference state")
+        failed_generation = _generation_id(lock["desired"])
+    expected_ready = _ready_payload(
+        generation,
+        lock_sha256=lock_sha256,
+        active_role=active_role,
+        failed_desired_generation_id=failed_generation,
+    )
+    if ready != expected_ready:
+        raise InferenceServiceError("invalid local inference state")
+
+    runtime = generation["llama_cpp"]
+    model = generation["model"]
+    if (
+        model.get("model_id") != MODEL_ALIAS
+        or model.get("context_length") != 32768
+        or model.get("chat_template") != "jinja"
+    ):
+        raise InferenceServiceError("invalid local inference state")
+    server = (
+        runtime_root
+        / runtime["commit"]
+        / runtime["archive_sha256"]
+        / f"llama-{runtime['release']}"
+        / "llama-server"
+    )
+    model_path = model_root / f"{model['sha256']}.gguf"
+    _require_path(server, runtime_root, mode=0o755)
+    _require_path(model_path, model_root, mode=0o440, size=model["size_bytes"])
+    _verify_runtime(runtime, server)
+    if _sha256_file(model_path) != model["sha256"]:
+        raise InferenceServiceError("invalid local inference state")
+    return InferenceGeneration(
+        active_role=active_role,
+        generation_id=ready["generation_id"],
+        model_alias=MODEL_ALIAS,
+        server=server,
+        model=model_path,
+    )
+
+
+def build_server_command(generation: InferenceGeneration) -> list[str]:
+    return [
+        str(generation.server),
+        "--model",
+        str(generation.model),
+        "--alias",
+        generation.model_alias,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8080",
+        "--ctx-size",
+        "32768",
+        "--threads",
+        "8",
+        "--threads-batch",
+        "8",
+        "--threads-http",
+        "2",
+        "--parallel",
+        "1",
+        "--timeout",
+        "120",
+        "--jinja",
+        "--no-webui",
+        "--no-slots",
+        "--log-disable",
+    ]
+
+
+class _RejectRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        raise InferenceServiceError("local inference redirected unexpectedly")
+
+
+def make_http_client() -> OpenerDirector:
+    return build_opener(ProxyHandler({}), _RejectRedirect())
+
+
+def _response_json(response: BinaryIO) -> Any:
+    payload = response.read(MAX_RESPONSE_BYTES + 1)
+    if len(payload) > MAX_RESPONSE_BYTES:
+        raise InferenceServiceError("invalid local inference response")
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise InferenceServiceError("invalid local inference response") from exc
+
+
+def _request_json(
+    opener: OpenerDirector,
+    path: str,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> Any:
+    data = None
+    headers = {"Accept": "application/json"}
+    method = "GET"
+    if payload is not None:
+        data = json.dumps(payload, separators=(",", ":")).encode()
+        headers["Content-Type"] = "application/json"
+        method = "POST"
+    request = Request(f"{BASE_URL}{path}", data=data, headers=headers, method=method)
+    try:
+        with opener.open(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            if getattr(response, "status", None) != 200:
+                raise InferenceNotReady("local inference is not ready")
+            return _response_json(response)
+    except InferenceServiceError:
+        raise
+    except (HTTPError, URLError, OSError, TimeoutError) as exc:
+        raise InferenceNotReady("local inference is not ready") from exc
+
+
+def _probe_health_and_model(opener: OpenerDirector) -> None:
+    health = _request_json(opener, "/health")
+    if health != {"status": "ok"}:
+        raise InferenceNotReady("local inference is not ready")
+    models = _request_json(opener, "/v1/models")
+    if (
+        not isinstance(models, dict)
+        or models.get("object") != "list"
+        or not isinstance(models.get("data"), list)
+        or len(models["data"]) != 1
+        or not isinstance(models["data"][0], dict)
+        or models["data"][0].get("id") != MODEL_ALIAS
+    ):
+        raise InferenceServiceError("local inference identity mismatch")
+
+
+def probe_ready(opener: OpenerDirector) -> None:
+    _probe_health_and_model(opener)
+    tool_probe = {
+        "model": MODEL_ALIAS,
+        "messages": [
+            {"role": "user", "content": "Call health_probe with value ready."}
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "health_probe",
+                    "description": "Return the fixed local readiness value.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"value": {"type": "string", "enum": ["ready"]}},
+                        "required": ["value"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ],
+        "tool_choice": {"type": "function", "function": {"name": "health_probe"}},
+        "parallel_tool_calls": False,
+        "temperature": 0,
+        "max_tokens": 32,
+        "stream": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    result = _request_json(opener, "/v1/chat/completions", payload=tool_probe)
+    try:
+        message = result["choices"][0]["message"]
+        calls = message["tool_calls"]
+        call = calls[0]
+        arguments = json.loads(call["function"]["arguments"])
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+        raise InferenceServiceError("local inference tool probe failed") from exc
+    if (
+        result.get("model") != MODEL_ALIAS
+        or len(calls) != 1
+        or call.get("type") != "function"
+        or call["function"].get("name") != "health_probe"
+        or arguments != {"value": "ready"}
+    ):
+        raise InferenceServiceError("local inference tool probe failed")
+
+
+def _notify_systemd(message: str) -> None:
+    address = os.environ.get("NOTIFY_SOCKET")
+    if not address:
+        raise InferenceServiceError("systemd notification socket is unavailable")
+    if address.startswith("@"):
+        address = "\0" + address[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notifier:
+            notifier.setblocking(False)
+            notifier.connect(address)
+            notifier.sendall(message.encode())
+    except OSError as exc:
+        raise InferenceServiceError("systemd notification failed") from exc
+
+
+def _watchdog_interval() -> float:
+    try:
+        watchdog_usec = int(os.environ["WATCHDOG_USEC"])
+    except (KeyError, ValueError) as exc:
+        raise InferenceServiceError("systemd watchdog is unavailable") from exc
+    if watchdog_usec < 3_000_000:
+        raise InferenceServiceError("systemd watchdog is unsafe")
+    return watchdog_usec / 3_000_000
+
+
+def _ensure_listener_available(*, port: int = 8080) -> None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", port))
+    except OSError as exc:
+        raise InferenceServiceError("local inference listener is unavailable") from exc
+
+
+def _listener_owned_by_pid(pid: int, *, proc_root: Path = Path("/proc")) -> bool:
+    try:
+        sockets: set[str] = set()
+        for index, descriptor in enumerate((proc_root / str(pid) / "fd").iterdir()):
+            if index >= 1024:
+                return False
+            target = os.readlink(descriptor)
+            if target.startswith("socket:[") and target.endswith("]"):
+                sockets.add(target[8:-1])
+        matched = False
+        total_bytes = 0
+        total_lines = 0
+        with (proc_root / str(pid) / "net/tcp").open("rb") as tcp_table:
+            while True:
+                raw_line = tcp_table.readline(MAX_PROC_TCP_LINE_BYTES + 1)
+                if not raw_line:
+                    break
+                total_bytes += len(raw_line)
+                total_lines += 1
+                if (
+                    len(raw_line) > MAX_PROC_TCP_LINE_BYTES
+                    or total_bytes > MAX_PROC_TCP_BYTES
+                    or total_lines > MAX_PROC_TCP_LINES
+                ):
+                    return False
+                fields = raw_line.decode("ascii", errors="strict").split()
+                if (
+                    len(fields) > 9
+                    and fields[1] == "0100007F:1F90"
+                    and fields[3] == "0A"
+                    and fields[9] in sockets
+                ):
+                    matched = True
+        return matched
+    except (OSError, UnicodeError):
+        return False
+
+
+def _notify_if_listener_owned(
+    process: subprocess.Popen[bytes],
+    message: str,
+    *,
+    stopping: Callable[[], bool],
+) -> None:
+    try:
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, STOP_SIGNALS)
+    except OSError as exc:
+        raise InferenceServiceError("local inference signal mask failed") from exc
+    try:
+        if stopping() or STOP_SIGNALS.intersection(signal.sigpending()):
+            raise InferenceServiceError("local inference is stopping")
+        if process.poll() is not None or not _listener_owned_by_pid(process.pid):
+            raise InferenceServiceError("local inference listener identity mismatch")
+        if stopping() or STOP_SIGNALS.intersection(signal.sigpending()):
+            raise InferenceServiceError("local inference is stopping")
+        _notify_systemd(message)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+
+
+def _stop_process(
+    process: subprocess.Popen[bytes], *, shutdown_deadline: float | None = None
+) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    timeout = SHUTDOWN_TIMEOUT_SECONDS
+    if shutdown_deadline is not None:
+        timeout = max(0.0, shutdown_deadline - time.monotonic())
+    try:
+        if timeout <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def supervise() -> None:
+    generation = load_generation()
+    command = build_server_command(generation)
+    opener = make_http_client()
+    stopping = False
+    process: subprocess.Popen[bytes] | None = None
+    shutdown_deadline: float | None = None
+    shutdown_timer: threading.Timer | None = None
+
+    def request_stop(_signum: int, _frame: Any) -> None:
+        nonlocal shutdown_deadline, shutdown_timer, stopping
+        stopping = True
+        if shutdown_deadline is None:
+            shutdown_deadline = time.monotonic() + SHUTDOWN_TIMEOUT_SECONDS
+
+            def force_kill() -> None:
+                if process is not None and process.poll() is None:
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+
+            shutdown_timer = threading.Timer(SHUTDOWN_TIMEOUT_SECONDS, force_kill)
+            shutdown_timer.daemon = True
+            shutdown_timer.start()
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+    _ensure_listener_available()
+    process = subprocess.Popen(command, close_fds=True)
+    try:
+        deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+        while True:
+            if stopping:
+                return
+            if process.poll() is not None:
+                raise InferenceServiceError("local inference exited during startup")
+            try:
+                if not _listener_owned_by_pid(process.pid):
+                    raise InferenceNotReady("local inference is not ready")
+                probe_ready(opener)
+                if process.poll() is not None or not _listener_owned_by_pid(process.pid):
+                    raise InferenceServiceError(
+                        "local inference listener identity mismatch"
+                    )
+                break
+            except InferenceNotReady as exc:
+                if time.monotonic() >= deadline:
+                    raise InferenceServiceError(
+                        "local inference startup timed out"
+                    ) from exc
+                time.sleep(STARTUP_POLL_SECONDS)
+        interval = min(_watchdog_interval(), PROCESS_POLL_MAX_SECONDS)
+        _notify_if_listener_owned(
+            process,
+            f"READY=1\nSTATUS=local inference ready ({generation.active_role})",
+            stopping=lambda: stopping,
+        )
+        while not stopping:
+            try:
+                return_code = process.wait(timeout=interval)
+            except subprocess.TimeoutExpired:
+                if stopping:
+                    return
+                _probe_health_and_model(opener)
+                if stopping:
+                    return
+                _notify_if_listener_owned(
+                    process,
+                    "WATCHDOG=1\nSTATUS=local inference healthy",
+                    stopping=lambda: stopping,
+                )
+                continue
+            if stopping:
+                return
+            raise InferenceServiceError(
+                f"local inference exited unexpectedly with status {return_code}"
+            )
+    finally:
+        _stop_process(process, shutdown_deadline=shutdown_deadline)
+        if shutdown_timer is not None:
+            shutdown_timer.cancel()
+
+
+def main() -> int:
+    try:
+        supervise()
+    except InferenceServiceError:
+        print("local inference supervision failed", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

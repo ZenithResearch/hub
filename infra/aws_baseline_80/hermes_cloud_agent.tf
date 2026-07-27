@@ -247,22 +247,25 @@ resource "aws_instance" "hermes_cloud_agent" {
   iam_instance_profile        = aws_iam_instance_profile.hermes_cloud_agent[0].name
   user_data_replace_on_change = true
   user_data_base64 = base64encode(templatefile("${path.module}/../hermes_cloud_agent/bootstrap.sh.tftpl", {
-    profile_json_b64              = base64encode(jsonencode(local.hermes_cloud_agent_profile_contract))
-    profile_schema_b64            = filebase64("${path.module}/../hermes_cloud_agent/profile.schema.json")
-    profile_config_b64            = base64encode(yamlencode(local.hermes_cloud_agent_config))
-    state_volume_id               = aws_ebs_volume.hermes_cloud_agent_state[0].id
-    runner_b64                    = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-run")
-    mount_script_b64              = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-state-volume-mount")
-    control_helper_b64            = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-control")
-    secret_reader_b64             = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-read-matrix-secret")
-    inference_preparer_b64        = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-prepare-local-inference")
-    inference_lock_b64            = filebase64("${path.module}/../hermes_cloud_agent/artifacts/local-inference.lock.json")
-    inference_lock_schema_b64     = filebase64("${path.module}/../hermes_cloud_agent/artifacts/local-inference-lock.schema.json")
-    matrix_trust_patch_b64        = filebase64("${path.module}/../hermes_cloud_agent/patches/strict-matrix-device-trust.patch")
-    state_service_b64             = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-state-volume.service")
-    podman_service_b64            = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-podman.service")
-    inference_prepare_service_b64 = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-inference-prepare.service")
-    gateway_service_b64           = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-cloud-agent.service")
+    profile_json_b64                = base64encode(jsonencode(local.hermes_cloud_agent_profile_contract))
+    profile_schema_b64              = filebase64("${path.module}/../hermes_cloud_agent/profile.schema.json")
+    profile_config_b64              = base64encode(yamlencode(local.hermes_cloud_agent_config))
+    state_volume_id                 = aws_ebs_volume.hermes_cloud_agent_state[0].id
+    runner_b64                      = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-run")
+    mount_script_b64                = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-state-volume-mount")
+    control_helper_b64              = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-control")
+    secret_reader_b64               = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-read-matrix-secret")
+    inference_preparer_b64          = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-prepare-local-inference")
+    inference_supervisor_b64        = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-inference-supervisor")
+    inference_network_preflight_b64 = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-inference-network-preflight")
+    inference_lock_b64              = filebase64("${path.module}/../hermes_cloud_agent/artifacts/local-inference.lock.json")
+    inference_lock_schema_b64       = filebase64("${path.module}/../hermes_cloud_agent/artifacts/local-inference-lock.schema.json")
+    matrix_trust_patch_b64          = filebase64("${path.module}/../hermes_cloud_agent/patches/strict-matrix-device-trust.patch")
+    state_service_b64               = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-state-volume.service")
+    podman_service_b64              = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-podman.service")
+    inference_prepare_service_b64   = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-inference-prepare.service")
+    inference_service_b64           = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-inference.service")
+    gateway_service_b64             = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-cloud-agent.service")
   }))
 
   root_block_device {

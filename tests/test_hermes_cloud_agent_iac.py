@@ -111,20 +111,23 @@ def test_cloud_agent_prepares_only_exact_s3_artifact_versions() -> None:
         assert f"${{{template_value}}}" in bootstrap
     assert "hermes-prepare-local-inference" in bootstrap
     assert "hermes-inference-prepare.service" in bootstrap
-    assert "Before=hermes-cloud-agent.service" in prepare_service
+    assert "Before=hermes-inference.service hermes-cloud-agent.service" in prepare_service
     assert "Requires=hermes-state-volume.service" in prepare_service
     assert (
         "Requires=hermes-state-volume.service hermes-podman.service "
-        "hermes-inference-prepare.service" in gateway_service
+        "hermes-inference-prepare.service hermes-inference.service" in gateway_service
     )
     assert (
         "After=network-online.target hermes-state-volume.service "
-        "hermes-podman.service hermes-inference-prepare.service" in gateway_service
+        "hermes-podman.service hermes-inference-prepare.service "
+        "hermes-inference.service" in gateway_service
     )
     assert "Type=oneshot" in prepare_service
     assert "RemainAfterExit=yes" in prepare_service
     assert "ExecStart=/opt/hermes/venv/bin/python /usr/local/libexec/hermes-prepare-local-inference" in prepare_service
     assert "NoNewPrivileges=true" in prepare_service
+    assert "CapabilityBoundingSet=CAP_CHOWN" in prepare_service
+    assert "AmbientCapabilities=CAP_CHOWN" in prepare_service
     assert "ProtectSystem=strict" in prepare_service
     assert "ReadWritePaths=/opt/hermes/inference /var/lib/hermes/models /var/lib/hermes/inference" in prepare_service
 
@@ -138,6 +141,97 @@ def test_cloud_agent_iam_secret_access_is_explicitly_scoped() -> None:
     assert "resources = var.hermes_cloud_agent_secret_kms_key_arns" in terraform
     assert "secretsmanager:*" not in terraform
     assert 'resources = ["*"]' not in terraform
+
+
+def test_local_inference_is_supervised_as_a_loopback_only_separate_identity() -> None:
+    root = IAC.parent / "hermes_cloud_agent"
+    bootstrap = (root / "bootstrap.sh.tftpl").read_text(encoding="utf-8")
+    service_path = root / "systemd/hermes-inference.service"
+    supervisor_path = root / "runtime/hermes-inference-supervisor"
+    preflight_path = root / "runtime/hermes-inference-network-preflight"
+    assert service_path.is_file(), "C4.3 inference service is not implemented"
+    assert supervisor_path.is_file(), "C4.3 inference supervisor is not implemented"
+    assert preflight_path.is_file(), "C4.3 network preflight is not implemented"
+    service = service_path.read_text(encoding="utf-8")
+    supervisor = supervisor_path.read_text(encoding="utf-8")
+    preflight = preflight_path.read_text(encoding="utf-8")
+
+    assert "User=hermes-inference" in service
+    assert "Group=hermes-inference" in service
+    assert "SupplementaryGroups=" in service
+    assert "Type=notify" in service
+    assert "NotifyAccess=main" in service
+    assert "WatchdogSec=90s" in service
+    assert "Upholds=hermes-cloud-agent.service" in service
+    assert "ExecStartPre=+/usr/local/libexec/hermes-inference-network-preflight" in service
+    assert "ExecStart=/opt/hermes/venv/bin/python /usr/local/libexec/hermes-inference-supervisor" in service
+    assert "IPAddressDeny=any" in service
+    assert "IPAddressAllow=localhost" in service
+    assert "SocketBindDeny=any" in service
+    assert "SocketBindAllow=tcp:ipv4:8080" in service
+    assert "RestrictAddressFamilies=AF_UNIX AF_INET" in service
+    assert "MemoryHigh=20G" in service
+    assert "MemoryMax=24G" in service
+    assert "CPUQuota=750%" in service
+    assert "TasksMax=128" in service
+    assert "LimitNOFILE=4096" in service
+    assert "LimitCORE=0" in service
+    assert "InaccessiblePaths=/etc/hermes-cloud-agent/profile.json" in service
+    assert "/var/lib/hermes/profiles" in service
+    assert "/run/hermes-podman" in service
+    assert "0.0.0.0" not in supervisor
+    assert "--model-url" not in supervisor
+    assert 'BASE_URL = "http://127.0.0.1:8080"' in supervisor
+
+    assert "bpftool" in bootstrap
+    assert "CONFIG_CGROUP_BPF is set to y" in preflight
+    assert "eBPF program_type cgroup_skb is available" in preflight
+    assert "eBPF program_type cgroup_sock_addr is available" in preflight
+    assert "nftables" in bootstrap
+    assert (
+        "meta skuid $inference_uid ct direction reply ct original ip daddr "
+        "127.0.0.1 meta l4proto tcp ct original proto-dst 8080 accept" in preflight
+    )
+    assert "ct state established,related accept" not in preflight
+    assert "meta skuid $inference_uid ip daddr 127.0.0.1 tcp dport 8080 accept" in preflight
+    assert "meta skuid $inference_uid reject" in preflight
+    assert "udp dport 53 accept" not in preflight
+    assert "useradd --system --gid hermes-inference" in bootstrap
+    assert "usermod --append --groups hermes-podman hermes-inference" not in bootstrap
+    assert "install -d -m 0751 -o root -g root /etc/hermes-cloud-agent" in bootstrap
+    assert "chown root:hermes-inference /etc/hermes-cloud-agent/local-inference.lock.json" in bootstrap
+    assert "/etc/hermes-cloud-agent/local-inference-lock.schema.json" in bootstrap
+    assert "chmod 0440 /etc/hermes-cloud-agent/local-inference.lock.json" in bootstrap
+    assert "chown root:hermes /etc/hermes-cloud-agent/profile.json" in bootstrap
+
+
+def test_gateway_waits_for_exact_inference_readiness_not_a_bare_path() -> None:
+    root = IAC.parent / "hermes_cloud_agent"
+    terraform = (IAC / "hermes_cloud_agent.tf").read_text(encoding="utf-8")
+    bootstrap = (root / "bootstrap.sh.tftpl").read_text(encoding="utf-8")
+    gateway_service = (root / "systemd/hermes-cloud-agent.service").read_text(
+        encoding="utf-8"
+    )
+    prepare_service = (root / "systemd/hermes-inference-prepare.service").read_text(
+        encoding="utf-8"
+    )
+
+    for template_value in (
+        "inference_supervisor_b64",
+        "inference_network_preflight_b64",
+        "inference_service_b64",
+    ):
+        assert template_value in terraform
+        assert f"${{{template_value}}}" in bootstrap
+    assert "hermes-inference.service" in bootstrap
+    enable_command = bootstrap.split("systemctl enable", 1)[1].split(
+        "systemctl start", 1
+    )[0]
+    assert "hermes-inference.service" not in enable_command
+    assert "hermes-inference.service" in gateway_service
+    assert "BindsTo=hermes-inference.service" in gateway_service
+    assert "ConditionPathExists=/var/lib/hermes/inference/READY.json" not in gateway_service
+    assert "Before=hermes-inference.service hermes-cloud-agent.service" in prepare_service
 
 
 def test_cloud_agent_bootstrap_pins_hermes_and_materializes_profile_service() -> None:
@@ -166,7 +260,8 @@ def test_cloud_agent_bootstrap_pins_hermes_and_materializes_profile_service() ->
     assert "WEBHOOK_ENABLED=false" in runner
     assert "TERMINAL_ENV=docker" in runner
     assert "gateway run --external-supervisor" in runner
-    assert "ConditionPathExists=/var/lib/hermes/inference/READY.json" in service
+    assert "ConditionPathExists=/var/lib/hermes/inference/READY.json" not in service
+    assert "BindsTo=hermes-inference.service" in service
     assert "NoNewPrivileges=true" in service
 
 
