@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""Fail closed unless every Hermes model route is the pinned local service."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+from typing import Any, Mapping
+
+import yaml
+
+MAX_DOCUMENT_BYTES = 1024 * 1024
+EXPECTED_BASE_URL = "http://127.0.0.1:8080/v1"
+EXPECTED_MODEL_ID = "qwen3-8b-q4-k-m"
+AUXILIARY_TASKS = (
+    "approval",
+    "background_review",
+    "compression",
+    "curator",
+    "goal_judge",
+    "kanban_decomposer",
+    "mcp",
+    "memory_query_rewrite",
+    "moa_aggregator",
+    "moa_reference",
+    "monitor",
+    "profile_describer",
+    "skills_hub",
+    "title_generation",
+    "triage_specifier",
+    "tts_audio_tags",
+    "vision",
+    "web_extract",
+)
+FORBIDDEN_ROUTING_SURFACES = frozenset(
+    {"channel_overrides", "custom_providers", "moa", "provider_routing", "providers"}
+)
+FORBIDDEN_ENVIRONMENT = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_TOKEN",
+        "ARCEEAI_API_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_PROFILE",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "DEEPINFRA_API_KEY",
+        "GEMINI_API_KEY",
+        "GITHUB_TOKEN",
+        "GLM_API_KEY",
+        "GOOGLE_API_KEY",
+        "HF_TOKEN",
+        "HUGGINGFACE_TOKEN",
+        "KILOCODE_API_KEY",
+        "KIMI_API_KEY",
+        "MINIMAX_API_KEY",
+        "MINIMAX_CN_API_KEY",
+        "NVIDIA_API_KEY",
+        "NOUS_API_KEY",
+        "OLLAMA_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_BASE_URL",
+        "XAI_API_KEY",
+        "XIAOMI_API_KEY",
+    }
+)
+PROXY_ENVIRONMENT = frozenset(
+    {"ALL_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
+)
+CREDENTIAL_ENVIRONMENT_SUFFIXES = ("_API_KEY", "_AUTH_TOKEN", "_OAUTH_TOKEN")
+FORBIDDEN_CREDENTIAL_PATHS = (
+    ".env",
+    "auth.json",
+    "credentials.json",
+    ".codex/auth.json",
+    ".claude/.credentials.json",
+    ".config/github-copilot/hosts.json",
+    ".minimax/credentials.json",
+)
+
+
+class RoutingValidationError(RuntimeError):
+    pass
+
+
+def _read_bounded(path: Path) -> bytes:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise RoutingValidationError("local routing document unavailable") from exc
+    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_DOCUMENT_BYTES:
+        raise RoutingValidationError("local routing document is unsafe")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as source:
+            payload = source.read(MAX_DOCUMENT_BYTES + 1)
+    except OSError as exc:
+        raise RoutingValidationError("local routing document is unreadable") from exc
+    if len(payload) > MAX_DOCUMENT_BYTES:
+        raise RoutingValidationError("local routing document is oversized")
+    return payload
+
+
+def _json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(_read_bounded(path))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RoutingValidationError("local routing JSON is malformed") from exc
+    if not isinstance(payload, dict):
+        raise RoutingValidationError("local routing JSON must be an object")
+    return payload
+
+
+def _yaml(path: Path) -> dict[str, Any]:
+    try:
+        payload = yaml.safe_load(_read_bounded(path))
+    except (yaml.YAMLError, UnicodeDecodeError) as exc:
+        raise RoutingValidationError("local routing YAML is malformed") from exc
+    if not isinstance(payload, dict):
+        raise RoutingValidationError("local routing YAML must be an object")
+    return payload
+
+
+def _require_exact_keys(value: Any, expected: set[str], label: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != expected:
+        raise RoutingValidationError(f"local routing {label} fields mismatch")
+    return value
+
+
+def _validate_route(route: Any, *, model_id: str, label: str) -> None:
+    expected = {
+        "provider": "custom",
+        "model": model_id,
+        "base_url": EXPECTED_BASE_URL,
+        "api_key": "",
+        "fallback_chain": [],
+    }
+    if route != expected:
+        raise RoutingValidationError(f"local routing {label} mismatch")
+
+
+def _validate_environment(environ: Mapping[str, str]) -> None:
+    for raw_name, raw_value in environ.items():
+        name = str(raw_name).upper()
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+        if (
+            name in FORBIDDEN_ENVIRONMENT
+            or name in PROXY_ENVIRONMENT
+            or name.endswith(CREDENTIAL_ENVIRONMENT_SUFFIXES)
+            or name.startswith("AUXILIARY_")
+            or name in {"HERMES_MODEL", "HERMES_PROVIDER", "HERMES_BASE_URL"}
+        ):
+            raise RoutingValidationError("local routing environment is unsafe")
+
+
+def _validate_credential_state(home: Path) -> None:
+    for relative_path in FORBIDDEN_CREDENTIAL_PATHS:
+        try:
+            (home / relative_path).lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise RoutingValidationError("local routing credential state is unreadable") from exc
+        raise RoutingValidationError("local routing credential state is forbidden")
+
+
+def validate_local_routing(
+    *,
+    profile_path: Path,
+    config_path: Path,
+    lock_path: Path,
+    ready_path: Path,
+    environ: Mapping[str, str],
+) -> None:
+    _validate_environment(environ)
+    _validate_credential_state(config_path.parent)
+    profile = _json(profile_path)
+    config = _yaml(config_path)
+    lock_bytes = _read_bounded(lock_path)
+    try:
+        lock = json.loads(lock_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RoutingValidationError("local routing lock is malformed") from exc
+    if not isinstance(lock, dict):
+        raise RoutingValidationError("local routing lock must be an object")
+    ready = _json(ready_path)
+
+    inference = profile.get("inference")
+    if not isinstance(inference, dict):
+        raise RoutingValidationError("local routing profile inference is missing")
+    desired = lock.get("desired")
+    if not isinstance(desired, dict):
+        raise RoutingValidationError("local routing desired generation is missing")
+    model = desired.get("model")
+    runtime = desired.get("llama_cpp")
+    if not isinstance(model, dict) or not isinstance(runtime, dict):
+        raise RoutingValidationError("local routing generation is malformed")
+
+    model_id = str(model.get("model_id") or "")
+    model_sha256 = str(model.get("sha256") or "")
+    lock_sha256 = hashlib.sha256(lock_bytes).hexdigest()
+    if model_id != EXPECTED_MODEL_ID:
+        raise RoutingValidationError("local routing model identity is not approved")
+    if inference != {
+        "provider": "custom",
+        "base_url": EXPECTED_BASE_URL,
+        "model_id": model_id,
+        "model_sha256": model_sha256,
+        "artifact_lock_sha256": lock_sha256,
+        "fallbacks": [],
+    }:
+        raise RoutingValidationError("local routing profile mismatch")
+
+    main = _require_exact_keys(
+        config.get("model"),
+        {"provider", "default", "base_url", "api_key", "api_mode", "context_length"},
+        "main model",
+    )
+    if main != {
+        "provider": "custom",
+        "default": model_id,
+        "base_url": EXPECTED_BASE_URL,
+        "api_key": "",
+        "api_mode": "chat_completions",
+        "context_length": model.get("context_length"),
+    }:
+        raise RoutingValidationError("local routing main model mismatch")
+    if config.get("fallback_providers") != [] or config.get("fallback_model") != []:
+        raise RoutingValidationError("local routing fallback mismatch")
+
+    present_surfaces = FORBIDDEN_ROUTING_SURFACES.intersection(config)
+    if present_surfaces:
+        raise RoutingValidationError("local routing surface is forbidden")
+
+    auxiliary = config.get("auxiliary")
+    expected_aux_keys = set(AUXILIARY_TASKS) | {"transient_retries"}
+    if not isinstance(auxiliary, dict) or set(auxiliary) != expected_aux_keys:
+        raise RoutingValidationError("local routing auxiliary task set mismatch")
+    retries = auxiliary.get("transient_retries")
+    if not isinstance(retries, int) or isinstance(retries, bool) or not 0 <= retries <= 6:
+        raise RoutingValidationError("local routing auxiliary retries are invalid")
+    for task in AUXILIARY_TASKS:
+        _validate_route(auxiliary.get(task), model_id=model_id, label=f"auxiliary {task}")
+
+    expected_ready_model = {"model_id": model_id, "sha256": model_sha256}
+    expected_ready_runtime = {
+        "commit": runtime.get("commit"),
+        "archive_sha256": runtime.get("archive_sha256"),
+    }
+    if (
+        ready.get("active_role") != "desired"
+        or ready.get("lock_sha256") != lock_sha256
+        or not isinstance(ready.get("model"), dict)
+        or not isinstance(ready.get("runtime"), dict)
+        or any(ready["model"].get(key) != value for key, value in expected_ready_model.items())
+        or any(ready["runtime"].get(key) != value for key, value in expected_ready_runtime.items())
+    ):
+        raise RoutingValidationError("local routing READY generation mismatch")
+
+
+def main() -> int:
+    try:
+        validate_local_routing(
+            profile_path=Path("/etc/hermes-cloud-agent/profile.json"),
+            config_path=Path(os.environ["HERMES_HOME"]) / "config.yaml",
+            lock_path=Path("/etc/hermes-cloud-agent/local-inference.lock.json"),
+            ready_path=Path("/var/lib/hermes/inference/READY.json"),
+            environ=os.environ,
+        )
+    except (KeyError, RoutingValidationError) as exc:
+        print(f"local routing validation failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

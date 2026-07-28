@@ -21,6 +21,7 @@ apt-get install -y --no-install-recommends \
   podman \
   python3 \
   python3-pip \
+  python3-yaml \
   python3-venv \
   slirp4netns \
   uidmap
@@ -80,6 +81,8 @@ chmod 0644 /etc/hermes-cloud-agent/state-volume-id
 # shellcheck disable=SC2016
 printf '%s' '${runner_b64}' | base64 -d > /usr/local/libexec/hermes-cloud-agent-run
 # shellcheck disable=SC2016
+printf '%s' '${routing_validator_b64}' | base64 -d > /usr/local/libexec/hermes-validate-local-routing
+# shellcheck disable=SC2016
 printf '%s' '${mount_script_b64}' | base64 -d > /usr/local/libexec/hermes-state-volume-mount
 # shellcheck disable=SC2016
 printf '%s' '${control_helper_b64}' | base64 -d > /usr/local/libexec/hermes-cloud-agent-control
@@ -93,14 +96,18 @@ printf '%s' '${inference_supervisor_b64}' | base64 -d > /usr/local/libexec/herme
 printf '%s' '${inference_network_preflight_b64}' | base64 -d > /usr/local/libexec/hermes-inference-network-preflight
 # shellcheck disable=SC2016
 printf '%s' '${matrix_trust_patch_b64}' | base64 -d > /opt/hermes/strict-matrix-device-trust.patch
+# shellcheck disable=SC2016
+printf '%s' '${routing_patch_b64}' | base64 -d > /opt/hermes/strict-local-model-routing.patch
 chmod 0755 /usr/local/libexec/hermes-cloud-agent-run \
+  /usr/local/libexec/hermes-validate-local-routing \
   /usr/local/libexec/hermes-cloud-agent-control \
   /usr/local/libexec/hermes-state-volume-mount \
   /usr/local/libexec/hermes-read-matrix-secret \
   /usr/local/libexec/hermes-prepare-local-inference \
   /usr/local/libexec/hermes-inference-supervisor \
   /usr/local/libexec/hermes-inference-network-preflight
-chmod 0444 /opt/hermes/strict-matrix-device-trust.patch
+chmod 0444 /opt/hermes/strict-matrix-device-trust.patch \
+  /opt/hermes/strict-local-model-routing.patch
 
 # shellcheck disable=SC2016
 printf '%s' '${state_service_b64}' | base64 -d > /etc/systemd/system/hermes-state-volume.service
@@ -126,6 +133,13 @@ git -C "$HERMES_SOURCE" checkout --detach FETCH_HEAD
 git -C "$HERMES_SOURCE" apply --unidiff-zero --check /opt/hermes/strict-matrix-device-trust.patch
 git -C "$HERMES_SOURCE" apply --unidiff-zero /opt/hermes/strict-matrix-device-trust.patch
 [[ "$(grep -c 'TrustState.CROSS_SIGNED_TRUSTED' "$HERMES_SOURCE/plugins/platforms/matrix/adapter.py")" == "2" ]]
+git -C "$HERMES_SOURCE" apply --check /opt/hermes/strict-local-model-routing.patch
+git -C "$HERMES_SOURCE" apply /opt/hermes/strict-local-model-routing.patch
+python3 -m py_compile \
+  "$HERMES_SOURCE/agent/auxiliary_client.py" \
+  "$HERMES_SOURCE/gateway/run.py" \
+  "$HERMES_SOURCE/gateway/slash_commands.py" \
+  "$HERMES_SOURCE/hermes_cli/runtime_provider.py"
 
 python3 -m venv "$HERMES_VENV"
 "$HERMES_VENV/bin/pip" install --upgrade 'pip==26.1.1'

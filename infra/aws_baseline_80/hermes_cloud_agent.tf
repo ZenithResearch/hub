@@ -2,6 +2,26 @@ locals {
   hermes_cloud_agent_profile_home = "/var/lib/hermes/profiles/${var.hermes_cloud_agent_profile_id}"
   local_inference_lock            = jsondecode(file("${path.module}/../hermes_cloud_agent/artifacts/local-inference.lock.json"))
   local_inference_lock_sha256     = filesha256("${path.module}/../hermes_cloud_agent/artifacts/local-inference.lock.json")
+  hermes_auxiliary_tasks = [
+    "approval",
+    "background_review",
+    "compression",
+    "curator",
+    "goal_judge",
+    "kanban_decomposer",
+    "mcp",
+    "memory_query_rewrite",
+    "moa_aggregator",
+    "moa_reference",
+    "monitor",
+    "profile_describer",
+    "skills_hub",
+    "title_generation",
+    "triage_specifier",
+    "tts_audio_tags",
+    "vision",
+    "web_extract",
+  ]
   hermes_cloud_agent_profile_contract = {
     schema_version = 1
     profile = {
@@ -46,6 +66,28 @@ locals {
     }
   }
   hermes_cloud_agent_config = {
+    model = {
+      provider       = local.hermes_cloud_agent_profile_contract.inference.provider
+      default        = local.hermes_cloud_agent_profile_contract.inference.model_id
+      base_url       = local.hermes_cloud_agent_profile_contract.inference.base_url
+      api_key        = ""
+      api_mode       = "chat_completions"
+      context_length = local.local_inference_lock.desired.model.context_length
+    }
+    fallback_providers = []
+    fallback_model     = []
+    auxiliary = merge(
+      { transient_retries = 2 },
+      {
+        for task in local.hermes_auxiliary_tasks : task => {
+          provider       = "custom"
+          model          = local.hermes_cloud_agent_profile_contract.inference.model_id
+          base_url       = local.hermes_cloud_agent_profile_contract.inference.base_url
+          api_key        = ""
+          fallback_chain = []
+        }
+      }
+    )
     agent = {
       disabled_toolsets = [
         "browser",
@@ -252,6 +294,7 @@ resource "aws_instance" "hermes_cloud_agent" {
     profile_config_b64              = base64encode(yamlencode(local.hermes_cloud_agent_config))
     state_volume_id                 = aws_ebs_volume.hermes_cloud_agent_state[0].id
     runner_b64                      = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-run")
+    routing_validator_b64           = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-validate-local-routing")
     mount_script_b64                = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-state-volume-mount")
     control_helper_b64              = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-cloud-agent-control")
     secret_reader_b64               = filebase64("${path.module}/../hermes_cloud_agent/runtime/hermes-read-matrix-secret")
@@ -261,6 +304,7 @@ resource "aws_instance" "hermes_cloud_agent" {
     inference_lock_b64              = filebase64("${path.module}/../hermes_cloud_agent/artifacts/local-inference.lock.json")
     inference_lock_schema_b64       = filebase64("${path.module}/../hermes_cloud_agent/artifacts/local-inference-lock.schema.json")
     matrix_trust_patch_b64          = filebase64("${path.module}/../hermes_cloud_agent/patches/strict-matrix-device-trust.patch")
+    routing_patch_b64               = filebase64("${path.module}/../hermes_cloud_agent/patches/strict-local-model-routing.patch")
     state_service_b64               = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-state-volume.service")
     podman_service_b64              = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-podman.service")
     inference_prepare_service_b64   = filebase64("${path.module}/../hermes_cloud_agent/systemd/hermes-inference-prepare.service")

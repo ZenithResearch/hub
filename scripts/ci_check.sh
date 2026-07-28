@@ -14,6 +14,20 @@ if [[ "${SKIP_PYTHON_TESTS:-0}" != "1" ]]; then
   "$PYTHON_BIN" -m pytest tests -q
 fi
 
+if [[ "${SKIP_PINNED_HERMES_ROUTING_CHECK:-0}" != "1" ]]; then
+  readonly PINNED_HERMES_COMMIT="3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
+  routing_source=$(mktemp -d "${RUNNER_TEMP:-/tmp}/hermes-routing-source.XXXXXX")
+  trap 'rm -rf "$routing_source"' EXIT
+  git clone --filter=blob:none --no-checkout \
+    https://github.com/NousResearch/hermes-agent.git "$routing_source"
+  git -C "$routing_source" fetch --depth 1 origin "$PINNED_HERMES_COMMIT"
+  git -C "$routing_source" checkout --detach FETCH_HEAD
+  "$PYTHON_BIN" scripts/verify_hermes_cloud_agent_pinned_routing.py \
+    --hermes-source "$routing_source"
+  rm -rf "$routing_source"
+  trap - EXIT
+fi
+
 if [[ "${SKIP_PROTO_GENERATION_CHECK:-0}" != "1" ]]; then
   make proto
   git diff --exit-code -- libs/common/proto
