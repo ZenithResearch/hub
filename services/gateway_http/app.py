@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import importlib
 import json
 import mimetypes
 import os
@@ -20,6 +21,7 @@ import httpx
 import yaml
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from google.protobuf.json_format import MessageToDict
 from pydantic import BaseModel
 from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
@@ -32,7 +34,6 @@ from libs.common.model_profiles import (
     resolve_effective_model_profile,
     update_model_profile_binding,
 )
-from libs.common.proto import agent_pb2, agent_pb2_grpc
 from libs.common.schemas import (
     HttpInvokeToolIn,
     HttpMessageIn,
@@ -44,6 +45,11 @@ from libs.common.schemas import (
 
 from .middleware import BodySizeLimitMiddleware, RequestContextMiddleware
 from .review_auth import ReviewAuthSession, create_review_auth_store
+
+agent_admin_pb2 = importlib.import_module("libs.common.proto.agent_admin_pb2")
+agent_admin_pb2_grpc = importlib.import_module("libs.common.proto.agent_admin_pb2_grpc")
+agent_pb2 = importlib.import_module("libs.common.proto.agent_pb2")
+agent_pb2_grpc = importlib.import_module("libs.common.proto.agent_pb2_grpc")
 
 
 class ReviewAuthSessionIn(BaseModel):
@@ -183,6 +189,22 @@ class CaseFollowUpIn(BaseModel):
 
 class SecretUpdateIn(BaseModel):
     value: str
+
+
+class AgentDesiredStateIn(BaseModel):
+    desired_state: Literal["enabled", "disabled"]
+    expected_revision: int
+
+
+class AgentCredentialReferenceIn(BaseModel):
+    secret_arn: str
+    expected_revision: int
+
+
+class AgentLifecycleOperationIn(BaseModel):
+    action: Literal["enable", "disable", "restart", "refresh_status"]
+    expected_revision: int
+    idempotency_key: str
 
 
 class ReviewAccessPolicyRepairPlanIn(BaseModel):
@@ -425,11 +447,15 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         channel = grpc.aio.insecure_channel(settings.runtime_grpc_target)
+        admin_channel = grpc.aio.insecure_channel(settings.agent_admin_grpc_target)
         app.state.grpc_channel = channel
+        app.state.agent_admin_grpc_channel = admin_channel
         app.state.runtime_stub = agent_pb2_grpc.AgentRuntimeStub(channel)
+        app.state.agent_admin_stub = None
         try:
             yield
         finally:
+            await admin_channel.close()
             await channel.close()
 
     app = FastAPI(lifespan=lifespan)
@@ -715,6 +741,196 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=401, detail="invalid review access admin token")
         if not hmac.compare_digest(token.strip(), expected):
             raise HTTPException(status_code=401, detail="invalid review access admin token")
+
+    def _require_agent_admin(request: Request) -> None:
+        expected = settings.agent_admin_bearer_token.strip()
+        if len(expected) < 32 or "\n" in expected or "\r" in expected:
+            raise HTTPException(status_code=503, detail="agent admin token is not configured")
+        authorization = request.headers.get("authorization") or ""
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="invalid agent admin token")
+        if not hmac.compare_digest(token.strip(), expected):
+            raise HTTPException(status_code=401, detail="invalid agent admin token")
+
+    def _agent_admin_json(message: Any) -> dict[str, Any]:
+        return MessageToDict(
+            message,
+            preserving_proto_field_name=True,
+            always_print_fields_with_no_presence=True,
+        )
+
+    async def _agent_admin_call(call: Any, message: Any, settings_: GatewaySettings) -> Any:
+        try:
+            return await call(message, timeout=settings_.grpc_timeout_s)
+        except grpc.aio.AioRpcError as exc:
+            status_map = {
+                grpc.StatusCode.INVALID_ARGUMENT: 422,
+                grpc.StatusCode.NOT_FOUND: 404,
+                grpc.StatusCode.ABORTED: 409,
+                grpc.StatusCode.FAILED_PRECONDITION: 409,
+                grpc.StatusCode.UNAVAILABLE: 503,
+            }
+            raise HTTPException(
+                status_code=status_map.get(exc.code(), 502),
+                detail=f"agent_admin error: {exc.code().name}",
+            ) from exc
+
+    def _agent_admin_stub(request: Request):
+        stub = request.app.state.agent_admin_stub
+        if stub is None:
+            stub = agent_admin_pb2_grpc.AgentAdminStub(
+                request.app.state.agent_admin_grpc_channel
+            )
+            request.app.state.agent_admin_stub = stub
+        return stub
+
+    @app.post("/v1/admin/agents/{profile_id}/register")
+    async def register_agent_profile(profile_id: str, request: Request) -> JSONResponse:
+        _require_agent_admin(request)
+        idempotency_key = (request.headers.get("idempotency-key") or "").strip()
+        if not idempotency_key or len(idempotency_key) > 128:
+            raise HTTPException(status_code=422, detail="idempotency-key header is required")
+        stub = _agent_admin_stub(request)
+        response = await _agent_admin_call(
+            stub.RegisterProfile,
+            agent_admin_pb2.RegisterProfileRequest(
+                profile_id=profile_id,
+                idempotency_key=idempotency_key,
+            ),
+            request.app.state.settings,
+        )
+        return JSONResponse(_agent_admin_json(response))
+
+    @app.get("/v1/admin/agents/{profile_id}")
+    async def get_agent_profile(profile_id: str, request: Request) -> JSONResponse:
+        _require_agent_admin(request)
+        stub = _agent_admin_stub(request)
+        response = await _agent_admin_call(
+            stub.GetProfile,
+            agent_admin_pb2.GetProfileRequest(profile_id=profile_id),
+            request.app.state.settings,
+        )
+        return JSONResponse(_agent_admin_json(response))
+
+    @app.put("/v1/admin/agents/{profile_id}/desired-state")
+    async def set_agent_desired_state(
+        profile_id: str,
+        payload: AgentDesiredStateIn,
+        request: Request,
+    ) -> JSONResponse:
+        _require_agent_admin(request)
+        desired_states = {
+            "enabled": agent_admin_pb2.DESIRED_STATE_ENABLED,
+            "disabled": agent_admin_pb2.DESIRED_STATE_DISABLED,
+        }
+        stub = _agent_admin_stub(request)
+        response = await _agent_admin_call(
+            stub.SetDesiredState,
+            agent_admin_pb2.SetDesiredStateRequest(
+                profile_id=profile_id,
+                desired_state=desired_states[payload.desired_state],
+                expected_revision=payload.expected_revision,
+            ),
+            request.app.state.settings,
+        )
+        return JSONResponse(_agent_admin_json(response))
+
+    @app.put("/v1/admin/agents/{profile_id}/matrix-credential-reference")
+    async def set_agent_matrix_credential_reference(
+        profile_id: str,
+        payload: AgentCredentialReferenceIn,
+        request: Request,
+    ) -> JSONResponse:
+        _require_agent_admin(request)
+        stub = _agent_admin_stub(request)
+        response = await _agent_admin_call(
+            stub.SetMatrixCredentialReference,
+            agent_admin_pb2.SetMatrixCredentialReferenceRequest(
+                profile_id=profile_id,
+                secret_arn=payload.secret_arn,
+                expected_revision=payload.expected_revision,
+            ),
+            request.app.state.settings,
+        )
+        return JSONResponse(_agent_admin_json(response))
+
+    @app.delete("/v1/admin/agents/{profile_id}/matrix-credential-reference")
+    async def deactivate_agent_matrix_credential_reference(
+        profile_id: str,
+        expected_revision: int,
+        request: Request,
+    ) -> JSONResponse:
+        _require_agent_admin(request)
+        stub = _agent_admin_stub(request)
+        response = await _agent_admin_call(
+            stub.DeactivateMatrixCredentialReference,
+            agent_admin_pb2.DeactivateMatrixCredentialReferenceRequest(
+                profile_id=profile_id,
+                expected_revision=expected_revision,
+            ),
+            request.app.state.settings,
+        )
+        return JSONResponse(_agent_admin_json(response))
+
+    @app.post("/v1/admin/agents/{profile_id}/lifecycle-operations")
+    async def request_agent_lifecycle_operation(
+        profile_id: str,
+        payload: AgentLifecycleOperationIn,
+        request: Request,
+    ) -> JSONResponse:
+        _require_agent_admin(request)
+        actions = {
+            "enable": agent_admin_pb2.LIFECYCLE_ACTION_ENABLE,
+            "disable": agent_admin_pb2.LIFECYCLE_ACTION_DISABLE,
+            "restart": agent_admin_pb2.LIFECYCLE_ACTION_RESTART,
+            "refresh_status": agent_admin_pb2.LIFECYCLE_ACTION_REFRESH_STATUS,
+        }
+        stub = _agent_admin_stub(request)
+        response = await _agent_admin_call(
+            stub.RequestLifecycleOperation,
+            agent_admin_pb2.RequestLifecycleOperationRequest(
+                profile_id=profile_id,
+                action=actions[payload.action],
+                expected_revision=payload.expected_revision,
+                idempotency_key=payload.idempotency_key,
+            ),
+            request.app.state.settings,
+        )
+        return JSONResponse(_agent_admin_json(response))
+
+    @app.get("/v1/admin/agents/{profile_id}/lifecycle-operations/{operation_id}")
+    async def get_agent_lifecycle_operation(
+        profile_id: str,
+        operation_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        _require_agent_admin(request)
+        stub = _agent_admin_stub(request)
+        response = await _agent_admin_call(
+            stub.GetLifecycleOperation,
+            agent_admin_pb2.GetLifecycleOperationRequest(
+                profile_id=profile_id,
+                operation_id=operation_id,
+            ),
+            request.app.state.settings,
+        )
+        return JSONResponse(_agent_admin_json(response))
+
+    @app.get("/v1/admin/agents/{profile_id}/evidence")
+    async def list_agent_evidence(
+        profile_id: str,
+        request: Request,
+        limit: int = 50,
+    ) -> JSONResponse:
+        _require_agent_admin(request)
+        stub = _agent_admin_stub(request)
+        response = await _agent_admin_call(
+            stub.ListEvidence,
+            agent_admin_pb2.ListEvidenceRequest(profile_id=profile_id, limit=limit),
+            request.app.state.settings,
+        )
+        return JSONResponse(_agent_admin_json(response))
 
     @app.put("/v1/admin/review-auth/admin-token", response_model=ReviewAccessAdminTokenUpdateOut)
     async def put_review_access_admin_token(payload: SecretUpdateIn, request: Request) -> JSONResponse:

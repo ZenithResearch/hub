@@ -1,0 +1,12 @@
+diff --git a/plugins/platforms/matrix/adapter.py b/plugins/platforms/matrix/adapter.py
+--- a/plugins/platforms/matrix/adapter.py
++++ b/plugins/platforms/matrix/adapter.py
+@@ -1414,2 +1414,2 @@
+-                    olm.share_keys_min_trust = TrustState.UNVERIFIED
+-                    olm.send_keys_min_trust = TrustState.UNVERIFIED
++                    olm.share_keys_min_trust = TrustState.CROSS_SIGNED_TRUSTED
++                    olm.send_keys_min_trust = TrustState.CROSS_SIGNED_TRUSTED
+@@ -2752,0 +2753,3 @@
++        # Strict deployment room allowlist: DMs are not exempt.
++        if self._allowed_rooms and room_id not in self._allowed_rooms:
++            return None

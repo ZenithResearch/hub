@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly service=hermes-cloud-agent.service
+if [[ $# -ne 1 ]]; then
+  echo '{"ok":false,"reason_code":"invalid_action"}'
+  exit 2
+fi
+readonly action=$1
+
+case "$action" in
+  enable)
+    systemctl enable --now "$service" >/dev/null
+    ;;
+  disable)
+    systemctl disable --now "$service" >/dev/null
+    ;;
+  restart)
+    systemctl restart "$service" >/dev/null
+    ;;
+  status)
+    ;;
+  *)
+    echo '{"ok":false,"reason_code":"invalid_action"}'
+    exit 2
+    ;;
+esac
+
+if systemctl is-active --quiet "$service"; then
+  echo '{"ok":true,"state":"running","secrets_printed":false}'
+else
+  echo '{"ok":true,"state":"stopped","secrets_printed":false}'
+fi

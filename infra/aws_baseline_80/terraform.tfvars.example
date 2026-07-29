@@ -52,6 +52,30 @@ llama_server_model_s3_key          = "models/Qwen3.5-9B-Q4_K_M.gguf"
 llama_server_model_expected_sha256 = ""
 llama_model_preload_image          = "public.ecr.aws/aws-cli/aws-cli:latest"
 
+# Matrix-only profiled Hermes cloud-agent proof. Keep disabled until a reviewed
+# AMI, runtime secret ARNs, and operator deployment window are available.
+enable_hermes_cloud_agent = false
+hermes_cloud_agent_ami_id = ""
+hermes_cloud_agent_instance_type = "m7i.2xlarge"
+hermes_cloud_agent_root_volume_size_gib = 40
+hermes_cloud_agent_state_volume_size_gib = 200
+hermes_cloud_agent_state_kms_key_arn     = ""
+hermes_cloud_agent_secret_arns           = []
+hermes_cloud_agent_secret_kms_key_arns   = []
+hermes_cloud_agent_profile_id             = "cloudproof"
+hermes_cloud_agent_matrix_homeserver      = "https://synapse.zenith-research.ca"
+hermes_cloud_agent_matrix_user_id         = ""
+hermes_cloud_agent_matrix_allowed_users   = []
+hermes_cloud_agent_matrix_allowed_rooms   = []
+hermes_cloud_agent_matrix_secret_arn      = ""
+hermes_cloud_agent_model_id               = "qwen3.5-9b-q4-k-m"
+hermes_cloud_agent_model_sha256           = ""
+# Preferred bootstrap: apply once with enable_hermes_cloud_agent=false, populate the
+# created Agent Admin secret out-of-band, then enable the agent and set the
+# readiness attestation. Setting the raw value stores it in Terraform state.
+agent_admin_bearer_token                   = ""
+agent_admin_bearer_token_secret_ready      = false
+
 image_tag = "v0.1.0"
 
 # External vector store (Qdrant Cloud)

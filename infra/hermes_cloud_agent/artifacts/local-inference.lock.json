@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "desired": {
+    "llama_cpp": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "commit": "47a39665e7081dc482feec169961acc09750a5c4",
+      "release": "b10000",
+      "archive_filename": "llama-b10000-bin-ubuntu-x64.tar.gz",
+      "archive_sha256": "80faa4e10350436aeb09f01c3f299f6ebeaf3000f21cdf2b0ec4d2299b056274",
+      "size_bytes": 15855212,
+      "s3_bucket": "zenith-hub-prod-llama-models-044528206149-us-east-1",
+      "s3_key": "hermes-cloud-agent/runtime/llama.cpp/b10000/80faa4e10350436aeb09f01c3f299f6ebeaf3000f21cdf2b0ec4d2299b056274/llama-b10000-bin-ubuntu-x64.tar.gz",
+      "s3_version_id": "apAEVDVfFYNUu13eZw0gIIaKYZwweTL5"
+    },
+    "model": {
+      "source_repository": "https://huggingface.co/Qwen/Qwen3-8B-GGUF",
+      "revision": "7c41481f57cb95916b40956ab2f0b139b296d974",
+      "filename": "Qwen3-8B-Q4_K_M.gguf",
+      "model_id": "qwen3-8b-q4-k-m",
+      "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+      "size_bytes": 5027783488,
+      "s3_bucket": "zenith-hub-prod-llama-models-044528206149-us-east-1",
+      "s3_key": "hermes-cloud-agent/models/Qwen3-8B/7c41481f57cb95916b40956ab2f0b139b296d974/d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785/Qwen3-8B-Q4_K_M.gguf",
+      "s3_version_id": "pNL9.QCQfHICIn7qYcL5kA5WRSBStpuo",
+      "license": "apache-2.0",
+      "context_length": 32768,
+      "chat_template": "jinja",
+      "tool_calling_verified": false
+    }
+  }
+}

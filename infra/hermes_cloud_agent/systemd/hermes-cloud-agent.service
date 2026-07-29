@@ -1,0 +1,45 @@
+[Unit]
+Description=Matrix-only profiled Hermes cloud agent
+Requires=hermes-state-volume.service hermes-podman.service hermes-inference-prepare.service hermes-inference.service
+After=network-online.target hermes-state-volume.service hermes-podman.service hermes-inference-prepare.service hermes-inference.service
+BindsTo=hermes-inference.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+SupplementaryGroups=hermes-inference
+Environment=HOME=/var/lib/hermes
+UnsetEnvironment=ALL_PROXY HTTP_PROXY HTTPS_PROXY NO_PROXY all_proxy http_proxy https_proxy no_proxy
+UnsetEnvironment=ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_TOKEN ARCEEAI_API_KEY
+UnsetEnvironment=AWS_ACCESS_KEY_ID AWS_BEARER_TOKEN_BEDROCK AWS_PROFILE AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+UnsetEnvironment=DEEPINFRA_API_KEY GEMINI_API_KEY GITHUB_TOKEN GLM_API_KEY GOOGLE_API_KEY
+UnsetEnvironment=HF_TOKEN HUGGINGFACE_TOKEN KILOCODE_API_KEY KIMI_API_KEY MINIMAX_API_KEY MINIMAX_CN_API_KEY
+UnsetEnvironment=NVIDIA_API_KEY NOUS_API_KEY OLLAMA_API_KEY OPENAI_API_KEY OPENAI_BASE_URL
+UnsetEnvironment=OPENROUTER_API_KEY OPENROUTER_BASE_URL XAI_API_KEY XIAOMI_API_KEY
+UnsetEnvironment=HERMES_MODEL HERMES_PROVIDER HERMES_BASE_URL
+UMask=0077
+LimitCORE=0
+ExecStart=/usr/local/libexec/hermes-cloud-agent-run
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=45
+NoNewPrivileges=true
+KeyringMode=private
+LockPersonality=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/hermes /run/hermes-podman
+
+[Install]
+WantedBy=multi-user.target

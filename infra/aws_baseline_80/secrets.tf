@@ -24,3 +24,16 @@ resource "aws_secretsmanager_secret_version" "review_access_admin_token" {
   secret_string = var.review_access_admin_token
 }
 
+resource "aws_secretsmanager_secret" "agent_admin_bearer_token" {
+  name        = "${local.name_prefix}/agent_admin_bearer_token"
+  description = "Dedicated Hub Agent Admin Gateway bearer token"
+  tags        = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "agent_admin_bearer_token" {
+  count = var.agent_admin_bearer_token != "" ? 1 : 0
+
+  secret_id     = aws_secretsmanager_secret.agent_admin_bearer_token.id
+  secret_string = var.agent_admin_bearer_token
+}
+

@@ -1,0 +1,2 @@
+# Unified diff context uses a single space to represent blank context lines.
+infra/hermes_cloud_agent/patches/*.patch whitespace=-blank-at-eol

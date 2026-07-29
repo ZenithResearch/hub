@@ -32,8 +32,8 @@ seed:
 	docker compose run --rm kb-indexer
 
 proto:
-	python -m grpc_tools.protoc -I./proto --python_out=./libs/common/proto --grpc_python_out=./libs/common/proto ./proto/agent.proto
-	python -c "p='libs/common/proto/agent_pb2_grpc.py'; import pathlib; t=pathlib.Path(p).read_text(); t=t.replace('import agent_pb2 as agent__pb2','from . import agent_pb2 as agent__pb2'); pathlib.Path(p).write_text(t)"
+	python -m grpc_tools.protoc -I./proto --python_out=./libs/common/proto --grpc_python_out=./libs/common/proto ./proto/agent.proto ./proto/agent_admin.proto
+	python -c "import pathlib,re; files=pathlib.Path('libs/common/proto').glob('*_pb2_grpc.py'); [(lambda p: p.write_text(re.sub(r'^import (\\w+_pb2) as ', r'from . import \\1 as ', p.read_text(), flags=re.MULTILINE)))(p) for p in files]"
 
 test:
 	docker compose run --rm -e REVIEWS_DATA_DIR=/tmp/hub-reviews -e CLIENTS_DB_PATH=/tmp/hub-clients.db runtime-grpc python -c "import libs.common.config, libs.kb.qdrant_store, libs.tools.registry; import services.runtime_grpc.main, services.tool_sandbox.main, services.gateway_http.app; print('imports_ok')"

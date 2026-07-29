@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly PROFILE_FILE=/etc/hermes-cloud-agent/profile.json
+readonly SCHEMA_FILE=/etc/hermes-cloud-agent/profile.schema.json
+readonly HERMES_BIN=/opt/hermes/venv/bin/hermes
+
+/opt/hermes/venv/bin/python -m jsonschema --instance "$PROFILE_FILE" "$SCHEMA_FILE" >/dev/null
+
+profile_id=$(jq -er '.profile.id' "$PROFILE_FILE")
+profile_home=$(jq -er '.profile.home' "$PROFILE_FILE")
+crypto_store=$(jq -er '.matrix.crypto_store' "$PROFILE_FILE")
+homeserver=$(jq -er '.matrix.homeserver' "$PROFILE_FILE")
+user_id=$(jq -er '.matrix.user_id' "$PROFILE_FILE")
+secret_ref=$(jq -er '.matrix.access_token_secret_ref' "$PROFILE_FILE")
+allowed_users=$(jq -er '.matrix.allowed_users | join(",")' "$PROFILE_FILE")
+allowed_rooms=$(jq -er '.matrix.allowed_rooms | join(",")' "$PROFILE_FILE")
+inference_model=$(jq -er '.inference.model_id' "$PROFILE_FILE")
+inference_base_url=$(jq -er '.inference.base_url' "$PROFILE_FILE")
+
+[[ "$profile_home" == "/var/lib/hermes/profiles/$profile_id" ]]
+[[ "$crypto_store" == "$profile_home/platforms/matrix/store" ]]
+[[ "$secret_ref" == aws-secretsmanager:arn:* ]]
+secret_arn=${secret_ref#aws-secretsmanager:}
+
+for name in \
+  ALL_PROXY HTTP_PROXY HTTPS_PROXY NO_PROXY \
+  all_proxy http_proxy https_proxy no_proxy \
+  ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_TOKEN ARCEEAI_API_KEY \
+  AWS_ACCESS_KEY_ID AWS_BEARER_TOKEN_BEDROCK AWS_PROFILE AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
+  DEEPINFRA_API_KEY GEMINI_API_KEY GITHUB_TOKEN GLM_API_KEY GOOGLE_API_KEY \
+  HF_TOKEN HUGGINGFACE_TOKEN KILOCODE_API_KEY KIMI_API_KEY MINIMAX_API_KEY \
+  MINIMAX_CN_API_KEY NVIDIA_API_KEY NOUS_API_KEY OLLAMA_API_KEY OPENAI_API_KEY \
+  OPENAI_BASE_URL OPENROUTER_API_KEY OPENROUTER_BASE_URL XAI_API_KEY XIAOMI_API_KEY \
+  HERMES_MODEL HERMES_PROVIDER HERMES_BASE_URL; do
+  unset "$name"
+done
+
+export HERMES_HOME="$profile_home"
+export HOME="$profile_home"
+export HERMES_STRICT_LOCAL_MODEL_ROUTING=1
+export HERMES_PINNED_MODEL="$inference_model"
+export HERMES_PINNED_BASE_URL="$inference_base_url"
+/usr/local/libexec/hermes-validate-local-routing
+
+secret_payload=$(/opt/hermes/venv/bin/python \
+  /usr/local/libexec/hermes-read-matrix-secret \
+  "$secret_arn")
+
+matrix_access_token=$(jq -er '.access_token | strings | select(length > 0)' <<<"$secret_payload")
+matrix_device_id=$(jq -er '.device_id | strings | select(length > 0)' <<<"$secret_payload")
+unset secret_payload
+
+# The one-shot secret reader above is the only gateway-start path that needs
+# the instance role. Prevent Hermes provider discovery from consulting IMDS or
+# shared AWS credential files after the Matrix secret has been acquired.
+export AWS_EC2_METADATA_DISABLED=true
+export AWS_SHARED_CREDENTIALS_FILE=/dev/null
+export AWS_CONFIG_FILE=/dev/null
+
+for value in "$matrix_access_token" "$matrix_device_id"; do
+  if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
+    echo "Matrix credential fields must be single-line" >&2
+    exit 1
+  fi
+done
+
+homeserver=${homeserver%/}
+whoami_payload=$(printf '%s' "$matrix_access_token" | /opt/hermes/venv/bin/python -c '
+import json
+import sys
+import urllib.request
+
+homeserver = sys.argv[1]
+token = sys.stdin.read()
+request = urllib.request.Request(
+    f"{homeserver}/_matrix/client/v3/account/whoami",
+    headers={"Authorization": f"Bearer {token}"},
+)
+with urllib.request.urlopen(request, timeout=10) as response:
+    payload = response.read(16385)
+if len(payload) > 16384:
+    raise ValueError("Matrix whoami response is too large")
+parsed = json.loads(payload)
+print(json.dumps(parsed, separators=(",", ":")))
+' "$homeserver")
+whoami_user_id=$(jq -er '.user_id | strings' <<<"$whoami_payload")
+whoami_device_id=$(jq -er '.device_id | strings' <<<"$whoami_payload")
+unset whoami_payload
+[[ "$whoami_user_id" == "$user_id" ]]
+[[ "$whoami_device_id" == "$matrix_device_id" ]]
+unset whoami_user_id whoami_device_id
+
+export MATRIX_HOMESERVER="$homeserver"
+export MATRIX_USER_ID="$user_id"
+export MATRIX_ACCESS_TOKEN="$matrix_access_token"
+export MATRIX_DEVICE_ID="$matrix_device_id"
+export MATRIX_E2EE_MODE=required
+export MATRIX_ALLOWED_USERS="$allowed_users"
+export MATRIX_ALLOWED_ROOMS="$allowed_rooms"
+export MATRIX_SESSION_SCOPE=room
+export MATRIX_REQUIRE_MENTION=true
+export MATRIX_AUTO_THREAD=false
+export MATRIX_TOOLS_ALLOW_REDACTION=false
+export MATRIX_TOOLS_ALLOW_INVITES=false
+export MATRIX_TOOLS_ALLOW_ROOM_CREATE=false
+export MATRIX_TOOLS_ALLOW_CROSS_ROOM=false
+export MATRIX_ALLOW_PUBLIC_ROOMS=false
+export API_SERVER_ENABLED=false
+export WEBHOOK_ENABLED=false
+export TERMINAL_ENV=docker
+export DOCKER_HOST=unix:///run/hermes-podman/podman.sock
+export HERMES_REDACT_SECRETS=true
+
+exec "$HERMES_BIN" gateway run --external-supervisor

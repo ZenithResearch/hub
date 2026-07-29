@@ -1,0 +1,38 @@
+[Unit]
+Description=Prepare exact local-inference artifacts for Hermes
+Requires=hermes-state-volume.service
+After=network-online.target hermes-state-volume.service
+Wants=network-online.target
+Before=hermes-inference.service hermes-cloud-agent.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0027
+ExecStart=/opt/hermes/venv/bin/python /usr/local/libexec/hermes-prepare-local-inference
+RemainAfterExit=yes
+TimeoutStartSec=30min
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_CHOWN
+AmbientCapabilities=CAP_CHOWN
+LockPersonality=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+InaccessiblePaths=/var/lib/hermes/profiles /run/hermes-podman
+ReadWritePaths=/opt/hermes/inference /var/lib/hermes/models /var/lib/hermes/inference
+
+[Install]
+WantedBy=multi-user.target

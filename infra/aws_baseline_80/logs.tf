@@ -53,3 +53,11 @@ resource "aws_cloudwatch_log_group" "llama_server" {
   retention_in_days = var.log_retention_days
   tags              = local.tags
 }
+
+resource "aws_cloudwatch_log_group" "agent_admin" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  name              = "/ecs/${local.name_prefix}/agent-admin"
+  retention_in_days = var.log_retention_days
+  tags              = local.tags
+}

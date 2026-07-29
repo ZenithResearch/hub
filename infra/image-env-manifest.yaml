@@ -4,7 +4,7 @@ principles:
   - Each deployable ECS task/image has an explicit environment contract.
   - New ECS task definitions must add an entry here before CI accepts them.
   - Runtime secrets are AWS Secrets Manager handles injected by ECS, never local override files or raw values.
-  - ZenithOS may edit safe configuration/secret handles through Hub APIs, but raw secrets stay behind Hub/AWS secret-manager boundaries.
+  - Authorized Hub admin clients may edit safe configuration or secret handles, but raw secrets stay behind Hub/AWS secret-manager boundaries.
 
 services:
   - service: gateway
@@ -14,6 +14,7 @@ services:
       LOG_LEVEL: literal
       HTTP_PORT: literal
       RUNTIME_GRPC_TARGET: cloudmap:runtime
+      AGENT_ADMIN_GRPC_TARGET: cloudmap:agent-admin
       CLIENTS_DB_BACKEND: terraform:enable_clients_postgres
       CLIENTS_DB_PATH: terraform:gateway_clients_db_path
       CLIENTS_PG_HOST: terraform:clients_postgres_host
@@ -41,6 +42,24 @@ services:
       REVIEW_ACCESS_ADMIN_TOKEN:
         source: aws_secrets_manager
         secret_ref: aws_secretsmanager_secret.review_access_admin_token.arn
+      AGENT_ADMIN_BEARER_TOKEN:
+        source: aws_secrets_manager
+        secret_ref: aws_secretsmanager_secret.agent_admin_bearer_token.arn
+        optional_when: enable_hermes_cloud_agent=false
+
+  - service: agent_admin
+    image: aws_ecr_repository.gateway.repository_url:local.agent_admin_image_tag
+    command: services.agent_admin.main
+    environment:
+      LOG_LEVEL: literal
+      AWS_REGION: terraform:aws_region
+      AGENT_ADMIN_GRPC_BIND: literal
+      AGENT_ADMIN_DB_PATH: terraform:agent_admin_db_path
+      AGENT_ADMIN_PROFILE_ID: terraform:hermes_cloud_agent_profile_id
+      AGENT_ADMIN_INSTANCE_ID: terraform:hermes_cloud_agent_instance_id
+      AGENT_ADMIN_SSM_DOCUMENT_NAME: terraform:hermes_cloud_agent_control_document
+      AGENT_ADMIN_ALLOWED_MATRIX_SECRET_ARNS: terraform:hermes_cloud_agent_matrix_secret_arn
+    secrets: {}
 
   - service: runtime
     image: aws_ecr_repository.runtime.repository_url:var.image_tag

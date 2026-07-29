@@ -6,6 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added the Issue 97 local-inference operator runbook — defines bounded exact-identity, loopback, restart, no-swap, tool-shape, negative-fixture, and declared-rollback evidence while keeping unavailable live proof explicitly blocked.
+- Added pytest to the reviewed project development lock — lets the local-inference negative-fixture gate run frozen and offline without an ad hoc mutable dependency overlay.
+- Added exact-version private-S3 retrieval and atomic local-inference generation preparation for Issue 97 — verifies byte counts, digests, archive safety, installed state, and explicitly declared rollback readiness before Hermes may start.
+- Added an immutable, schema-validated local-inference artifact lock bound into the Issue 97 profile — pins independently verified `llama.cpp` and Qwen GGUF bytes to exact private-S3 object versions and removes the placeholder model identity before node installation can proceed.
+- Added the private Issue 97 Agent Admin service, customer-managed-KMS single-writer state, private SSM endpoint, fixed-action dispatcher, least-privilege ECS/IAM boundary, and authenticated Gateway projection — enables bounded profile lifecycle administration without creating prompt, tool, arbitrary-command, raw-secret, or public agent ingress.
+- Added a separate typed Agent Admin gRPC contract and generated-stub drift gate for Issue 97 — keeps lifecycle, desired state, credential references, and redacted evidence structurally isolated from prompt, tool, arbitrary-command, and raw-secret APIs.
+- Added pinned Hermes Matrix profile bootstrap and hardened systemd supervision for Issue 97 — preserves E2EE/device state on encrypted storage, loads credentials only at runtime, and provides sandboxed tools through a rootless Podman socket without exposing generic Hermes ingress.
 - Documented the digest-pinned Synapse landing rollout and issue boundary — keeps publication, Synapse-only deployment, API/federation smoke, browser QA, and rollback evidence explicit without claiming deployment.
 - Added dynamic Synapse static-path installation and image-byte verification — avoids Python site-packages assumptions and proves the hardened image contains the reviewed landing-page bytes.
 - Added the self-contained Zenith Synapse landing page and source contract tests — gives visitors a sparse, accessible route to ZenithOS without adding scripts, tracking, remote assets, or authority claims.
@@ -76,6 +83,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 
 ### Changed
+- Reconciled the repo-local Issue 97 specification through C4.4 commit `ae110ca` and exact-head CI, while preserving G4.1, undeclared rollback, the missing bounded in-place lock rollout/recovery transition, and absent causal startup-failure attestation as blockers to C4.5 rather than overclaiming Task 4 closure.
+- Clarified Issue 97 around its dedicated normal Matrix account/device and dedicated Hub admin credential — removes the rejected application-service token pattern and unrelated application assumptions from the cloud-agent objective.
+- Hardened Issue 97 Matrix device state and tool isolation — requires a customer-managed KMS key, rejects recovery material at runtime, blocks cloned state activation, prevents accidental volume destruction, and removes tool-container host, credential, environment, and network exposure.
+- Expanded the Issue 97 cloud-agent contract with a private Hub admin control plane and dedicated Matrix account/device lifecycle — separates lifecycle/resource administration from Matrix conversation without creating generic Hermes ingress.
 - Synced ISS-P14-007 PR evidence back into the repo-local issue spec — makes the task-per-commit boundary and remaining operator-auth gate visible from the spec itself.
 - Linked ISS-P14-007 from the Matrix issue index and P15 production homeserver spec — keeps downstream work blocked on accepted production evidence instead of older DNS/TLS shorthand.
 - Upgraded the manual Gateway image workflow actions to Node 24-compatible releases — keeps the build-only image rail current without changing operator-controlled Terraform deployment ownership.
@@ -84,6 +95,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Made local-inference runtime generations commit-and-digest addressed — prevents a desired archive that reuses a rollback commit from displacing the previously validated rollback runtime before the generation is accepted.
+- Rejected the sentinel `latest` as an artifact object-version ID in both the lock schema and Terraform activation guard — prevents mutable S3 selection from bypassing the immutable local-inference contract.
+- Ordered Gateway task-definition creation behind Terraform-managed Agent Admin secret-version creation — prevents the supported inline-token bootstrap path from racing ECS startup before `AWSCURRENT` exists.
+- Closed the final Agent Admin review blockers around verified lifecycle postconditions, transactional terminal evidence, exact idempotency replay, transient SSM observation, Fargate control-plane endpoints, secret readiness, and EFS destruction protection — prevents false-success state, duplicate actions, partial audit records, undeployable private tasks, and accidental authority-state loss.
+- Pinned the protobuf generator used by the checked-in stubs — keeps Agent Admin and runtime protobuf drift checks reproducible across local and hosted CI environments.
+- Made Agent Admin lifecycle recovery fail closed and SSM polling eventual-consistency-safe — prevents duplicate command dispatch after ambiguous crashes and avoids misclassifying newly dispatched commands as failed.
+- Bound Issue 97 state activation to the exact EBS, EC2, homeserver, Matrix user, and device tuple; removed unsafe block-device fallbacks; verified `/account/whoami`; narrowed secret/KMS IAM; and applied room allowlists to DMs — prevents wrong-disk formatting, store/credential substitution, overbroad secret reads, and unlisted direct-message ingress identified by security review.
 - Made the Docker-backed `make test` smoke use writable temporary review/client paths — keeps the import check reproducible when the image runs as the non-root app user and the copied `data/` tree is not writable.
 - Added collectswirls origins to the Gateway CORS example — keeps SWRL Review SDK browser sessions from being blocked at preflight while the Hub Review Auth DB policy remains authoritative.
 - Added regression coverage for Gallery review-access regeneration with compatibility deployment metadata — ensures renewing an existing project-scoped Gallery access code keeps the canonical apex, www, and local authentication model working without leaking raw secrets.

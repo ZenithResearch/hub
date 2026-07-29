@@ -477,6 +477,19 @@ variable "review_access_admin_token" {
   default     = ""
 }
 
+variable "agent_admin_bearer_token" {
+  description = "Dedicated bearer token for the Issue 97 Agent Admin Gateway projection. Prefer populating the always-created managed secret out-of-band before enabling the agent; enablement requires an operator readiness attestation. If set here, the token is stored in Terraform state."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "agent_admin_bearer_token_secret_ready" {
+  description = "Operator attestation that the managed Agent Admin bearer secret has an AWSCURRENT version populated out-of-band. Required for agent enablement when the raw token is not supplied to Terraform."
+  type        = bool
+  default     = false
+}
+
 variable "cors_allow_origins" {
   description = "CORS_ALLOW_ORIGINS for gateway-http."
   type        = string
@@ -734,4 +747,153 @@ variable "matrix_federation_allowed_ipv6_cidr_blocks" {
   description = "IPv6 CIDR allowlist for ALB Matrix federation ingress on 8448. Empty disables IPv6 federation ingress."
   type        = list(string)
   default     = []
+}
+
+variable "enable_hermes_cloud_agent" {
+  description = "Create the non-production Matrix-only profiled Hermes EC2 proof node. Disabled by default."
+  type        = bool
+  default     = false
+}
+
+variable "hermes_cloud_agent_ami_id" {
+  description = "Reviewed Linux AMI ID for the Hermes cloud-agent node. Required when enable_hermes_cloud_agent is true."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.hermes_cloud_agent_ami_id == "" || can(regex("^ami-[0-9a-f]+$", var.hermes_cloud_agent_ami_id))
+    error_message = "hermes_cloud_agent_ami_id must be empty or a valid AMI ID."
+  }
+}
+
+variable "hermes_cloud_agent_instance_type" {
+  description = "Initial combined Hermes plus local-inference node size; downsize only from measured evidence."
+  type        = string
+  default     = "m7i.2xlarge"
+}
+
+variable "hermes_cloud_agent_root_volume_size_gib" {
+  description = "Encrypted root volume size for the Hermes cloud-agent node."
+  type        = number
+  default     = 40
+
+  validation {
+    condition     = var.hermes_cloud_agent_root_volume_size_gib >= 20
+    error_message = "hermes_cloud_agent_root_volume_size_gib must be at least 20 GiB."
+  }
+}
+
+variable "hermes_cloud_agent_state_volume_size_gib" {
+  description = "Encrypted persistent profile, Matrix crypto, session, memory, skill, log, and model state volume size."
+  type        = number
+  default     = 200
+
+  validation {
+    condition     = var.hermes_cloud_agent_state_volume_size_gib >= 100
+    error_message = "hermes_cloud_agent_state_volume_size_gib must be at least 100 GiB for profile and model state."
+  }
+}
+
+variable "hermes_cloud_agent_state_kms_key_arn" {
+  description = "Dedicated customer-managed KMS key ARN for the persistent Matrix state volume."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.hermes_cloud_agent_state_kms_key_arn == "" || can(regex("^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]+$", var.hermes_cloud_agent_state_kms_key_arn))
+    error_message = "hermes_cloud_agent_state_kms_key_arn must be a KMS key ARN, not an alias."
+  }
+}
+
+variable "hermes_cloud_agent_secret_arns" {
+  description = "Exact Secrets Manager ARNs the node may read at runtime. At least one is required when enabled."
+  type        = list(string)
+  default     = []
+}
+
+variable "hermes_cloud_agent_secret_kms_key_arns" {
+  description = "Exact customer-managed KMS key ARNs needed to decrypt declared runtime secrets. Empty for AWS-managed secret encryption."
+  type        = list(string)
+  default     = []
+}
+
+variable "hermes_cloud_agent_profile_id" {
+  description = "Stable Hermes profile identifier for the first cloud-agent proof."
+  type        = string
+  default     = "cloudproof"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9_-]{2,31}$", var.hermes_cloud_agent_profile_id))
+    error_message = "hermes_cloud_agent_profile_id must be a 3-32 character lowercase profile identifier."
+  }
+}
+
+variable "hermes_cloud_agent_matrix_homeserver" {
+  description = "HTTPS Matrix homeserver used by the dedicated cloud-agent identity."
+  type        = string
+  default     = "https://synapse.zenith-research.ca"
+
+  validation {
+    condition     = can(regex("^https://", var.hermes_cloud_agent_matrix_homeserver))
+    error_message = "hermes_cloud_agent_matrix_homeserver must use HTTPS."
+  }
+}
+
+variable "hermes_cloud_agent_matrix_user_id" {
+  description = "Dedicated Matrix user ID for the cloud-agent profile. Required when enabled."
+  type        = string
+  default     = ""
+}
+
+variable "hermes_cloud_agent_matrix_allowed_users" {
+  description = "Exact Matrix user IDs allowed to trigger the cloud-agent profile."
+  type        = list(string)
+  default     = []
+}
+
+variable "hermes_cloud_agent_matrix_allowed_rooms" {
+  description = "Exact Matrix room IDs allowed to trigger the cloud-agent profile."
+  type        = list(string)
+  default     = []
+}
+
+variable "hermes_cloud_agent_matrix_secret_arn" {
+  description = "Secrets Manager ARN containing JSON access_token and device_id fields for the dedicated Matrix device."
+  type        = string
+  default     = ""
+}
+
+variable "agent_admin_task_cpu" {
+  description = "CPU units for the private Agent Admin gRPC task."
+  type        = number
+  default     = 256
+}
+
+variable "agent_admin_task_memory" {
+  description = "Memory in MiB for the private Agent Admin gRPC task."
+  type        = number
+  default     = 512
+}
+
+variable "agent_admin_desired_count" {
+  description = "Agent Admin replicas. SQLite persistence requires exactly one writer."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.agent_admin_desired_count == 1
+    error_message = "agent_admin_desired_count must remain 1 while SQLite-backed."
+  }
+}
+
+variable "agent_admin_db_path" {
+  description = "Agent Admin SQLite database path on encrypted EFS."
+  type        = string
+  default     = "/data/agent-admin.db"
+}
+
+variable "agent_admin_image_tag" {
+  description = "Optional Agent Admin image tag override; defaults to the Gateway image tag."
+  type        = string
+  default     = ""
 }

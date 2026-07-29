@@ -1,0 +1,29 @@
+[Unit]
+Description=Rootless Podman API for Hermes Docker backend
+Requires=hermes-state-volume.service
+After=hermes-state-volume.service
+
+[Service]
+Type=simple
+User=hermes-sandbox
+Group=hermes-podman
+RuntimeDirectory=hermes-podman
+RuntimeDirectoryMode=0770
+Delegate=yes
+UMask=0007
+Environment=HOME=/var/lib/hermes/podman
+Environment=XDG_RUNTIME_DIR=/run/hermes-podman
+ExecStart=/usr/bin/podman system service --time=0 unix:///run/hermes-podman/podman.sock
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+KeyringMode=private
+ProtectProc=invisible
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/hermes/podman /run/hermes-podman
+InaccessiblePaths=/var/lib/hermes/profiles
+
+[Install]
+WantedBy=multi-user.target

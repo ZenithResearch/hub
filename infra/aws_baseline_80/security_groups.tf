@@ -75,6 +75,14 @@ resource "aws_security_group" "gateway" {
   }
 
   egress {
+    description = "gateway_to_agent_admin_grpc"
+    from_port   = 50054
+    to_port     = 50054
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
     description = "gateway_to_queue_http"
     from_port   = 8081
     to_port     = 8081
@@ -603,5 +611,63 @@ resource "aws_security_group" "clients_postgres" {
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-clients-postgres-sg" })
+}
+
+resource "aws_security_group" "agent_admin" {
+  count = var.enable_hermes_cloud_agent ? 1 : 0
+
+  name        = "${local.name_prefix}-agent-admin-sg"
+  description = "Private Agent Admin gRPC ingress from Gateway only"
+  vpc_id      = aws_vpc.this.id
+
+  ingress {
+    description     = "gateway_to_agent_admin_grpc"
+    from_port       = 50054
+    to_port         = 50054
+    protocol        = "tcp"
+    security_groups = [aws_security_group.gateway.id]
+  }
+
+  egress {
+    description = "agent_admin_to_efs"
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  egress {
+    description     = "aws_interface_endpoints_https"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.hermes_cloud_agent_ssm_endpoint[0].id]
+  }
+
+  egress {
+    description     = "aws_s3_gateway_https"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    prefix_list_ids = [aws_vpc_endpoint.hermes_cloud_agent_s3[0].prefix_list_id]
+  }
+
+  egress {
+    description = "dns_udp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = [aws_vpc.this.cidr_block]
+  }
+
+  egress {
+    description = "dns_tcp"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.this.cidr_block]
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-agent-admin-sg" })
 }
 
