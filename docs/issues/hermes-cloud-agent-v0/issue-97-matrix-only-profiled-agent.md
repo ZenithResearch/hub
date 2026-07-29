@@ -47,7 +47,7 @@ Terraform owns the private node, encrypted storage, IAM, networking, and bootstr
 - AWS IAM instance identity: retrieve explicitly permitted runtime secrets and use Systems Manager.
 - Dedicated Hermes profile directory: durable state for one profile only.
 - Dedicated Matrix account/device: conversational identity only.
-- Local llama.cpp listener: inference transport only, bound to loopback or a node-local network.
+- Local llama.cpp listener: inference transport only, bound to numeric loopback `127.0.0.1:8080`.
 - Container sandbox: terminal/file execution boundary.
 - Authenticated Gateway admin edge: operator authentication and HTTP projection only.
 - Agent Admin Service: bounded resource lifecycle and redacted status; no prompt/tool ingress.
@@ -104,6 +104,14 @@ Recovery and teardown follow [`state-recovery-runbook.md`](state-recovery-runboo
 
 Later remote-inference and secS profiles require a separately reviewed schema version rather than weakening version 1.
 
+## Task 4 delivery status
+
+- **C4.1 complete (`0471421`, `80fda25`):** the exact `llama.cpp` and Qwen model source revisions, files, sizes, digests, private-S3 version IDs, context, template, license, and literal model alias are frozen in a closed lock and profile activation contract.
+- **C4.2 complete (`4e2f325`, `6bbb5c4`, `81391c2`):** exact-version retrieval, bounded streaming, hostile-archive rejection, digest-addressed atomic installation, complete installed-byte verification, and explicit declared-rollback validation fail closed.
+- **C4.3 complete (`c1315fc`):** the prepared runtime is supervised under `hermes-inference`, serves numeric loopback only, verifies PID-bound semantic readiness and fixed tool-call shape, enforces bounded resources/watchdog/shutdown, and gates Hermes lifecycle.
+- **C4.4 complete (`ae110cabe8859e782851070d2e16a32b6043eb79`):** every main and auxiliary Hermes model route is pinned to literal model `qwen3-8b-q4-k-m`, provider `custom`, and `http://127.0.0.1:8080/v1`. Startup validates the lock, profile, rendered config, and desired `READY.json` before Matrix credential retrieval; session/channel overrides, persisted model state, `/model`, `/moa`, provider routing, credentials, proxy widening, and main/auxiliary fallback fail closed. The final local gate passed 574 tests and 20 subtests, and [exact-head hosted CI run `30403655158`](https://github.com/ZenithResearch/hub/actions/runs/30403655158) passed.
+- **C4.5 remains blocked:** [`local-inference-operator-runbook.md`](local-inference-operator-runbook.md) defines bounded startup, exact identity, restart, no-swap, tool-shape, negative-fixture, and rollback evidence. G4.1 must still run on the declared `m7i.2xlarge`; the current lock has no declared rollback generation; and Terraform currently replaces the instance when the user-data-embedded lock changes, while the persistent state binding correctly rejects that replacement. A separately reviewed bounded lock rollout mechanism or state-binding recovery transition, plus a closed pre-secret startup failure attestation, is therefore required before failed desired upgrade/rollback evidence can run. Missing live inputs remain `BLOCKED`, never simulated success.
+
 ## Tasks — commit boundaries
 
 ### Task 1: Contract and evidence design
@@ -130,7 +138,7 @@ Agent Admin EFS removal is deliberately not an ordinary feature-disable operatio
 
 ### Task 4: Same-node inference
 
-Add checksum-pinned llama.cpp/Qwen provisioning, loopback-only serving, explicit custom-provider binding, readiness, and no-fallback behavior.
+Add checksum-pinned llama.cpp/Qwen provisioning, loopback-only serving, explicit custom-provider binding, readiness, and no-fallback behavior. C4.1–C4.4 are implemented through `ae110ca`; operating and rollback evidence follows [`local-inference-operator-runbook.md`](local-inference-operator-runbook.md), with C4.5 held until G4.1 and declared-rollback proof exist.
 
 ### Task 5: Proof harness and evidence
 

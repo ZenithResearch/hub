@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added the Issue 97 local-inference operator runbook — defines bounded exact-identity, loopback, restart, no-swap, tool-shape, negative-fixture, and declared-rollback evidence while keeping unavailable live proof explicitly blocked.
+- Added pytest to the reviewed project development lock — lets the local-inference negative-fixture gate run frozen and offline without an ad hoc mutable dependency overlay.
 - Added exact-version private-S3 retrieval and atomic local-inference generation preparation for Issue 97 — verifies byte counts, digests, archive safety, installed state, and explicitly declared rollback readiness before Hermes may start.
 - Added an immutable, schema-validated local-inference artifact lock bound into the Issue 97 profile — pins independently verified `llama.cpp` and Qwen GGUF bytes to exact private-S3 object versions and removes the placeholder model identity before node installation can proceed.
 - Added the private Issue 97 Agent Admin service, customer-managed-KMS single-writer state, private SSM endpoint, fixed-action dispatcher, least-privilege ECS/IAM boundary, and authenticated Gateway projection — enables bounded profile lifecycle administration without creating prompt, tool, arbitrary-command, raw-secret, or public agent ingress.
@@ -81,6 +83,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 
 ### Changed
+- Reconciled the repo-local Issue 97 specification through C4.4 commit `ae110ca` and exact-head CI, while preserving G4.1, undeclared rollback, the missing bounded in-place lock rollout/recovery transition, and absent causal startup-failure attestation as blockers to C4.5 rather than overclaiming Task 4 closure.
 - Clarified Issue 97 around its dedicated normal Matrix account/device and dedicated Hub admin credential — removes the rejected application-service token pattern and unrelated application assumptions from the cloud-agent objective.
 - Hardened Issue 97 Matrix device state and tool isolation — requires a customer-managed KMS key, rejects recovery material at runtime, blocks cloned state activation, prevents accidental volume destruction, and removes tool-container host, credential, environment, and network exposure.
 - Expanded the Issue 97 cloud-agent contract with a private Hub admin control plane and dedicated Matrix account/device lifecycle — separates lifecycle/resource administration from Matrix conversation without creating generic Hermes ingress.
