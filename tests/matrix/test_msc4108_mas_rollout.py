@@ -63,6 +63,7 @@ def test_mas_image_gate_rejects_every_high_or_critical_vulnerability():
     assert "severity: HIGH,CRITICAL" in workflow
     assert "ignore-unfixed: false" in workflow
     assert "ignore-unfixed: true" not in workflow
+    assert 'image-ref: ${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}' in workflow
 
 
 def test_synapse_shared_secret_uses_task_ephemeral_storage_only():
@@ -146,6 +147,49 @@ def test_phase_one_plan_guard_accepts_only_new_mas_resources(tmp_path):
     assert result.returncode == 0
 
 
+def run_plan_guard(tmp_path, phase, address, actions):
+    path = tmp_path / f"{phase}.json"
+    path.write_text(
+        json.dumps({"resource_changes": [{"address": address, "change": {"actions": actions}}]}),
+        encoding="utf-8",
+    )
+    return subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_matrix_mas_plan.py"), "--phase", phase, str(path)],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_plan_guard_enforces_exact_phase_and_action_boundaries(tmp_path):
+    assert run_plan_guard(
+        tmp_path, "infrastructure", "aws_lb_listener_rule.matrix_mas_auth_host[0]", ["create"]
+    ).returncode == 1
+    assert run_plan_guard(
+        tmp_path, "infrastructure", "aws_db_instance.matrix_mas[0]", ["delete", "create"]
+    ).returncode == 1
+    assert run_plan_guard(
+        tmp_path, "cutover", "aws_db_instance.matrix_mas[0]", ["delete"]
+    ).returncode == 1
+    assert run_plan_guard(
+        tmp_path, "migration", "aws_ecs_task_definition.matrix_mas_migration[0]", ["create"]
+    ).returncode == 0
+
+
+def test_phase_one_does_not_publish_the_auth_hostname():
+    routes = read("infra/aws_baseline_80/matrix_dns_tls.tf")
+
+    assert 'count = var.enable_matrix_mas_public_edge && var.matrix_hosted_zone_id != "" ? 1 : 0' in routes
+    assert 'count = var.enable_matrix_mas_public_edge && var.matrix_hosted_zone_id != "" && var.enable_dual_stack_public_edge ? 1 : 0' in routes
+
+
+def test_runbook_uses_argument_only_migration_task_overrides():
+    runbook = read("docs/operations/matrix-msc4108-mas-rollout.md")
+
+    assert '["syn2mas", "check", "--synapse-config", "/synapse-data/homeserver.yaml"]' in runbook
+    assert '["syn2mas", "migrate", "--synapse-config", "/synapse-data/homeserver.yaml", "--dry-run"]' in runbook
+    assert "mas-cli --config /run/mas/config.yaml" not in runbook
+
+
 def test_mas_has_a_dedicated_auth_host_and_only_explicit_compatibility_routes_on_synapse():
     runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
     routes = read("infra/aws_baseline_80/matrix_dns_tls.tf")
@@ -193,7 +237,7 @@ def test_mas_production_inputs_outputs_and_operator_runbook_are_present():
     assert 'output "matrix_mas_postgres_endpoint"' in outputs
     for marker in [
         "syn2mas",
-        "migrate --dry-run",
+        '"--dry-run"',
         "maintenance window",
         "stop Synapse",
         "not easily reversible",

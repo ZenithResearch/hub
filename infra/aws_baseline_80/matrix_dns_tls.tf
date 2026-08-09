@@ -77,7 +77,7 @@ resource "aws_acm_certificate_validation" "matrix_mas" {
 }
 
 resource "aws_route53_record" "matrix_mas" {
-  count = var.enable_matrix_mas && var.matrix_hosted_zone_id != "" ? 1 : 0
+  count = var.enable_matrix_mas_public_edge && var.matrix_hosted_zone_id != "" ? 1 : 0
 
   name    = var.public_matrix_auth_domain_name
   type    = "A"
@@ -91,7 +91,7 @@ resource "aws_route53_record" "matrix_mas" {
 }
 
 resource "aws_route53_record" "matrix_mas_ipv6" {
-  count = var.enable_matrix_mas && var.matrix_hosted_zone_id != "" && var.enable_dual_stack_public_edge ? 1 : 0
+  count = var.enable_matrix_mas_public_edge && var.matrix_hosted_zone_id != "" && var.enable_dual_stack_public_edge ? 1 : 0
 
   name    = var.public_matrix_auth_domain_name
   type    = "AAAA"

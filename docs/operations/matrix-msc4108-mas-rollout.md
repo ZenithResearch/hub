@@ -27,13 +27,15 @@ This runbook introduces Matrix Authentication Service (MAS) so Hypha can use MSC
 
 Set `enable_matrix_mas_migration_task=true` only with the reviewed account-local digest-pinned wrapper image and populated secret versions. Terraform registers a dedicated Fargate task whose default command is `syn2mas check`; it mounts the existing Synapse EFS access point read-only at `/synapse-data`, uses encrypted NFS transport, and receives secrets only through ECS secret injection. Never copy secret values into shell arguments.
 
-For every phase, save `terraform show -json` output locally and run `scripts/check_matrix_mas_plan.py --phase <infrastructure|public-edge|cutover> PLAN.json`. Do not apply a rejected plan.
+For every phase, save `terraform show -json` output locally and run `scripts/check_matrix_mas_plan.py --phase <infrastructure|public-edge|migration|cutover> PLAN.json`. Do not apply a rejected plan.
 
 Run and inspect:
 
+Use these argument-only ECS container command overrides. The wrapper creates its private configuration at `/tmp/mas/config.yaml`, prepends `mas-cli`, and appends the generated `--config` argument; do not include `mas-cli` or a config path in the override:
+
 ```text
-mas-cli --config /run/mas/config.yaml syn2mas --synapse-config /synapse-data/homeserver.yaml check
-mas-cli --config /run/mas/config.yaml syn2mas --synapse-config /synapse-data/homeserver.yaml migrate --dry-run
+["syn2mas", "check", "--synapse-config", "/synapse-data/homeserver.yaml"]
+["syn2mas", "migrate", "--synapse-config", "/synapse-data/homeserver.yaml", "--dry-run"]
 ```
 
 The dry run may execute while Synapse remains online and rolls back its MAS database writes. Record its duration for the maintenance window. Resolve all errors and review every warning. Confirm imported password compatibility uses bcrypt version 1 with `unicode_normalization: true`, followed by argon2id version 2.
@@ -48,7 +50,7 @@ Start MAS before cutover only after the dry run, backup coverage, secret checks,
 4. Run the real import:
 
 ```text
-mas-cli --config /run/mas/config.yaml syn2mas --synapse-config /synapse-data/homeserver.yaml migrate
+["syn2mas", "migrate", "--synapse-config", "/synapse-data/homeserver.yaml"]
 ```
 
 5. If import fails, leave MAS stopped, restore the known-good Synapse configuration, and restart legacy Synapse authentication. The migration tool does not write to the Synapse database.

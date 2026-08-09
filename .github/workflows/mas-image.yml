@@ -108,5 +108,13 @@ jobs:
           tags: ${{ steps.image.outputs.image }}
           provenance: true
           sbom: true
+      - name: Scan the exact pushed digest
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
       - name: Emit digest-pinned deployment reference
         run: echo "${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}"
