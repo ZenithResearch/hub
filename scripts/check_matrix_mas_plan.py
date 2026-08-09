@@ -57,6 +57,7 @@ PHASE_RULES = {
     "migration": {
         "aws_ecs_task_definition.matrix_mas_migration[0]": {CREATE},
         "aws_security_group.matrix_synapse_efs[0]": {UPDATE},
+        "aws_security_group.matrix_synapse_postgres[0]": {UPDATE},
         "aws_security_group_rule.matrix_mas_to_synapse_efs[0]": {CREATE},
     },
     "cutover": {

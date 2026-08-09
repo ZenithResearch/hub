@@ -26,6 +26,17 @@ resource "aws_security_group" "matrix_synapse_postgres" {
     security_groups = [aws_security_group.matrix.id]
   }
 
+  dynamic "ingress" {
+    for_each = var.enable_matrix_mas_migration_task ? [1] : []
+    content {
+      description     = "Postgres access for reviewed syn2mas migration task"
+      from_port       = 5432
+      to_port         = 5432
+      protocol        = "tcp"
+      security_groups = [aws_security_group.matrix_mas[0].id]
+    }
+  }
+
   tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-db-sg" })
 }
 
