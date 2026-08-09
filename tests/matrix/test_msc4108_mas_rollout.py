@@ -251,6 +251,7 @@ def test_runbook_uses_argument_only_migration_task_overrides():
 
     assert '["syn2mas", "check", "--synapse-config", "/synapse-data/homeserver.yaml"]' in runbook
     assert '["syn2mas", "migrate", "--synapse-config", "/synapse-data/homeserver.yaml", "--dry-run"]' in runbook
+    assert "<infrastructure|public-edge|migration|service-start|cutover>" in runbook
     assert "mas-cli --config /run/mas/config.yaml" not in runbook
 
 

@@ -28,7 +28,7 @@ This runbook introduces Matrix Authentication Service (MAS) so Hypha can use MSC
 
 Set `enable_matrix_mas_migration_task=true` only with the reviewed account-local digest-pinned wrapper image and populated secret versions. Terraform registers a dedicated Fargate task whose default command is `syn2mas check`; it mounts the existing Synapse EFS access point read-only at `/synapse-data`, uses encrypted NFS transport, and receives secrets only through ECS secret injection. Never copy secret values into shell arguments.
 
-For every phase, save `terraform show -json` output locally and run `scripts/check_matrix_mas_plan.py --phase <infrastructure|public-edge|migration|cutover> PLAN.json`. Do not apply a rejected plan.
+For every phase, save `terraform show -json` output locally and run `scripts/check_matrix_mas_plan.py --phase <infrastructure|public-edge|migration|service-start|cutover> PLAN.json`. Use `service-start` when replacing the digest-pinned MAS task definitions and changing the MAS service from desired zero to desired one before cutover. Do not apply a rejected plan.
 
 Run and inspect:
 
