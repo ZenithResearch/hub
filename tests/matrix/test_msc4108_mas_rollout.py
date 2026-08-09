@@ -38,6 +38,7 @@ def test_mas_uses_digest_pinned_image_and_file_backed_secrets():
 
     assert 'busybox@sha256:' in dockerfile
     assert 'COPY --from=busybox /bin/busybox /bin/sh' in dockerfile
+    assert 'ADD --chmod=0444 --checksum=sha256:' in dockerfile
     assert 'ghcr.io/element-hq/matrix-authentication-service@sha256:' in variables
     assert 'resource "aws_secretsmanager_secret" "matrix_mas_synapse_shared_secret"' in secrets
     assert 'resource "aws_secretsmanager_secret" "matrix_mas_encryption_secret"' in secrets

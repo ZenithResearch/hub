@@ -9,7 +9,7 @@ COPY --from=busybox /bin/busybox /bin/wc
 COPY --from=busybox /bin/busybox /bin/tr
 COPY --from=busybox /bin/busybox /bin/chmod
 COPY --from=busybox /bin/busybox /bin/cat
-ADD --checksum=sha256:e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3 \
+ADD --chmod=0444 --checksum=sha256:e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3 \
     https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
     /etc/ssl/certs/aws-rds-global-bundle.pem
 COPY --chmod=0555 infra/matrix/mas/entrypoint.sh /usr/local/bin/zenith-mas-entrypoint
