@@ -101,6 +101,17 @@ resource "aws_security_group" "matrix_synapse_efs" {
     security_groups = [aws_security_group.matrix.id]
   }
 
+  dynamic "ingress" {
+    for_each = var.enable_matrix_mas_migration_task ? [1] : []
+    content {
+      description     = "Read-only Synapse EFS access for reviewed syn2mas migration task"
+      from_port       = 2049
+      to_port         = 2049
+      protocol        = "tcp"
+      security_groups = [aws_security_group.matrix_mas[0].id]
+    }
+  }
+
   tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-efs-sg" })
 }
 

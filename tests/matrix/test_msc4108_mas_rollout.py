@@ -112,11 +112,35 @@ def test_reviewed_migration_task_mounts_synapse_state_read_only():
 
 def test_cutover_opens_only_bidirectional_synapse_to_mas_transport():
     runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
+    routes = read("infra/aws_baseline_80/matrix_dns_tls.tf")
 
     assert 'resource "aws_security_group_rule" "matrix_mas_from_synapse"' in runtime
-    assert 'resource "aws_security_group_rule" "matrix_synapse_to_mas"' in runtime
-    assert runtime.count("count = var.matrix_mas_cutover_complete ? 1 : 0") >= 2
+    assert 'resource "aws_security_group_rule" "matrix_synapse_to_mas"' not in runtime
+    assert "dynamic \"egress\"" in routes
+    assert "for_each = var.matrix_mas_cutover_complete ? [1] : []" in routes
     assert 'description              = "Synapse delegated authentication to MAS"' in runtime
+
+
+def test_security_groups_have_one_rule_ownership_model_per_group():
+    runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
+    synapse = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+
+    mas_group = runtime.split('resource "aws_security_group" "matrix_mas"', 1)[1].split(
+        'resource "aws_security_group_rule"', 1
+    )[0]
+    assert "ingress {" not in mas_group
+    assert "egress {" not in mas_group
+    for rule in [
+        "matrix_mas_web_from_alb",
+        "matrix_mas_health_from_alb",
+        "matrix_mas_https_control_plane",
+        "matrix_mas_private_postgres",
+        "matrix_mas_dns_udp",
+        "matrix_mas_dns_tcp",
+    ]:
+        assert f'resource "aws_security_group_rule" "{rule}"' in runtime
+    assert 'resource "aws_security_group_rule" "matrix_synapse_efs_from_mas_migration"' not in runtime
+    assert "dynamic \"ingress\"" in synapse
 
 
 def test_phase_one_plan_guard_rejects_live_synapse_changes(tmp_path):
@@ -181,6 +205,9 @@ def test_plan_guard_enforces_exact_phase_and_action_boundaries(tmp_path):
     assert run_plan_guard(
         tmp_path, "cutover", "aws_db_instance.matrix_mas[0]", ["delete"]
     ).returncode == 1
+    assert run_plan_guard(
+        tmp_path, "cutover", "aws_ecs_task_definition.matrix_mas[0]", ["delete", "create"]
+    ).returncode == 0
     assert run_plan_guard(
         tmp_path, "migration", "aws_ecs_task_definition.matrix_mas_migration[0]", ["create"]
     ).returncode == 0
