@@ -206,6 +206,9 @@ def test_plan_guard_enforces_exact_phase_and_action_boundaries(tmp_path):
         tmp_path, "cutover", "aws_db_instance.matrix_mas[0]", ["delete"]
     ).returncode == 1
     assert run_plan_guard(
+        tmp_path, "cutover", "aws_ecs_task_definition.matrix_mas[0]", ["delete", "create"]
+    ).returncode == 0
+    assert run_plan_guard(
         tmp_path, "migration", "aws_ecs_task_definition.matrix_mas_migration[0]", ["create"]
     ).returncode == 0
 

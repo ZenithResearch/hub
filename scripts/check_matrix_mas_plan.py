@@ -62,6 +62,7 @@ PHASE_RULES = {
     "cutover": {
         "aws_ecs_service.matrix_mas[0]": {UPDATE},
         "aws_ecs_service.matrix_synapse[0]": {UPDATE},
+        "aws_ecs_task_definition.matrix_mas[0]": {REPLACE},
         "aws_ecs_task_definition.matrix_synapse[0]": {CREATE, REPLACE},
         "aws_iam_role_policy.execution_secrets": {UPDATE},
         "aws_lb_listener_rule.matrix_mas_compat[0]": {CREATE, UPDATE},
