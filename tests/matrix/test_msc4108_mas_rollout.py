@@ -221,6 +221,24 @@ def test_plan_guard_enforces_exact_phase_and_action_boundaries(tmp_path):
     ).returncode == 0
 
 
+def test_plan_guard_allows_only_expected_service_start_replacements(tmp_path):
+    assert run_plan_guard(
+        tmp_path, "service-start", "aws_ecs_task_definition.matrix_mas[0]", ["delete", "create"]
+    ).returncode == 0
+    assert run_plan_guard(
+        tmp_path,
+        "service-start",
+        "aws_ecs_task_definition.matrix_mas_migration[0]",
+        ["delete", "create"],
+    ).returncode == 0
+    assert run_plan_guard(
+        tmp_path, "service-start", "aws_ecs_service.matrix_mas[0]", ["update"]
+    ).returncode == 0
+    assert run_plan_guard(
+        tmp_path, "service-start", "aws_ecs_service.matrix_synapse[0]", ["update"]
+    ).returncode == 1
+
+
 def test_phase_one_does_not_publish_the_auth_hostname():
     routes = read("infra/aws_baseline_80/matrix_dns_tls.tf")
 
@@ -233,6 +251,7 @@ def test_runbook_uses_argument_only_migration_task_overrides():
 
     assert '["syn2mas", "check", "--synapse-config", "/synapse-data/homeserver.yaml"]' in runbook
     assert '["syn2mas", "migrate", "--synapse-config", "/synapse-data/homeserver.yaml", "--dry-run"]' in runbook
+    assert "<infrastructure|public-edge|migration|service-start|cutover>" in runbook
     assert "mas-cli --config /run/mas/config.yaml" not in runbook
 
 

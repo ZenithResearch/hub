@@ -60,6 +60,14 @@ PHASE_RULES = {
         "aws_security_group.matrix_synapse_postgres[0]": {UPDATE},
         "aws_security_group_rule.matrix_mas_to_synapse_efs[0]": {CREATE},
     },
+    "service-start": {
+        "aws_cloudwatch_metric_alarm.matrix_mas_5xx[0]": {UPDATE},
+        "aws_cloudwatch_metric_alarm.matrix_mas_cpu[0]": {UPDATE},
+        "aws_cloudwatch_metric_alarm.matrix_mas_healthy_hosts[0]": {UPDATE},
+        "aws_ecs_service.matrix_mas[0]": {UPDATE},
+        "aws_ecs_task_definition.matrix_mas[0]": {REPLACE},
+        "aws_ecs_task_definition.matrix_mas_migration[0]": {REPLACE},
+    },
     "cutover": {
         "aws_ecs_service.matrix_mas[0]": {UPDATE},
         "aws_ecs_service.matrix_synapse[0]": {UPDATE},
