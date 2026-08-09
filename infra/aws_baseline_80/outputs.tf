@@ -188,6 +188,27 @@ output "matrix_synapse_media_file_system_id" {
   value       = var.enable_matrix_synapse ? aws_efs_file_system.matrix_synapse[0].id : null
 }
 
+output "matrix_mas_service_name" {
+  description = "ECS service name for Matrix Authentication Service."
+  value       = var.enable_matrix_mas_public_edge ? aws_ecs_service.matrix_mas[0].name : null
+}
+
+output "matrix_mas_postgres_endpoint" {
+  description = "Private RDS endpoint for the dedicated MAS database."
+  value       = var.enable_matrix_mas ? aws_db_instance.matrix_mas[0].endpoint : null
+}
+
+output "matrix_mas_certificate_dns_validation_records" {
+  description = "ACM DNS validation records for auth.zenith-research.ca when DNS is external."
+  value = var.enable_matrix_mas ? [
+    for option in aws_acm_certificate.matrix_mas[0].domain_validation_options : {
+      name  = option.resource_record_name
+      type  = option.resource_record_type
+      value = option.resource_record_value
+    }
+  ] : []
+}
+
 output "matrix_certificate_dns_validation_records" {
   description = "ACM DNS validation records for the Matrix certificate. Add these at the external DNS provider when matrix_hosted_zone_id is empty."
   value = var.public_matrix_domain_name != "" ? [

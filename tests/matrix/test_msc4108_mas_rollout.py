@@ -1,0 +1,191 @@
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def read(relative: str) -> str:
+    return (ROOT / relative).read_text(encoding="utf-8")
+
+
+def test_mas_runtime_is_an_inactive_private_stateful_service_by_default():
+    runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
+    variables = read("infra/aws_baseline_80/variables.tf")
+
+    assert 'resource "aws_db_instance" "matrix_mas"' in runtime
+    assert 'db_name' in runtime and '"mas"' in runtime
+    assert "manage_master_user_password" in runtime and "true" in runtime
+    assert "prevent_destroy = true" in runtime
+    assert 'resource "aws_ecs_task_definition" "matrix_mas"' in runtime
+    assert 'resource "aws_ecs_service" "matrix_mas"' in runtime
+    assert "assign_public_ip = false" in runtime
+    assert "var.start_matrix_mas_service" in runtime
+    assert 'variable "enable_matrix_mas"' in variables
+    assert 'variable "enable_matrix_mas_public_edge"' in variables
+    assert 'variable "start_matrix_mas_service"' in variables
+    assert 'default     = false' in variables
+
+
+def test_mas_uses_digest_pinned_image_and_file_backed_secrets():
+    runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
+    variables = read("infra/aws_baseline_80/variables.tf")
+    secrets = read("infra/aws_baseline_80/matrix_secrets.tf")
+    wrapper = read("infra/matrix/mas/entrypoint.sh")
+
+    assert 'ghcr.io/element-hq/matrix-authentication-service@sha256:' in variables
+    assert 'resource "aws_secretsmanager_secret" "matrix_mas_synapse_shared_secret"' in secrets
+    assert 'resource "aws_secretsmanager_secret" "matrix_mas_encryption_secret"' in secrets
+    assert 'resource "aws_secretsmanager_secret" "matrix_mas_signing_key"' in secrets
+    assert 'secret_string = var.matrix_mas' not in secrets
+    assert 'database.password_file' not in runtime
+    for marker in [
+        "database:",
+        "password_file:",
+        "secret_file:",
+        "encryption_file:",
+        "key_file:",
+        "umask 077",
+        "exec /usr/local/bin/mas-cli --config",
+    ]:
+        assert marker in wrapper
+
+
+def test_mas_image_gate_rejects_every_high_or_critical_vulnerability():
+    workflow = read(".github/workflows/mas-image.yml")
+
+    assert "severity: HIGH,CRITICAL" in workflow
+    assert "ignore-unfixed: false" in workflow
+    assert "ignore-unfixed: true" not in workflow
+
+
+def test_synapse_shared_secret_uses_task_ephemeral_storage_only():
+    synapse = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+
+    assert "/tmp/mas-shared-secret" in synapse
+    assert "/data/mas-shared-secret" not in synapse
+
+
+def test_mas_and_synapse_cutover_are_separate_reviewed_gates():
+    runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
+    synapse = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
+    variables = read("infra/aws_baseline_80/variables.tf")
+
+    assert 'variable "matrix_mas_cutover_complete"' in variables
+    assert "var.matrix_mas_cutover_complete" in synapse
+    assert '"matrix_authentication_service"' in synapse
+    assert '"msc4108_enabled": True' in synapse
+    assert "start_matrix_mas_service requires enable_matrix_mas" in runtime
+    assert "matrix_mas_cutover_complete requires a completed syn2mas migration" in synapse
+    assert "var.matrix_mas_cutover_complete ? [" in synapse
+    assert "service_registries" not in synapse
+
+
+def test_reviewed_migration_task_mounts_synapse_state_read_only():
+    runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
+    wrapper = read("infra/matrix/mas/entrypoint.sh")
+
+    assert 'resource "aws_ecs_task_definition" "matrix_mas_migration"' in runtime
+    assert 'containerPath = "/synapse-data"' in runtime
+    assert "readOnly      = true" in runtime
+    assert 'transit_encryption = "ENABLED"' in runtime
+    assert "syn2mas check" in runtime
+    assert 'if [ "$#" -gt 0 ]' in wrapper
+
+
+def test_phase_one_plan_guard_rejects_live_synapse_changes(tmp_path):
+    plan = {
+        "resource_changes": [{
+            "address": "aws_ecs_task_definition.matrix_synapse[0]",
+            "change": {"actions": ["delete", "create"]},
+        }]
+    }
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_matrix_mas_plan.py"), "--phase", "infrastructure", str(path)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "aws_ecs_task_definition.matrix_synapse[0]" in result.stdout
+
+
+def test_phase_one_plan_guard_accepts_only_new_mas_resources(tmp_path):
+    plan = {
+        "resource_changes": [{
+            "address": "aws_db_instance.matrix_mas[0]",
+            "change": {"actions": ["create"]},
+        }]
+    }
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_matrix_mas_plan.py"), "--phase", "infrastructure", str(path)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+
+
+def test_mas_has_a_dedicated_auth_host_and_only_explicit_compatibility_routes_on_synapse():
+    runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
+    routes = read("infra/aws_baseline_80/matrix_dns_tls.tf")
+    variables = read("infra/aws_baseline_80/variables.tf")
+
+    assert 'resource "aws_lb_target_group" "matrix_mas"' in runtime
+    assert '"/health"' in runtime
+    assert 'resource "aws_lb_listener_rule" "matrix_mas_auth_host"' in routes
+    assert 'resource "aws_lb_listener_rule" "matrix_mas_compat"' in routes
+    assert "var.public_matrix_auth_domain_name" in routes
+    assert "auth.zenith-research.ca" in variables
+    for path in [
+        "/_matrix/client/*/login",
+        "/_matrix/client/*/logout",
+        "/_matrix/client/*/refresh",
+    ]:
+        assert path in routes
+
+
+def test_mas_database_is_backed_up_and_private_health_admin_surfaces_are_not_routed():
+    backup = read("infra/aws_baseline_80/matrix_backup.tf")
+    routes = read("infra/aws_baseline_80/matrix_dns_tls.tf")
+    wrapper = read("infra/matrix/mas/entrypoint.sh")
+
+    assert "aws_db_instance.matrix_mas[0].arn" in backup
+    assert "name: health" in wrapper
+    assert "0.0.0.0:8081" in wrapper
+    assert '"adminapi"' not in wrapper
+    assert '"prometheus"' not in wrapper
+    assert "/health" not in routes
+    assert "/metrics" not in routes
+    assert "/api/admin" not in routes
+
+
+def test_mas_production_inputs_outputs_and_operator_runbook_are_present():
+    example = read("infra/aws_baseline_80/terraform.tfvars.example")
+    outputs = read("infra/aws_baseline_80/outputs.tf")
+    runbook = read("docs/operations/matrix-msc4108-mas-rollout.md")
+
+    assert "enable_matrix_mas" in example and "false" in example
+    assert "enable_matrix_mas_public_edge" in example
+    assert "start_matrix_mas_service" in example
+    assert "matrix_mas_cutover_complete = false" in example
+    assert 'output "matrix_mas_service_name"' in outputs
+    assert 'output "matrix_mas_postgres_endpoint"' in outputs
+    for marker in [
+        "syn2mas",
+        "migrate --dry-run",
+        "maintenance window",
+        "stop Synapse",
+        "not easily reversible",
+        "/_matrix/client/v1/auth_metadata",
+        '"org.matrix.msc4108":true',
+    ]:
+        assert marker in runbook

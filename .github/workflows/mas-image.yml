@@ -1,0 +1,112 @@
+name: Hardened Matrix Authentication Service Image
+
+on:
+  pull_request:
+    paths:
+      - "infra/matrix/mas/**"
+      - ".github/workflows/mas-image.yml"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Immutable candidate tag; defaults to matrix-mas-<short-sha>."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: matrix-mas-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY: zenith-hub-prod-runtime-grpc
+
+jobs:
+  verify:
+    name: Build, exercise, and scan hardened MAS
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - name: Validate entrypoint shell
+        run: sh -n infra/matrix/mas/entrypoint.sh
+      - name: Build local verification image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/matrix/mas/Dockerfile
+          load: true
+          tags: hardened-matrix-mas:verify
+          platforms: linux/amd64
+      - name: Verify non-root runtime and wrapper
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect hardened-matrix-mas:verify --format '{{.Config.User}}')" = "65532:65532"
+          docker run --rm --entrypoint /bin/sh hardened-matrix-mas:verify -ec 'test -x /usr/local/bin/zenith-mas-entrypoint; test -r /etc/ssl/certs/aws-rds-global-bundle.pem; /usr/local/bin/mas-cli --version'
+      - name: Validate rendered MAS configuration with pinned CLI
+        run: |
+          set -euo pipefail
+          SIGNING_KEY="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null)"
+          docker run --rm \
+            -e MATRIX_MAS_DB_HOST=db.internal \
+            -e MATRIX_MAS_DB_PASSWORD=REPLACE_ME_CI_ONLY \
+            -e MATRIX_MAS_SYNAPSE_SHARED_SECRET=ci-only-shared-secret \
+            -e MATRIX_MAS_ENCRYPTION_SECRET=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e MATRIX_MAS_SIGNING_KEY="$SIGNING_KEY" \
+            hardened-matrix-mas:verify config check
+      - name: Fail on fixable high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: hardened-matrix-mas:verify
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+
+  publish:
+    name: Publish reviewed MAS candidate
+    if: github.event_name == 'workflow_dispatch'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure AWS credentials by OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_PROD_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: docker/setup-buildx-action@v4
+      - name: Resolve immutable tag and registry
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.image_tag }}"
+          if [[ -z "$TAG" ]]; then TAG="matrix-mas-${GITHUB_SHA::12}"; fi
+          [[ "$TAG" =~ ^matrix-mas-[A-Za-z0-9_.-]{1,115}$ ]] || { echo "invalid tag" >&2; exit 2; }
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "registry=$REGISTRY" >> "$GITHUB_OUTPUT"
+          echo "image=$REGISTRY/$ECR_REPOSITORY:$TAG" >> "$GITHUB_OUTPUT"
+      - name: Authenticate to ECR
+        run: aws ecr get-login-password | docker login --username AWS --password-stdin "${{ steps.image.outputs.registry }}"
+      - name: Build and push reviewed candidate
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/matrix/mas/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.image.outputs.image }}
+          provenance: true
+          sbom: true
+      - name: Emit digest-pinned deployment reference
+        run: echo "${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}"

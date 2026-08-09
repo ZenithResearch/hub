@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added a fail-closed Matrix Authentication Service rollout contract — enables MSC4108 QR login without silently breaking existing users, sessions, devices, tokens, or E2EE state during the required `syn2mas` migration.
 - Documented the digest-pinned Synapse landing rollout and issue boundary — keeps publication, Synapse-only deployment, API/federation smoke, browser QA, and rollback evidence explicit without claiming deployment.
 - Added dynamic Synapse static-path installation and image-byte verification — avoids Python site-packages assumptions and proves the hardened image contains the reviewed landing-page bytes.
 - Added the self-contained Zenith Synapse landing page and source contract tests — gives visitors a sparse, accessible route to ZenithOS without adding scripts, tracking, remote assets, or authority claims.

@@ -175,7 +175,7 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
       user       = "991:991"
       essential  = true
       entryPoint = ["/bin/sh", "-ec"]
-      command = [<<-SCRIPT
+      command = var.matrix_mas_cutover_complete ? [<<-SCRIPT
         umask 077
         python - <<'PY'
         import os
@@ -218,6 +218,12 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
         signing_key_path = data_dir / f"{server_name}.signing.key"
         signing_key_path.write_text(os.environ["SYNAPSE_SIGNING_KEY"].rstrip("\n") + "\n")
 
+        mas_cutover = os.environ.get("SYNAPSE_MAS_CUTOVER_COMPLETE") == "true"
+        mas_secret_path = Path("/tmp/mas-shared-secret")
+        if mas_cutover:
+            mas_secret_path.write_text(os.environ["SYNAPSE_MAS_SHARED_SECRET"])
+            mas_secret_path.chmod(0o600)
+
         homeserver = {
             "server_name": server_name,
             "public_baseurl": f"https://{server_name}/",
@@ -255,6 +261,14 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
             "suppress_key_server_warning": True,
             "trusted_key_servers": [{"server_name": "matrix.org"}],
         }
+        if mas_cutover:
+            homeserver["matrix_authentication_service"] = {
+                "enabled": True,
+                "endpoint": f"http://matrix-mas.{os.environ['SYNAPSE_CLOUDMAP_NAMESPACE']}:8080/",
+                "secret_path": str(mas_secret_path),
+                "force_http2": False,
+            }
+            homeserver["experimental_features"] = {"msc4108_enabled": True}
         (data_dir / "homeserver.yaml").write_text(yaml.safe_dump(homeserver, sort_keys=False))
 
         log_config = {
@@ -268,19 +282,22 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
         PY
         exec /start.py run
       SCRIPT
-      ]
+      ] : [local.matrix_synapse_legacy_command]
       portMappings = [
         { containerPort = 8008, protocol = "tcp" }
       ]
-      environment = [
+      environment = concat([
         { name = "SYNAPSE_SERVER_NAME", value = var.public_matrix_domain_name },
         { name = "SYNAPSE_REPORT_STATS", value = "no" },
         { name = "SYNAPSE_CONFIG_PATH", value = "/data/homeserver.yaml" },
         { name = "SYNAPSE_DB_HOST", value = aws_db_instance.matrix_synapse[0].address },
         { name = "SYNAPSE_RDS_CA_BUNDLE_URL", value = var.matrix_rds_ca_bundle_url },
         { name = "SYNAPSE_RDS_CA_BUNDLE_SHA256", value = var.matrix_rds_ca_bundle_sha256 },
-      ]
-      secrets = [
+        ], var.matrix_mas_cutover_complete ? [
+        { name = "SYNAPSE_MAS_CUTOVER_COMPLETE", value = "true" },
+        { name = "SYNAPSE_CLOUDMAP_NAMESPACE", value = local.cloudmap_namespace },
+      ] : [])
+      secrets = concat([
         {
           name      = "SYNAPSE_DB_PASSWORD"
           valueFrom = "${aws_db_instance.matrix_synapse[0].master_user_secret[0].secret_arn}:password::"
@@ -301,7 +318,10 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
           name      = "SYNAPSE_FORM_SECRET"
           valueFrom = aws_secretsmanager_secret.matrix_form_secret.arn
         },
-      ]
+        ], var.matrix_mas_cutover_complete ? [{
+          name      = "SYNAPSE_MAS_SHARED_SECRET"
+          valueFrom = aws_secretsmanager_secret.matrix_mas_synapse_shared_secret.arn
+      }] : [])
       mountPoints = [{
         sourceVolume  = "synapse-data"
         containerPath = "/data"
@@ -330,6 +350,10 @@ resource "aws_ecs_task_definition" "matrix_synapse" {
       condition     = var.public_matrix_domain_name == "synapse.zenith-research.ca"
       error_message = "Production Matrix requires public_matrix_domain_name to be synapse.zenith-research.ca."
     }
+    precondition {
+      condition     = !var.matrix_mas_cutover_complete || (var.enable_matrix_mas && var.start_matrix_mas_service)
+      error_message = "matrix_mas_cutover_complete requires a completed syn2mas migration and a started MAS service."
+    }
   }
 
   tags = local.tags
@@ -351,6 +375,7 @@ resource "aws_ecs_service" "matrix_synapse" {
     security_groups  = [aws_security_group.matrix.id]
     assign_public_ip = false
   }
+
 
   load_balancer {
     target_group_arn = aws_lb_target_group.matrix_client[0].arn

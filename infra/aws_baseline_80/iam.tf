@@ -36,6 +36,7 @@ data "aws_iam_policy_document" "execution_secrets" {
         aws_secretsmanager_secret.matrix_registration_shared_secret.arn,
         aws_secretsmanager_secret.matrix_form_secret.arn,
       ] : [],
+      var.matrix_mas_cutover_complete ? [aws_secretsmanager_secret.matrix_mas_synapse_shared_secret.arn] : [],
       var.elevenlabs_api_key_secret_arn != "" ? [var.elevenlabs_api_key_secret_arn] : []
     )
   }

@@ -43,11 +43,22 @@ resource "aws_security_group" "alb" {
   }
 
   egress {
-    description = "alb_to_gateway_http"
+    description = "alb_to_gateway_and_mas_http"
     from_port   = 8080
     to_port     = 8080
     protocol    = "tcp"
     cidr_blocks = aws_subnet.private[*].cidr_block
+  }
+
+  dynamic "egress" {
+    for_each = var.enable_matrix_mas_public_edge ? [1] : []
+    content {
+      description = "alb_to_mas_health"
+      from_port   = 8081
+      to_port     = 8081
+      protocol    = "tcp"
+      cidr_blocks = aws_subnet.private[*].cidr_block
+    }
   }
 
   tags = merge(local.tags, { Name = "${local.name_prefix}-alb-sg" })
