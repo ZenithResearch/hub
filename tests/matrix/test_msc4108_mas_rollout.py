@@ -98,6 +98,7 @@ def test_gateway_matrix_environment_has_a_separate_inactive_gate():
 
 def test_reviewed_migration_task_mounts_synapse_state_read_only():
     runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
+    synapse = read("infra/aws_baseline_80/matrix_synapse_runtime.tf")
     wrapper = read("infra/matrix/mas/entrypoint.sh")
 
     assert 'resource "aws_ecs_task_definition" "matrix_mas_migration"' in runtime
@@ -108,6 +109,8 @@ def test_reviewed_migration_task_mounts_synapse_state_read_only():
     assert 'if [ "$#" -gt 0 ]' in wrapper
     assert 'resource "aws_security_group_rule" "matrix_mas_to_synapse_efs"' in runtime
     assert 'type                     = "egress"' in runtime
+    assert "Postgres access for reviewed syn2mas migration task" in synapse
+    assert "for_each = var.enable_matrix_mas_migration_task ? [1] : []" in synapse
 
 
 def test_cutover_opens_only_bidirectional_synapse_to_mas_transport():
@@ -210,6 +213,9 @@ def test_plan_guard_enforces_exact_phase_and_action_boundaries(tmp_path):
     ).returncode == 0
     assert run_plan_guard(
         tmp_path, "migration", "aws_ecs_task_definition.matrix_mas_migration[0]", ["create"]
+    ).returncode == 0
+    assert run_plan_guard(
+        tmp_path, "migration", "aws_security_group.matrix_synapse_postgres[0]", ["update"]
     ).returncode == 0
 
 
