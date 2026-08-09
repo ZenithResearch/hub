@@ -7,58 +7,79 @@ resource "aws_security_group" "matrix_mas" {
   name        = "${local.name_prefix}-matrix-mas-sg"
   description = "Private Matrix Authentication Service ingress"
   vpc_id      = aws_vpc.this.id
+  tags        = merge(local.tags, { Name = "${local.name_prefix}-matrix-mas-sg" })
+}
 
-  ingress {
-    description     = "mas_web_from_alb"
-    from_port       = 8080
-    to_port         = 8080
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
+resource "aws_security_group_rule" "matrix_mas_web_from_alb" {
+  count = var.enable_matrix_mas ? 1 : 0
 
-  ingress {
-    description     = "mas_health_from_alb"
-    from_port       = 8081
-    to_port         = 8081
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
+  type                     = "ingress"
+  description              = "MAS web from ALB"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.alb.id
+  security_group_id        = aws_security_group.matrix_mas[0].id
+}
 
+resource "aws_security_group_rule" "matrix_mas_health_from_alb" {
+  count = var.enable_matrix_mas ? 1 : 0
 
-  egress {
-    description = "https_control_plane"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  type                     = "ingress"
+  description              = "MAS health from ALB"
+  from_port                = 8081
+  to_port                  = 8081
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.alb.id
+  security_group_id        = aws_security_group.matrix_mas[0].id
+}
 
-  egress {
-    description = "private_postgres"
-    from_port   = 5432
-    to_port     = 5432
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
+resource "aws_security_group_rule" "matrix_mas_https_control_plane" {
+  count = var.enable_matrix_mas ? 1 : 0
 
+  type              = "egress"
+  description       = "HTTPS control plane"
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.matrix_mas[0].id
+}
 
-  egress {
-    description = "vpc_dns_udp"
-    from_port   = 53
-    to_port     = 53
-    protocol    = "udp"
-    cidr_blocks = [var.vpc_cidr]
-  }
+resource "aws_security_group_rule" "matrix_mas_private_postgres" {
+  count = var.enable_matrix_mas ? 1 : 0
 
-  egress {
-    description = "vpc_dns_tcp"
-    from_port   = 53
-    to_port     = 53
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
+  type              = "egress"
+  description       = "Private PostgreSQL"
+  from_port         = 5432
+  to_port           = 5432
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.matrix_mas[0].id
+}
 
-  tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-mas-sg" })
+resource "aws_security_group_rule" "matrix_mas_dns_udp" {
+  count = var.enable_matrix_mas ? 1 : 0
+
+  type              = "egress"
+  description       = "VPC DNS UDP"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "udp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.matrix_mas[0].id
+}
+
+resource "aws_security_group_rule" "matrix_mas_dns_tcp" {
+  count = var.enable_matrix_mas ? 1 : 0
+
+  type              = "egress"
+  description       = "VPC DNS TCP"
+  from_port         = 53
+  to_port           = 53
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.matrix_mas[0].id
 }
 
 resource "aws_security_group_rule" "matrix_mas_from_synapse" {
@@ -71,18 +92,6 @@ resource "aws_security_group_rule" "matrix_mas_from_synapse" {
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.matrix.id
   security_group_id        = aws_security_group.matrix_mas[0].id
-}
-
-resource "aws_security_group_rule" "matrix_synapse_to_mas" {
-  count = var.matrix_mas_cutover_complete ? 1 : 0
-
-  type                     = "egress"
-  description              = "Synapse delegated authentication to MAS"
-  from_port                = 8080
-  to_port                  = 8080
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.matrix_mas[0].id
-  security_group_id        = aws_security_group.matrix.id
 }
 
 
@@ -340,18 +349,6 @@ resource "aws_ecs_service" "matrix_mas" {
 
   depends_on = [aws_lb_listener_rule.matrix_mas_auth_host]
   tags       = local.tags
-}
-
-resource "aws_security_group_rule" "matrix_synapse_efs_from_mas_migration" {
-  count = var.enable_matrix_mas_migration_task ? 1 : 0
-
-  type                     = "ingress"
-  description              = "Read-only Synapse EFS access for reviewed syn2mas migration task"
-  from_port                = 2049
-  to_port                  = 2049
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.matrix_mas[0].id
-  security_group_id        = aws_security_group.matrix_synapse_efs[0].id
 }
 
 resource "aws_security_group_rule" "matrix_mas_to_synapse_efs" {

@@ -196,6 +196,17 @@ resource "aws_security_group" "matrix" {
     cidr_blocks = [var.vpc_cidr]
   }
 
+  dynamic "egress" {
+    for_each = var.matrix_mas_cutover_complete ? [1] : []
+    content {
+      description     = "Synapse delegated authentication to MAS"
+      from_port       = 8080
+      to_port         = 8080
+      protocol        = "tcp"
+      security_groups = [aws_security_group.matrix_mas[0].id]
+    }
+  }
+
   tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-sg" })
 }
 
