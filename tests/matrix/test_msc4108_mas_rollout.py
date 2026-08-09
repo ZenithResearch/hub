@@ -55,6 +55,8 @@ def test_mas_uses_digest_pinned_image_and_file_backed_secrets():
         "exec /usr/local/bin/mas-cli --config",
     ]:
         assert marker in wrapper
+    assert "printf '%s' \"$MATRIX_MAS_SIGNING_KEY\"" in wrapper
+    assert "printf '%s\\n' \"$MATRIX_MAS_SIGNING_KEY\"" not in wrapper
 
 
 def test_mas_image_gate_rejects_every_high_or_critical_vulnerability():

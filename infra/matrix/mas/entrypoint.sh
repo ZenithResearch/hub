@@ -39,7 +39,7 @@ mkdir -p "$run_dir"
 printf '%s' "$MATRIX_MAS_DB_PASSWORD" > "$run_dir/database-password"
 printf '%s' "$MATRIX_MAS_SYNAPSE_SHARED_SECRET" > "$run_dir/synapse-shared-secret"
 printf '%s' "$MATRIX_MAS_ENCRYPTION_SECRET" > "$run_dir/encryption-secret"
-printf '%s\n' "$MATRIX_MAS_SIGNING_KEY" > "$run_dir/signing-key.pem"
+printf '%s' "$MATRIX_MAS_SIGNING_KEY" > "$run_dir/signing-key.pem"
 chmod 600 "$run_dir"/*
 
 cat > "$run_dir/config.yaml" <<EOF
