@@ -61,6 +61,30 @@ resource "aws_security_group" "matrix_mas" {
   tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-mas-sg" })
 }
 
+resource "aws_security_group_rule" "matrix_mas_from_synapse" {
+  count = var.matrix_mas_cutover_complete ? 1 : 0
+
+  type                     = "ingress"
+  description              = "Synapse delegated authentication to MAS"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.matrix.id
+  security_group_id        = aws_security_group.matrix_mas[0].id
+}
+
+resource "aws_security_group_rule" "matrix_synapse_to_mas" {
+  count = var.matrix_mas_cutover_complete ? 1 : 0
+
+  type                     = "egress"
+  description              = "Synapse delegated authentication to MAS"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.matrix_mas[0].id
+  security_group_id        = aws_security_group.matrix.id
+}
+
 
 resource "aws_security_group" "matrix_mas_postgres" {
   count = var.enable_matrix_mas ? 1 : 0
@@ -328,6 +352,18 @@ resource "aws_security_group_rule" "matrix_synapse_efs_from_mas_migration" {
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.matrix_mas[0].id
   security_group_id        = aws_security_group.matrix_synapse_efs[0].id
+}
+
+resource "aws_security_group_rule" "matrix_mas_to_synapse_efs" {
+  count = var.enable_matrix_mas_migration_task ? 1 : 0
+
+  type                     = "egress"
+  description              = "Reviewed syn2mas migration task to Synapse EFS"
+  from_port                = 2049
+  to_port                  = 2049
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.matrix_synapse_efs[0].id
+  security_group_id        = aws_security_group.matrix_mas[0].id
 }
 
 resource "aws_ecs_task_definition" "matrix_mas_migration" {

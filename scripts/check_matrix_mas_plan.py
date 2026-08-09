@@ -50,6 +50,7 @@ PHASE_RULES = {
     },
     "migration": {
         "aws_ecs_task_definition.matrix_mas_migration[0]": {CREATE},
+        "aws_security_group_rule.matrix_mas_to_synapse_efs[0]": {CREATE},
         "aws_security_group_rule.matrix_synapse_efs_from_mas_migration[0]": {CREATE},
     },
     "cutover": {
@@ -58,6 +59,8 @@ PHASE_RULES = {
         "aws_ecs_task_definition.matrix_synapse[0]": {CREATE, REPLACE},
         "aws_iam_role_policy.execution_secrets": {UPDATE},
         "aws_lb_listener_rule.matrix_mas_compat[0]": {CREATE, UPDATE},
+        "aws_security_group_rule.matrix_mas_from_synapse[0]": {CREATE},
+        "aws_security_group_rule.matrix_synapse_to_mas[0]": {CREATE},
     },
 }
 

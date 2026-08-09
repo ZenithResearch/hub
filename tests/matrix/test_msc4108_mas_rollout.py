@@ -106,6 +106,17 @@ def test_reviewed_migration_task_mounts_synapse_state_read_only():
     assert 'transit_encryption = "ENABLED"' in runtime
     assert "syn2mas check" in runtime
     assert 'if [ "$#" -gt 0 ]' in wrapper
+    assert 'resource "aws_security_group_rule" "matrix_mas_to_synapse_efs"' in runtime
+    assert 'type                     = "egress"' in runtime
+
+
+def test_cutover_opens_only_bidirectional_synapse_to_mas_transport():
+    runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
+
+    assert 'resource "aws_security_group_rule" "matrix_mas_from_synapse"' in runtime
+    assert 'resource "aws_security_group_rule" "matrix_synapse_to_mas"' in runtime
+    assert runtime.count("count = var.matrix_mas_cutover_complete ? 1 : 0") >= 2
+    assert 'description              = "Synapse delegated authentication to MAS"' in runtime
 
 
 def test_phase_one_plan_guard_rejects_live_synapse_changes(tmp_path):
