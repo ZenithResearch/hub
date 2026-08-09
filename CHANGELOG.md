@@ -85,6 +85,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Preserved the signing-key secret bytes exactly when materializing the runtime PEM — avoids appending a second trailing newline to Secrets Manager values, which MAS rejects as an unsupported multi-document key format.
 - Added migration-only Synapse PostgreSQL ingress from the MAS task security group — allows `syn2mas check` and migration rehearsals to reach the existing Synapse database without broadening steady-state access.
 - Allowed only the required MAS task-definition replacement during the cutover phase — lets MAS transition from read-only migration mode to authoritative Synapse mode without weakening database or out-of-phase destruction guards.
 - Unified MAS security-group rule ownership — MAS rules are standalone while existing Synapse/EFS groups retain conditional inline rules, preventing AWS provider refresh churn from deleting cutover or migration network paths.
