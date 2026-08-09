@@ -22,6 +22,7 @@ This runbook introduces Matrix Authentication Service (MAS) so Hypha can use MSC
 5. Populate the MAS shared secret, 64-character hex encryption secret, and stable RSA signing key through the approved operator secret channel.
 6. Publish the ACM DNS validation records at the external DNS provider and wait for `ISSUED`.
 7. Plan `enable_matrix_mas_public_edge=true` to attach the issued certificate, auth-host rule, and desired-zero ECS service. Reject unrelated changes.
+8. If `matrix_hosted_zone_id` is empty, the domain uses an external DNS provider: after the public-edge apply, publish `auth.zenith-research.ca` as a CNAME to the Terraform `matrix_alb_dns_name`/ALB DNS name. Do not point it at the ALB before the auth-host listener rule exists. Verify the authoritative answer before starting MAS.
 
 ## Phase 2: migration rehearsal
 

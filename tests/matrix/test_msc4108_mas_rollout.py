@@ -235,6 +235,9 @@ def test_mas_production_inputs_outputs_and_operator_runbook_are_present():
     assert "matrix_mas_cutover_complete = false" in example
     assert 'output "matrix_mas_service_name"' in outputs
     assert 'output "matrix_mas_postgres_endpoint"' in outputs
+    assert "external DNS provider" in runbook
+    assert "auth.zenith-research.ca" in runbook
+    assert "ALB DNS name" in runbook
     for marker in [
         "syn2mas",
         '"--dry-run"',

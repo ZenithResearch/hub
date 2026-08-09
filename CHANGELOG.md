@@ -85,7 +85,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
-- Closed final MAS rollout review blockers — exact phase/action plan policies now reject state destruction, phase one cannot publish the auth hostname, migration overrides match the wrapper contract, and the exact ECR digest receives the zero-HIGH/CRITICAL scan.
+- Closed final MAS rollout review blockers — exact phase/action plan policies now reject state destruction, phase one cannot publish the auth hostname, migration overrides match the wrapper contract, external DNS publication is explicit, and the exact ECR digest receives the zero-HIGH/CRITICAL scan.
 - Made the pinned RDS CA bundle world-readable in the non-root MAS image — allows the runtime preflight and PostgreSQL `verify-full` connection to use it without relaxing process identity.
 - Added a digest-pinned BusyBox shell/tool layer to the distroless MAS image — lets the secret-safe runtime wrapper execute without expanding to an unpinned general-purpose base image.
 - Decoupled gateway Matrix environment injection from Synapse/MAS provisioning — prevents inactive authentication infrastructure plans from rolling the live gateway.
