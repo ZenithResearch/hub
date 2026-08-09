@@ -11,8 +11,9 @@ def read(path: str) -> str:
 def test_gateway_production_task_uses_public_matrix_homeserver_and_identity():
     ecs = read("infra/aws_baseline_80/ecs.tf")
 
-    assert '{ name = "MATRIX_HOMESERVER_URL", value = var.enable_matrix_synapse ? "https://${var.public_matrix_domain_name}" : "" }' in ecs
-    assert '{ name = "MATRIX_GATEWAY_BOT_USER_ID", value = var.enable_matrix_synapse ? "@gateway-bot:${var.public_matrix_domain_name}" : "" }' in ecs
+    assert "var.enable_matrix_gateway_integration ? [" in ecs
+    assert '{ name = "MATRIX_HOMESERVER_URL", value = "https://${var.public_matrix_domain_name}" }' in ecs
+    assert '{ name = "MATRIX_GATEWAY_BOT_USER_ID", value = "@gateway-bot:${var.public_matrix_domain_name}" }' in ecs
 
 
 def test_enabled_synapse_fails_closed_on_wrong_or_missing_public_identity():

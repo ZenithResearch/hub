@@ -537,6 +537,12 @@ variable "enable_matrix_synapse" {
   default     = false
 }
 
+variable "enable_matrix_gateway_integration" {
+  description = "Inject Matrix gateway bot settings independently from Synapse and MAS infrastructure rollout."
+  type        = bool
+  default     = false
+}
+
 variable "matrix_synapse_image" {
   description = "Digest-pinned Synapse container image used by the production ECS target."
   type        = string

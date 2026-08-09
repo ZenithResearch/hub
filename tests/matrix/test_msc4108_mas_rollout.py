@@ -83,6 +83,14 @@ def test_mas_and_synapse_cutover_are_separate_reviewed_gates():
     assert "service_registries" not in synapse
 
 
+def test_gateway_matrix_environment_has_a_separate_inactive_gate():
+    ecs = read("infra/aws_baseline_80/ecs.tf")
+    variables = read("infra/aws_baseline_80/variables.tf")
+
+    assert 'variable "enable_matrix_gateway_integration"' in variables
+    assert "var.enable_matrix_gateway_integration ? [" in ecs
+
+
 def test_reviewed_migration_task_mounts_synapse_state_read_only():
     runtime = read("infra/aws_baseline_80/matrix_mas_runtime.tf")
     wrapper = read("infra/matrix/mas/entrypoint.sh")

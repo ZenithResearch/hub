@@ -43,7 +43,7 @@ resource "aws_security_group" "alb" {
   }
 
   egress {
-    description = "alb_to_gateway_and_mas_http"
+    description = "alb_to_gateway_http"
     from_port   = 8080
     to_port     = 8080
     protocol    = "tcp"
