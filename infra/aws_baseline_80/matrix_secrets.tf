@@ -55,6 +55,24 @@ resource "aws_secretsmanager_secret_version" "matrix_form_secret" {
   secret_string = var.matrix_form_secret
 }
 
+resource "aws_secretsmanager_secret" "matrix_mas_synapse_shared_secret" {
+  name        = "${local.name_prefix}/matrix/mas_synapse_shared_secret"
+  description = "Shared secret authenticating Synapse and Matrix Authentication Service"
+  tags        = local.tags
+}
+
+resource "aws_secretsmanager_secret" "matrix_mas_encryption_secret" {
+  name        = "${local.name_prefix}/matrix/mas_encryption_secret"
+  description = "Immutable 32-byte hex-encoded MAS field and cookie encryption key"
+  tags        = local.tags
+}
+
+resource "aws_secretsmanager_secret" "matrix_mas_signing_key" {
+  name        = "${local.name_prefix}/matrix/mas_signing_key"
+  description = "Stable RSA private signing key for MAS OAuth and OIDC tokens"
+  tags        = local.tags
+}
+
 resource "aws_secretsmanager_secret" "matrix_appservice_as_token" {
   name        = "${local.name_prefix}/matrix/appservice_as_token"
   description = "Synapse appservice as_token for Hub Matrix appservice"

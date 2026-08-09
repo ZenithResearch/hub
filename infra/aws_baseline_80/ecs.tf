@@ -60,7 +60,7 @@ resource "aws_ecs_task_definition" "gateway" {
       portMappings = [
         { containerPort = 8080, protocol = "tcp" }
       ]
-      environment = [
+      environment = concat([
         { name = "LOG_LEVEL", value = "info" },
         { name = "HTTP_PORT", value = "8080" },
         { name = "RUNTIME_GRPC_TARGET", value = local.runtime_target },
@@ -78,12 +78,13 @@ resource "aws_ecs_task_definition" "gateway" {
         { name = "CASES_HTTP_URL", value = "http://${local.cases_http_target}" },
         { name = "EVENTBUS_URL", value = "http://${local.eventbus_target}" },
         { name = "HUBFS_ALLOWED_ROOTS", value = "/data:/app/base/ops/processes" },
-        { name = "MATRIX_HOMESERVER_URL", value = var.enable_matrix_synapse ? "https://${var.public_matrix_domain_name}" : "" },
-        { name = "MATRIX_GATEWAY_BOT_USER_ID", value = var.enable_matrix_synapse ? "@gateway-bot:${var.public_matrix_domain_name}" : "" },
         { name = "CORS_ALLOW_ORIGINS", value = var.cors_allow_origins },
         { name = "MAX_BODY_BYTES", value = tostring(var.max_body_bytes) },
         { name = "GATEWAY_GRPC_TIMEOUT_S", value = "5.0" }
-      ]
+        ], var.enable_matrix_gateway_integration ? [
+        { name = "MATRIX_HOMESERVER_URL", value = "https://${var.public_matrix_domain_name}" },
+        { name = "MATRIX_GATEWAY_BOT_USER_ID", value = "@gateway-bot:${var.public_matrix_domain_name}" },
+      ] : [])
       secrets = concat(
         var.enable_clients_postgres ? [
           {

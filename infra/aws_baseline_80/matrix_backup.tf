@@ -71,5 +71,8 @@ resource "aws_backup_selection" "matrix" {
       aws_db_instance.matrix_synapse[0].arn,
       aws_efs_file_system.matrix_synapse[0].arn,
     ] : [],
+    var.enable_matrix_mas ? [
+      aws_db_instance.matrix_mas[0].arn,
+    ] : [],
   )
 }

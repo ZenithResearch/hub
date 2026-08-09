@@ -39,6 +39,71 @@ resource "aws_acm_certificate_validation" "matrix" {
   validation_record_fqdns = [for record in aws_route53_record.matrix_cert_validation : record.fqdn]
 }
 
+resource "aws_acm_certificate" "matrix_mas" {
+  count = var.enable_matrix_mas ? 1 : 0
+
+  domain_name       = var.public_matrix_auth_domain_name
+  validation_method = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = merge(local.tags, { Name = "${local.name_prefix}-matrix-mas-cert" })
+}
+
+resource "aws_route53_record" "matrix_mas_cert_validation" {
+  for_each = var.enable_matrix_mas && var.matrix_hosted_zone_id != "" ? {
+    for dvo in aws_acm_certificate.matrix_mas[0].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  } : {}
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = var.matrix_hosted_zone_id
+}
+
+resource "aws_acm_certificate_validation" "matrix_mas" {
+  count = var.enable_matrix_mas && var.matrix_hosted_zone_id != "" ? 1 : 0
+
+  certificate_arn         = aws_acm_certificate.matrix_mas[0].arn
+  validation_record_fqdns = [for record in aws_route53_record.matrix_mas_cert_validation : record.fqdn]
+}
+
+resource "aws_route53_record" "matrix_mas" {
+  count = var.enable_matrix_mas_public_edge && var.matrix_hosted_zone_id != "" ? 1 : 0
+
+  name    = var.public_matrix_auth_domain_name
+  type    = "A"
+  zone_id = var.matrix_hosted_zone_id
+
+  alias {
+    evaluate_target_health = true
+    name                   = aws_lb.gateway.dns_name
+    zone_id                = aws_lb.gateway.zone_id
+  }
+}
+
+resource "aws_route53_record" "matrix_mas_ipv6" {
+  count = var.enable_matrix_mas_public_edge && var.matrix_hosted_zone_id != "" && var.enable_dual_stack_public_edge ? 1 : 0
+
+  name    = var.public_matrix_auth_domain_name
+  type    = "AAAA"
+  zone_id = var.matrix_hosted_zone_id
+
+  alias {
+    evaluate_target_health = true
+    name                   = aws_lb.gateway.dns_name
+    zone_id                = aws_lb.gateway.zone_id
+  }
+}
+
 resource "aws_route53_record" "matrix_client" {
   count = var.matrix_hosted_zone_id != "" && var.public_matrix_domain_name != "" ? 1 : 0
 
@@ -79,6 +144,7 @@ resource "aws_security_group" "matrix" {
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
+
 
 
   egress {
@@ -172,6 +238,59 @@ resource "aws_lb_listener_rule" "matrix_https_host" {
   condition {
     host_header {
       values = [var.public_matrix_domain_name]
+    }
+  }
+}
+
+resource "aws_lb_listener_certificate" "matrix_mas_https" {
+  count = var.enable_matrix_mas_public_edge && var.public_hub_domain_name != "" && var.enable_https_listener ? 1 : 0
+
+  listener_arn    = aws_lb_listener.https[0].arn
+  certificate_arn = var.matrix_hosted_zone_id != "" ? aws_acm_certificate_validation.matrix_mas[0].certificate_arn : aws_acm_certificate.matrix_mas[0].arn
+}
+
+resource "aws_lb_listener_rule" "matrix_mas_auth_host" {
+  count = var.enable_matrix_mas_public_edge && var.public_hub_domain_name != "" && var.enable_https_listener ? 1 : 0
+
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = var.matrix_mas_auth_listener_rule_priority
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.matrix_mas[0].arn
+  }
+
+  condition {
+    host_header {
+      values = [var.public_matrix_auth_domain_name]
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "matrix_mas_compat" {
+  count = var.matrix_mas_cutover_complete && var.enable_matrix_mas_public_edge && var.enable_https_listener ? 1 : 0
+
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = var.matrix_mas_compat_listener_rule_priority
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.matrix_mas[0].arn
+  }
+
+  condition {
+    host_header {
+      values = [var.public_matrix_domain_name]
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = [
+        "/_matrix/client/*/login*",
+        "/_matrix/client/*/logout*",
+        "/_matrix/client/*/refresh",
+      ]
     }
   }
 }

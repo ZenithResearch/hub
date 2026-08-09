@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added a fail-closed Matrix Authentication Service rollout contract — enables MSC4108 QR login without silently breaking existing users, sessions, devices, tokens, or E2EE state during the required `syn2mas` migration.
 - Documented the digest-pinned Synapse landing rollout and issue boundary — keeps publication, Synapse-only deployment, API/federation smoke, browser QA, and rollback evidence explicit without claiming deployment.
 - Added dynamic Synapse static-path installation and image-byte verification — avoids Python site-packages assumptions and proves the hardened image contains the reviewed landing-page bytes.
 - Added the self-contained Zenith Synapse landing page and source contract tests — gives visitors a sparse, accessible route to ZenithOS without adding scripts, tracking, remote assets, or authority claims.
@@ -84,6 +85,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Added cutover-only bidirectional Synapse-to-MAS TCP/8080 rules and migration-only MAS-to-EFS TCP/2049 egress — delegated authentication and `syn2mas` can reach their private targets without broadening inactive-phase access.
+- Closed final MAS rollout review blockers — exact phase/action plan policies now reject state destruction, phase one cannot publish the auth hostname, migration overrides match the wrapper contract, external DNS publication is explicit, and the exact ECR digest receives the zero-HIGH/CRITICAL scan.
+- Made the pinned RDS CA bundle world-readable in the non-root MAS image — allows the runtime preflight and PostgreSQL `verify-full` connection to use it without relaxing process identity.
+- Added a digest-pinned BusyBox shell/tool layer to the distroless MAS image — lets the secret-safe runtime wrapper execute without expanding to an unpinned general-purpose base image.
+- Decoupled gateway Matrix environment injection from Synapse/MAS provisioning — prevents inactive authentication infrastructure plans from rolling the live gateway.
 - Made the Docker-backed `make test` smoke use writable temporary review/client paths — keeps the import check reproducible when the image runs as the non-root app user and the copied `data/` tree is not writable.
 - Added collectswirls origins to the Gateway CORS example — keeps SWRL Review SDK browser sessions from being blocked at preflight while the Hub Review Auth DB policy remains authoritative.
 - Added regression coverage for Gallery review-access regeneration with compatibility deployment metadata — ensures renewing an existing project-scoped Gallery access code keeps the canonical apex, www, and local authentication model working without leaking raw secrets.

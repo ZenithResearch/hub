@@ -147,3 +147,25 @@ resource "aws_service_discovery_service" "llama_server" {
 
   tags = local.tags
 }
+
+
+resource "aws_service_discovery_service" "matrix_mas" {
+  count = var.enable_matrix_mas ? 1 : 0
+  name  = "matrix-mas"
+
+  dns_config {
+    namespace_id   = aws_service_discovery_private_dns_namespace.this.id
+    routing_policy = "MULTIVALUE"
+
+    dns_records {
+      type = "A"
+      ttl  = 10
+    }
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+
+  tags = local.tags
+}

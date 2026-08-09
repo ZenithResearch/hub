@@ -537,6 +537,12 @@ variable "enable_matrix_synapse" {
   default     = false
 }
 
+variable "enable_matrix_gateway_integration" {
+  description = "Inject Matrix gateway bot settings independently from Synapse and MAS infrastructure rollout."
+  type        = bool
+  default     = false
+}
+
 variable "matrix_synapse_image" {
   description = "Digest-pinned Synapse container image used by the production ECS target."
   type        = string
@@ -553,6 +559,120 @@ variable "start_matrix_synapse_service" {
   description = "Start the Synapse ECS task after infrastructure and secret versions are ready. Independent from existing service desired counts."
   type        = bool
   default     = false
+}
+
+variable "enable_matrix_mas" {
+  description = "Provision Matrix Authentication Service infrastructure without changing active Synapse authentication."
+  type        = bool
+  default     = false
+}
+
+variable "enable_matrix_mas_public_edge" {
+  description = "Attach the issued MAS certificate, auth-host rule, and inactive ECS service only after external DNS validation completes."
+  type        = bool
+  default     = false
+}
+
+variable "start_matrix_mas_service" {
+  description = "Start MAS only after its database, secret versions, image, backup, and routing prerequisites are ready."
+  type        = bool
+  default     = false
+}
+
+variable "enable_matrix_mas_migration_task" {
+  description = "Register the reviewed syn2mas migration task only after the hardened account-local MAS image and secret versions are ready."
+  type        = bool
+  default     = false
+}
+
+variable "matrix_mas_cutover_complete" {
+  description = "Enable Synapse delegated authentication and compatibility routing only after stopped-Synapse syn2mas migration succeeds."
+  type        = bool
+  default     = false
+}
+
+variable "matrix_mas_image" {
+  description = "Digest-pinned MAS image. Production startup additionally requires an account-local reviewed ECR mirror."
+  type        = string
+  default     = "ghcr.io/element-hq/matrix-authentication-service@sha256:8cb319ec41706adc1ed8b5b63e1de2f067073cc33a304686226f658f5e83c8b3"
+}
+
+variable "matrix_mas_desired_count" {
+  description = "Initial MAS task count after explicit startup."
+  type        = number
+  default     = 1
+}
+
+variable "matrix_mas_task_cpu" {
+  description = "Fargate CPU units for MAS."
+  type        = number
+  default     = 512
+}
+
+variable "matrix_mas_task_memory" {
+  description = "Fargate memory in MiB for MAS."
+  type        = number
+  default     = 1024
+}
+
+variable "matrix_mas_postgres_instance_class" {
+  description = "RDS instance class for the dedicated MAS PostgreSQL database."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "matrix_mas_postgres_engine_version" {
+  description = "PostgreSQL engine version for MAS."
+  type        = string
+  default     = "16.13"
+}
+
+variable "matrix_mas_postgres_multi_az" {
+  description = "Run MAS PostgreSQL in Multi-AZ mode."
+  type        = bool
+  default     = true
+}
+
+variable "matrix_mas_postgres_allocated_storage_gb" {
+  description = "Initial allocated storage in GiB for MAS PostgreSQL."
+  type        = number
+  default     = 20
+}
+
+variable "matrix_mas_postgres_max_allocated_storage_gb" {
+  description = "Maximum autoscaled storage in GiB for MAS PostgreSQL."
+  type        = number
+  default     = 100
+}
+
+variable "matrix_mas_backup_retention_days" {
+  description = "Automated RDS backup retention for MAS."
+  type        = number
+  default     = 7
+}
+
+variable "matrix_mas_deletion_protection" {
+  description = "Protect the production MAS RDS instance from deletion."
+  type        = bool
+  default     = true
+}
+
+variable "public_matrix_auth_domain_name" {
+  description = "Dedicated public OAuth/OIDC and human-authorization host for MAS."
+  type        = string
+  default     = "auth.zenith-research.ca"
+}
+
+variable "matrix_mas_auth_listener_rule_priority" {
+  description = "ALB listener priority for the dedicated MAS auth host."
+  type        = number
+  default     = 105
+}
+
+variable "matrix_mas_compat_listener_rule_priority" {
+  description = "ALB listener priority for Matrix legacy login/logout/refresh compatibility routes."
+  type        = number
+  default     = 106
 }
 
 variable "matrix_synapse_task_cpu" {
