@@ -89,6 +89,7 @@ def test_data_volume_is_encrypted_disposable_and_mounted_by_nitro_id_and_uuid():
     user_data = read("infra/matrix/aws/user_data.sh.tpl")
 
     assert 'permissions_boundary = "arn:aws:iam::610992396917:policy/HyphaSynapseInstanceBoundary"' in main
+    assert "ignore_changes = [user_data]" in main
     assert "dnf install -y awscli docker jq xfsprogs" in user_data
     assert "dnf install -y awscli curl" not in user_data
 
@@ -105,6 +106,10 @@ def test_data_volume_is_encrypted_disposable_and_mounted_by_nitro_id_and_uuid():
     assert 'FILESYSTEM_TYPE="xfs"' in user_data
     assert 'FILESYSTEM_LABEL="hypha-matrix"' in user_data
     assert 'grep -Fq "UUID=$DATA_UUID " /etc/fstab' in user_data
+    assert "nofail" not in user_data
+    assert "RequiresMountsFor=/opt/matrix-data" in user_data
+    assert 'mountpoint -q "$DATA_MOUNT" || { echo "Matrix data volume is not mounted"' in user_data
+    assert "/etc/systemd/system/docker.service.d/matrix-data.conf" in user_data
     assert "findmnt" in user_data
     assert 'blkid -s UUID -o value' in user_data
     assert 'UUID=$DATA_UUID' in user_data

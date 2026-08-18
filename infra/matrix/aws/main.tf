@@ -181,6 +181,13 @@ resource "aws_instance" "matrix" {
     caddy_image             = var.caddy_image
   })
 
+  # User data is first-boot input. Automatic replacement is unsafe while the
+  # persistent Matrix EBS block is inline and delete-on-termination. Reconcile
+  # later boot-policy changes through SSM and controlled-reboot acceptance.
+  lifecycle {
+    ignore_changes = [user_data]
+  }
+
   metadata_options {
     http_endpoint = "enabled"
     http_tokens   = "required"

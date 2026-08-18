@@ -48,14 +48,21 @@ fi
 DATA_UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
 mkdir -p "$DATA_MOUNT"
 grep -Fq "UUID=$DATA_UUID " /etc/fstab || \
-  echo "UUID=$DATA_UUID $DATA_MOUNT xfs defaults,nofail,nodev,nosuid 0 2" >> /etc/fstab
+  echo "UUID=$DATA_UUID $DATA_MOUNT xfs defaults,nodev,nosuid 0 2" >> /etc/fstab
 mountpoint -q "$DATA_MOUNT" || mount "$DATA_MOUNT"
+mountpoint -q "$DATA_MOUNT" || { echo "Matrix data volume is not mounted" >&2; exit 1; }
 findmnt --verify --verbose >/dev/null
 
 mkdir -p "$MATRIX_DIR" "$DATA_MOUNT/postgres" "$DATA_MOUNT/synapse" "$DATA_MOUNT/caddy-data" "$DATA_MOUNT/caddy-config"
 chmod 700 "$MATRIX_DIR" "$DATA_MOUNT"
 chown 991:991 "$DATA_MOUNT/synapse"
 
+install -d -m 0755 /etc/systemd/system/docker.service.d
+cat > /etc/systemd/system/docker.service.d/matrix-data.conf <<'EOF_DOCKER_MOUNT'
+[Unit]
+RequiresMountsFor=/opt/matrix-data
+EOF_DOCKER_MOUNT
+systemctl daemon-reload
 systemctl enable --now docker
 
 COMPOSE_VERSION=2.27.0

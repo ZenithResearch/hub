@@ -65,7 +65,10 @@ Security boundaries:
   with the `hypha-fresh-synapse-data` tag, resolves that exact volume's Nitro
   by-id device, formats a blank device with the deployment-specific
   `hypha-matrix` XFS label, accepts only that exact label on a retry, and
-  persists one UUID mount entry;
+  persists one required UUID mount entry;
+- Docker has a persistent `RequiresMountsFor=/opt/matrix-data` dependency, so
+  PostgreSQL, Synapse, and Caddy cannot start against empty root-filesystem
+  directories after a data-volume mount failure;
 - Terraform creates only the Secrets Manager container. Secret values are
   fetched on the instance at runtime and never enter Terraform variables,
   state, user data, or bootstrap logs.
@@ -105,6 +108,12 @@ success it requires SSM/cloud-init readiness, the exact XFS mount, Docker,
 healthy PostgreSQL and Synapse containers, and an internal Matrix HTTP 200.
 Its final JSON contains only the instance identifier, public URL, and exact DNS
 A record.
+
+User data is first-boot input. Because the persistent data EBS block is inline
+and replacement would delete it, Terraform ignores later user-data diffs on an
+existing host. Reconcile boot-policy changes through SSM, verify the live files,
+and repeat controlled-reboot acceptance; fresh instances receive the current
+template directly.
 
 The bootstrap also creates a `$30` monthly budget and SNS-backed Free Plan
 expiry alerts at 60, 30, 14, and 7 days. Email confirmation is recommended but
