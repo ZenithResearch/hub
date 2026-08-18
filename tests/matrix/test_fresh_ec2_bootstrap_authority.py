@@ -209,7 +209,9 @@ def test_runtime_backend_uses_isolated_s3_state_and_lockfile():
     backend = read("infra/matrix/aws/backend.tf")
     example = read("infra/matrix/aws/backend.hcl.example")
 
-    assert 'required_version = ">= 1.10"' in main
+    assert 'required_version = "= 1.14.0"' in main
+    assert 'version = "= 5.100.0"' in main
+    assert 'version     = "5.100.0"' in read("infra/matrix/aws/.terraform.lock.hcl")
     assert 'backend "s3"' in backend
     assert "use_lockfile = true" in example
     assert 'profile      = "zenith-hypha-bootstrap"' in example
