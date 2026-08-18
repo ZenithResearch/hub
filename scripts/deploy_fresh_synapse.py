@@ -151,7 +151,7 @@ def deployment_profiles_installed(home: Path | None = None) -> bool:
     )
 
 
-def runtime_verification_commands() -> tuple[str, ...]:
+def runtime_verification_commands(hostname: str) -> tuple[str, ...]:
     return (
         "set -euo pipefail",
         "cloud-init status --wait",
@@ -163,7 +163,11 @@ def runtime_verification_commands() -> tuple[str, ...]:
             "for attempt in $(seq 1 120); do "
             "db_health=$(docker inspect --format='{{.State.Health.Status}}' matrix-db 2>/dev/null || true); "
             "synapse_health=$(docker inspect --format='{{.State.Health.Status}}' matrix-synapse 2>/dev/null || true); "
+            "caddy_status=$(docker inspect --format='{{.State.Status}}' matrix-caddy 2>/dev/null || true); "
+            "edge_status=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: " + hostname + "' "
+            "http://127.0.0.1/_matrix/client/versions 2>/dev/null || true); "
             "if [ \"$db_health\" = healthy ] && [ \"$synapse_health\" = healthy ] && "
+            "[ \"$caddy_status\" = running ] && { [ \"$edge_status\" = 200 ] || [ \"$edge_status\" = 308 ]; } && "
             "docker exec matrix-synapse python -c \"import urllib.request; "
             "r=urllib.request.urlopen('http://127.0.0.1:8008/_matrix/client/versions', timeout=10); "
             "assert r.status == 200\" >/dev/null 2>&1; then exit 0; fi; "
@@ -172,7 +176,7 @@ def runtime_verification_commands() -> tuple[str, ...]:
     )
 
 
-def _verify_runtime(root: Path, instance_id: str) -> None:
+def _verify_runtime(root: Path, instance_id: str, hostname: str) -> None:
     online_deadline = time.monotonic() + 600
     while time.monotonic() < online_deadline:
         raw = _run(
@@ -202,7 +206,7 @@ def _verify_runtime(root: Path, instance_id: str) -> None:
     with TemporaryDirectory(prefix="hypha-synapse-verify-") as temporary_name:
         parameter_path = Path(temporary_name) / "commands.json"
         parameter_path.write_text(
-            json.dumps({"commands": list(runtime_verification_commands())}),
+            json.dumps({"commands": list(runtime_verification_commands(hostname))}),
             encoding="utf-8",
         )
         os.chmod(parameter_path, 0o600)
@@ -428,7 +432,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_configuration(aws_dir, args.hostname, args.ami_id, args.instance_type, args.data_volume_size_gb, True)
             _plan_and_apply(aws_dir, temporary, "runtime", RUNTIME_CREATES)
         outputs = _safe_outputs(aws_dir)
-        _verify_runtime(root, outputs["instance_id"])
+        _verify_runtime(root, outputs["instance_id"], args.hostname)
     except (DeploymentError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

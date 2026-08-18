@@ -31,7 +31,7 @@ def test_launcher_is_single_command_configured_and_secret_safe():
         '"terraform", "apply"',
         '"terraform", "state", "list"',
         "if needs_base_stage(state):",
-        "runtime_verification_commands()",
+        "runtime_verification_commands(hostname)",
         '"ssm",\n                "send-command"',
         '"list-commands"',
         '"secretsmanager",\n            "describe-secret"',
@@ -118,7 +118,7 @@ def test_routine_deployment_detects_installed_bounded_profiles(tmp_path):
 
 def test_runtime_acceptance_requires_mount_containers_and_internal_synapse():
     deployer = load_deployer()
-    commands = "\n".join(deployer.runtime_verification_commands())
+    commands = "\n".join(deployer.runtime_verification_commands("synapse.zenith-research.ca"))
 
     for marker in [
         "cloud-init status --wait",
@@ -127,6 +127,11 @@ def test_runtime_acceptance_requires_mount_containers_and_internal_synapse():
         "systemctl is-active docker",
         "matrix-db",
         "matrix-synapse",
+        "matrix-caddy",
+        "caddy_status",
+        "edge_status",
+        "Host: synapse.zenith-research.ca",
+        "http://127.0.0.1/_matrix/client/versions",
         "/_matrix/client/versions",
         "for attempt in $(seq 1 120)",
         "sleep 5",
