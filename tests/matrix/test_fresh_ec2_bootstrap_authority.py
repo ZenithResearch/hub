@@ -59,6 +59,11 @@ def test_deployment_policy_is_service_bounded_and_cannot_touch_castalia_bucket()
     assert "ec2:ResourceTag/Project: hypha" in template
     assert "ec2:ResourceTag/Component: fresh-synapse" in template
     assert "ManageTaggedSynapseSecurityGroupRules" in template
+    assert "TagOnlyDuringSynapseResourceCreation" in template
+    assert "ec2:CreateAction:" in template
+    assert "aws:RequestTag/Project: hypha" in template
+    assert "aws:RequestTag/Component: fresh-synapse" in template
+    assert "ConfigureTaggedSynapseInfrastructure" in template
     assert "SsmTaggedSynapseInstance" in template
     assert "ssm:resourceTag/Project: hypha" in template
     assert "ssm:resourceTag/Component: fresh-synapse" in template
@@ -69,6 +74,10 @@ def test_deployment_policy_is_service_bounded_and_cannot_touch_castalia_bucket()
     assert "ssm:CancelCommand" not in template
     assert "ec2:TerminateInstances" not in template
     assert "ec2:StopInstances" not in template
+    assert "ec2:DeleteTags" not in template
+    assert "ec2:ModifyInstanceAttribute" not in template
+    assert "ec2:ModifyVolume" not in template
+    assert "ec2:ReplaceIamInstanceProfileAssociation" not in template
     assert "iam:DeleteRolePermissionsBoundary" not in template
     assert "arn:aws:iam::610992396917:role/hypha-fresh-synapse" in template
     assert "arn:aws:iam::610992396917:instance-profile/hypha-fresh-synapse" in template
@@ -190,7 +199,9 @@ def test_runtime_backend_uses_isolated_s3_state_and_lockfile():
 
     assert 'required_version = ">= 1.10"' in main
     assert 'backend "s3"' in backend
-    assert 'use_lockfile = true' in example
+    assert "use_lockfile = true" in example
+    assert 'profile      = "zenith-hypha-bootstrap"' in example
+    assert 'profile      = "zenith-hypha-free"' not in example
     assert 'key          = "fresh-synapse/prod/terraform.tfstate"' in example
     assert 'region       = "us-east-1"' in example
     assert "encrypt      = true" in example

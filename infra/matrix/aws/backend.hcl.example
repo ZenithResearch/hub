@@ -3,7 +3,7 @@ key          = "fresh-synapse/prod/terraform.tfstate"
 region       = "us-east-1"
 encrypt      = true
 use_lockfile = true
-profile      = "zenith-hypha-free"
+profile      = "zenith-hypha-bootstrap"
 assume_role = {
   role_arn = "arn:aws:iam::610992396917:role/HyphaSynapseDeploymentRole"
 }
