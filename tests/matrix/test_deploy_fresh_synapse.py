@@ -20,9 +20,11 @@ def test_launcher_is_single_command_configured_and_secret_safe():
     for marker in [
         'EXPECTED_PROFILE = "zenith-hypha-free"',
         'EXPECTED_DEPLOYMENT_PROFILE = "zenith-hypha-synapse"',
+        'EXPECTED_SOURCE_PROFILE = "zenith-hypha-bootstrap"',
         'EXPECTED_ACCOUNT = "610992396917"',
         'EXPECTED_REGION = "us-east-1"',
         '"bootstrap_fresh_synapse_account.py"',
+        "if not deployment_profiles_installed():",
         '"populate_fresh_synapse_secret.py"',
         '"terraform", "init"',
         '"terraform", "plan"',
@@ -31,7 +33,7 @@ def test_launcher_is_single_command_configured_and_secret_safe():
         "if needs_base_stage(state):",
         "runtime_verification_commands()",
         '"ssm",\n                "send-command"',
-        '"get-command-invocation"',
+        '"list-commands"',
         '"secretsmanager",\n            "describe-secret"',
         '"AWSCURRENT"',
         '"dns": {"type": "A"',
@@ -39,6 +41,7 @@ def test_launcher_is_single_command_configured_and_secret_safe():
         assert marker in source
     for forbidden in [
         "get-secret-value",
+        "get-command-invocation",
         "SecretString",
         "provision_fresh_synapse_admin.py",
         "@beaver:",
@@ -87,6 +90,30 @@ def test_partial_base_state_is_completed_before_runtime_activation():
     assert deployer.needs_base_stage(["aws_secretsmanager_secret.matrix"])
     assert not deployer.needs_base_stage(["aws_instance.matrix[0]"])
     assert not deployer.needs_base_stage(["aws_eip.matrix[0]"])
+
+
+def test_routine_deployment_detects_installed_bounded_profiles(tmp_path):
+    deployer = load_deployer()
+    aws = tmp_path / ".aws"
+    aws.mkdir()
+    (aws / "config").write_text(
+        "[profile zenith-hypha-synapse]\n"
+        "role_arn = arn:aws:iam::610992396917:role/HyphaSynapseDeploymentRole\n"
+        "source_profile = zenith-hypha-bootstrap\n"
+        "role_session_name = hypha-synapse-deploy\n"
+        "region = us-east-1\n",
+        encoding="utf-8",
+    )
+    (aws / "credentials").write_text(
+        "[zenith-hypha-bootstrap]\n"
+        "aws_access_key_id = local-key-id\n"
+        "aws_secret_access_key = local-secret\n",
+        encoding="utf-8",
+    )
+
+    assert deployer.deployment_profiles_installed(tmp_path)
+    (aws / "credentials").write_text("", encoding="utf-8")
+    assert not deployer.deployment_profiles_installed(tmp_path)
 
 
 def test_runtime_acceptance_requires_mount_containers_and_internal_synapse():

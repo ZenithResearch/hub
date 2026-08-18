@@ -23,6 +23,7 @@ EXPECTED_ROLE_ARN = "arn:aws:iam::610992396917:role/HyphaSynapseDeploymentRole"
 EXPECTED_SOURCE_USER = "HyphaSynapseTerraformSource"
 SOURCE_PROFILE = "zenith-hypha-bootstrap"
 DEPLOYMENT_PROFILE = "zenith-hypha-synapse"
+DEPLOYMENT_ROLE_SESSION_NAME = "hypha-synapse-deploy"
 STACK_NAME = "hypha-synapse-bootstrap"
 EXPECTED_TOPIC_ARN = "arn:aws:sns:us-east-1:610992396917:hypha-synapse-expiry-alerts"
 SAFE_OUTPUT_KEYS = frozenset(
@@ -307,6 +308,7 @@ def _configure_local_profiles() -> None:
     deployment_section = "profile " + DEPLOYMENT_PROFILE
     config.set(deployment_section, "source_profile", SOURCE_PROFILE)
     config.set(deployment_section, "role_arn", EXPECTED_ROLE_ARN)
+    config.set(deployment_section, "role_session_name", DEPLOYMENT_ROLE_SESSION_NAME)
     _write_ini(config_path, config)
 
     source_identity = None

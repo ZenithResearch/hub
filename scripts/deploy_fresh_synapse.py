@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import configparser
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ from typing import Any, Sequence
 EXPECTED_PROFILE = "zenith-hypha-free"
 EXPECTED_DEPLOYMENT_PROFILE = "zenith-hypha-synapse"
 EXPECTED_SOURCE_PROFILE = "zenith-hypha-bootstrap"
+EXPECTED_ROLE_SESSION_NAME = "hypha-synapse-deploy"
 EXPECTED_ACCOUNT = "610992396917"
 EXPECTED_REGION = "us-east-1"
 EXPECTED_ROLE_ARN = "arn:aws:iam::610992396917:role/HyphaSynapseDeploymentRole"
@@ -131,6 +133,24 @@ def needs_base_stage(state: Sequence[str]) -> bool:
     return not any(address in state for address in RUNTIME_CREATES)
 
 
+def deployment_profiles_installed(home: Path | None = None) -> bool:
+    root = home or Path.home()
+    config = configparser.RawConfigParser()
+    credentials = configparser.RawConfigParser()
+    config.read(root / ".aws" / "config")
+    credentials.read(root / ".aws" / "credentials")
+    section = "profile " + EXPECTED_DEPLOYMENT_PROFILE
+    return (
+        config.get(section, "role_arn", fallback=None) == EXPECTED_ROLE_ARN
+        and config.get(section, "source_profile", fallback=None) == EXPECTED_SOURCE_PROFILE
+        and config.get(section, "role_session_name", fallback=None) == EXPECTED_ROLE_SESSION_NAME
+        and config.get(section, "region", fallback=None) == EXPECTED_REGION
+        and credentials.has_section(EXPECTED_SOURCE_PROFILE)
+        and bool(credentials.get(EXPECTED_SOURCE_PROFILE, "aws_access_key_id", fallback=None))
+        and bool(credentials.get(EXPECTED_SOURCE_PROFILE, "aws_secret_access_key", fallback=None))
+    )
+
+
 def runtime_verification_commands() -> tuple[str, ...]:
     return (
         "set -euo pipefail",
@@ -220,11 +240,9 @@ def _verify_runtime(root: Path, instance_id: str) -> None:
                 (
                     "aws",
                     "ssm",
-                    "get-command-invocation",
+                    "list-commands",
                     "--command-id",
                     command_id,
-                    "--instance-id",
-                    instance_id,
                     "--output",
                     "json",
                 ),
@@ -236,9 +254,10 @@ def _verify_runtime(root: Path, instance_id: str) -> None:
             time.sleep(5)
             continue
         try:
-            status = json.loads(raw).get("Status")
+            commands = json.loads(raw).get("Commands", [])
         except (AttributeError, json.JSONDecodeError) as exc:
             raise DeploymentError("AWS returned invalid runtime verification status") from exc
+        status = commands[0].get("Status") if commands and isinstance(commands[0], dict) else None
         if status == "Success":
             return
         if status in {"Cancelled", "Cancelling", "Failed", "TimedOut"}:
@@ -347,17 +366,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[1]
     aws_dir = root / "infra" / "matrix" / "aws"
     try:
-        _run(
-            (
-                sys.executable,
-                str(root / "scripts" / "bootstrap_fresh_synapse_account.py"),
-                "--profile",
-                EXPECTED_PROFILE,
-                "--region",
-                EXPECTED_REGION,
-            ),
-            cwd=root,
-        )
+        if not deployment_profiles_installed():
+            _run(
+                (
+                    sys.executable,
+                    str(root / "scripts" / "bootstrap_fresh_synapse_account.py"),
+                    "--profile",
+                    EXPECTED_PROFILE,
+                    "--region",
+                    EXPECTED_REGION,
+                ),
+                cwd=root,
+            )
         identity_raw = _run(
             ("aws", "sts", "get-caller-identity", "--output", "json"),
             cwd=root,

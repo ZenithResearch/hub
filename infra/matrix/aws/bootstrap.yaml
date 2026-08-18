@@ -273,22 +273,41 @@ Resources:
                   - secretsmanager:UntagResource
                   - secretsmanager:UpdateSecret
                 Resource: arn:aws:secretsmanager:us-east-1:610992396917:secret:hypha/fresh-synapse/runtime-*
-              - Sid: SsmCommandsAndManagedInstances
+              - Sid: SsmManagedInstanceMetadata
                 Effect: Allow
                 Action:
-                  - ssm:CancelCommand
                   - ssm:DescribeInstanceInformation
-                  - ssm:GetCommandInvocation
                   - ssm:ListCommandInvocations
                   - ssm:ListCommands
-                  - ssm:ResumeSession
-                  - ssm:SendCommand
-                  - ssm:StartSession
-                  - ssm:TerminateSession
                 Resource: "*"
                 Condition:
                   StringEquals:
                     aws:RequestedRegion: us-east-1
+              - Sid: SsmRunShellDocument
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource: arn:aws:ssm:us-east-1::document/AWS-RunShellScript
+              - Sid: SsmInteractiveSessionDocument
+                Effect: Allow
+                Action: ssm:StartSession
+                Resource: arn:aws:ssm:us-east-1:610992396917:document/SSM-SessionManagerRunShell
+              - Sid: SsmTaggedSynapseInstance
+                Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:StartSession
+                Resource: arn:aws:ec2:us-east-1:610992396917:instance/*
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/Project: hypha
+                    ssm:resourceTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: SsmOwnedSessions
+                Effect: Allow
+                Action:
+                  - ssm:ResumeSession
+                  - ssm:TerminateSession
+                Resource: arn:aws:ssm:us-east-1:610992396917:session/hypha-synapse-deploy-*
               - Sid: VerifyMonthlyBudget
                 Effect: Allow
                 Action: budgets:ViewBudget

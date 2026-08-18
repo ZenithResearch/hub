@@ -59,6 +59,14 @@ def test_deployment_policy_is_service_bounded_and_cannot_touch_castalia_bucket()
     assert "ec2:ResourceTag/Project: hypha" in template
     assert "ec2:ResourceTag/Component: fresh-synapse" in template
     assert "ManageTaggedSynapseSecurityGroupRules" in template
+    assert "SsmTaggedSynapseInstance" in template
+    assert "ssm:resourceTag/Project: hypha" in template
+    assert "ssm:resourceTag/Component: fresh-synapse" in template
+    assert "arn:aws:ssm:us-east-1::document/AWS-RunShellScript" in template
+    assert "arn:aws:ssm:us-east-1:610992396917:document/SSM-SessionManagerRunShell" in template
+    assert "arn:aws:ssm:us-east-1:610992396917:session/hypha-synapse-deploy-*" in template
+    assert "ssm:GetCommandInvocation" not in template
+    assert "ssm:CancelCommand" not in template
     assert "ec2:TerminateInstances" not in template
     assert "ec2:StopInstances" not in template
     assert "iam:DeleteRolePermissionsBoundary" not in template
@@ -99,6 +107,7 @@ def test_bootstrap_script_fails_closed_on_profile_account_region_and_principal()
         "stored_key_id != live_key_id",
         '"sts", "get-caller-identity"',
         'config.set(deployment_section, "role_arn", EXPECTED_ROLE_ARN)',
+        'config.set(deployment_section, "role_session_name", DEPLOYMENT_ROLE_SESSION_NAME)',
         'os.chmod(path, 0o600)',
     ]:
         assert marker in script

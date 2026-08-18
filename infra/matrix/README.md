@@ -91,7 +91,9 @@ exact-trust `HyphaSynapseDeploymentRole`. The bootstrap creates at most one
 access key, writes it directly to the mode-0600 local AWS credentials file,
 configures the source and assumed-role profiles, and verifies both identities.
 No manual IAM user, access-key, profile, backend, or variable-file setup is
-required.
+required. Once those exact profiles are installed, routine launcher reruns do
+not invoke root bootstrap; run the bootstrap script directly only to create or
+repair that authority chain.
 
 The launcher then initializes isolated state, validates each saved Terraform
 plan against exact resource/action allowlists, creates the base resources,
