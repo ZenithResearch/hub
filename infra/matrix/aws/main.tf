@@ -1,209 +1,229 @@
 terraform {
-  required_version = ">= 1.5"
+  required_version = "= 1.14.0"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "= 5.100.0"
     }
   }
 }
 
 provider "aws" {
-  region = var.aws_region
-}
+  region              = var.aws_region
+  allowed_account_ids = ["610992396917"]
 
-locals {
-  name_prefix = "${var.project_name}-matrix-${var.environment}"
-
-  tags = {
-    Project     = var.project_name
-    Environment = var.environment
-    Component   = "matrix"
-    ManagedBy   = "terraform"
+  default_tags {
+    tags = {
+      Project   = "hypha"
+      Component = "fresh-synapse"
+      ManagedBy = "terraform"
+    }
   }
-}
-
-# ──────────────────────────────────────────────
-# Networking (optional — skips if vpc_id provided)
-# ──────────────────────────────────────────────
-
-resource "aws_vpc" "matrix" {
-  count      = var.vpc_id == null ? 1 : 0
-  cidr_block = var.vpc_cidr
-
-  enable_dns_support   = true
-  enable_dns_hostnames = true
-
-  tags = merge(local.tags, { Name = "${local.name_prefix}-vpc" })
-}
-
-resource "aws_internet_gateway" "matrix" {
-  count  = var.vpc_id == null ? 1 : 0
-  vpc_id = aws_vpc.matrix[0].id
-
-  tags = merge(local.tags, { Name = "${local.name_prefix}-igw" })
-}
-
-resource "aws_subnet" "matrix" {
-  count                   = var.vpc_id == null ? 1 : 0
-  vpc_id                  = aws_vpc.matrix[0].id
-  cidr_block              = cidrsubnet(var.vpc_cidr, 8, 1)
-  map_public_ip_on_launch = true
-  availability_zone       = data.aws_availability_zones.available.names[0]
-
-  tags = merge(local.tags, { Name = "${local.name_prefix}-subnet" })
-}
-
-resource "aws_route_table" "matrix" {
-  count  = var.vpc_id == null ? 1 : 0
-  vpc_id = aws_vpc.matrix[0].id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.matrix[0].id
-  }
-
-  tags = merge(local.tags, { Name = "${local.name_prefix}-rt" })
-}
-
-resource "aws_route_table_association" "matrix" {
-  count          = var.vpc_id == null ? 1 : 0
-  subnet_id      = aws_subnet.matrix[0].id
-  route_table_id = aws_route_table.matrix[0].id
 }
 
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
-locals {
-  resolved_vpc_id    = var.vpc_id != null ? var.vpc_id : aws_vpc.matrix[0].id
-  resolved_subnet_id = var.subnet_id != null ? var.subnet_id : aws_subnet.matrix[0].id
+resource "aws_vpc" "matrix" {
+  cidr_block           = var.vpc_cidr
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = { Name = "hypha-fresh-synapse" }
 }
 
-# ──────────────────────────────────────────────
-# Security Group
-# ──────────────────────────────────────────────
+resource "aws_internet_gateway" "matrix" {
+  vpc_id = aws_vpc.matrix.id
+
+  tags = { Name = "hypha-fresh-synapse" }
+}
+
+resource "aws_subnet" "matrix" {
+  vpc_id                  = aws_vpc.matrix.id
+  cidr_block              = cidrsubnet(var.vpc_cidr, 8, 0)
+  availability_zone       = data.aws_availability_zones.available.names[0]
+  map_public_ip_on_launch = true
+
+  tags = { Name = "hypha-fresh-synapse" }
+}
+
+resource "aws_route_table" "matrix" {
+  vpc_id = aws_vpc.matrix.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.matrix.id
+  }
+
+  tags = { Name = "hypha-fresh-synapse" }
+}
+
+resource "aws_route_table_association" "matrix" {
+  subnet_id      = aws_subnet.matrix.id
+  route_table_id = aws_route_table.matrix.id
+}
 
 resource "aws_security_group" "matrix" {
-  name        = "${local.name_prefix}-sg"
-  description = "Matrix Synapse — client (8008) and federation (8448)"
-  vpc_id      = local.resolved_vpc_id
+  name        = "hypha-fresh-synapse"
+  description = "Public Caddy TLS edge only"
+  vpc_id      = aws_vpc.matrix.id
 
-  # Client API
   ingress {
-    from_port   = 8008
-    to_port     = 8008
+    description = "Caddy HTTP challenge and HTTPS redirect"
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = var.allowed_cidr_blocks
-    description = "Matrix client API"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Federation
-  dynamic "ingress" {
-    for_each = var.matrix_federation_enabled ? [1] : []
-    content {
-      from_port   = 8448
-      to_port     = 8448
-      protocol    = "tcp"
-      cidr_blocks = var.allowed_cidr_blocks
-      description = "Matrix federation"
-    }
-  }
-
-  # SSH (optional)
-  dynamic "ingress" {
-    for_each = length(var.ssh_cidr_blocks) > 0 ? [1] : []
-    content {
-      from_port   = 22
-      to_port     = 22
-      protocol    = "tcp"
-      cidr_blocks = var.ssh_cidr_blocks
-      description = "SSH access"
-    }
+  ingress {
+    description = "Caddy HTTPS Matrix client and federation edge"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
+    description = "Package, image, AWS API, DNS, and ACME access"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
-    description = "All outbound"
   }
-
-  tags = merge(local.tags, { Name = "${local.name_prefix}-sg" })
 }
 
-# ──────────────────────────────────────────────
-# EBS data volume (Postgres + media store)
-# ──────────────────────────────────────────────
-
-resource "aws_ebs_volume" "matrix_data" {
-  availability_zone = data.aws_availability_zones.available.names[0]
-  size              = var.ebs_size_gb
-  type              = "gp3"
-  encrypted         = true
-
-  tags = merge(local.tags, { Name = "${local.name_prefix}-data" })
+resource "aws_secretsmanager_secret" "matrix" {
+  name                    = "hypha/fresh-synapse/runtime"
+  description             = "Runtime-only Synapse and PostgreSQL credentials"
+  recovery_window_in_days = 7
 }
 
-resource "aws_volume_attachment" "matrix_data" {
-  device_name  = "/dev/xvdf"
-  volume_id    = aws_ebs_volume.matrix_data.id
-  instance_id  = aws_instance.matrix.id
-  force_detach = false
+# This intentionally disabled declaration records the prohibited provider path:
+# enabling it would copy SecretString into Terraform state. Runtime gating is
+# instead enforced by the instance bootstrap's AWSCURRENT fetch and exact-key
+# validation, while enable_runtime remains the operator's explicit creation gate.
+data "aws_secretsmanager_secret_version" "matrix" {
+  count     = 0
+  secret_id = aws_secretsmanager_secret.matrix.id
 }
 
-# ──────────────────────────────────────────────
-# EC2 instance
-# ──────────────────────────────────────────────
+resource "aws_iam_role" "matrix" {
+  name                 = "hypha-fresh-synapse"
+  permissions_boundary = "arn:aws:iam::610992396917:policy/HyphaSynapseInstanceBoundary"
 
-data "aws_ami" "amazon_linux" {
-  most_recent = true
-  owners      = ["amazon"]
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
 
-  filter {
-    name   = "name"
-    values = ["al2023-ami-*-x86_64"]
-  }
+resource "aws_iam_role_policy_attachment" "ssm" {
+  role       = aws_iam_role.matrix.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
 
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
+resource "aws_iam_role_policy" "matrix_secret" {
+  name = "read-exact-matrix-secret"
+  role = aws_iam_role.matrix.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = aws_secretsmanager_secret.matrix.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ec2:DescribeVolumes"]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "matrix" {
+  name = "hypha-fresh-synapse"
+  role = aws_iam_role.matrix.name
 }
 
 resource "aws_instance" "matrix" {
-  ami                    = data.aws_ami.amazon_linux.id
-  instance_type          = var.instance_type
-  subnet_id              = local.resolved_subnet_id
-  vpc_security_group_ids = [aws_security_group.matrix.id]
-  key_name               = var.key_name
+  count = var.enable_runtime ? 1 : 0
+
+  ami                         = var.ami_id
+  instance_type               = var.instance_type
+  subnet_id                   = aws_subnet.matrix.id
+  vpc_security_group_ids      = [aws_security_group.matrix.id]
+  iam_instance_profile        = aws_iam_instance_profile.matrix.name
+  associate_public_ip_address = true
+  user_data_replace_on_change = true
+
+  # No secret-version data is referenced: that AWS provider data source would
+  # persist SecretString in state. Bootstrap fetches AWSCURRENT at runtime.
+  user_data = templatefile("${path.module}/user_data.sh.tpl", {
+    secret_arn              = aws_secretsmanager_secret.matrix.arn
+    aws_region              = var.aws_region
+    matrix_server_name      = var.matrix_server_name
+    matrix_server_name_json = jsonencode(var.matrix_server_name)
+    matrix_public_url_json  = jsonencode("https://${var.matrix_server_name}/")
+    synapse_image           = var.synapse_image
+    postgres_image          = var.postgres_image
+    caddy_image             = var.caddy_image
+  })
+
+  # User data is first-boot input. Automatic replacement is unsafe while the
+  # persistent Matrix EBS block is inline and delete-on-termination. Reconcile
+  # later boot-policy changes through SSM and controlled-reboot acceptance.
+  lifecycle {
+    ignore_changes = [user_data]
+  }
+
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
 
   root_block_device {
     volume_type           = "gp3"
     volume_size           = 20
-    delete_on_termination = true
     encrypted             = true
+    delete_on_termination = true
   }
 
-  user_data = base64encode(templatefile("${path.module}/user_data.sh.tpl", {
-    matrix_server_name         = var.matrix_server_name
-    matrix_db_password         = var.matrix_db_password
-    matrix_registration_secret = var.matrix_registration_secret
-    matrix_macaroon_secret     = var.matrix_macaroon_secret
-    matrix_form_secret         = var.matrix_form_secret
-    matrix_federation_enabled  = tostring(var.matrix_federation_enabled)
-    matrix_enable_registration = tostring(var.matrix_enable_registration)
-  }))
+  ebs_block_device {
+    device_name           = "/dev/sdf"
+    volume_type           = "gp3"
+    volume_size           = var.data_volume_size_gb
+    encrypted             = true
+    delete_on_termination = true
+    tags = {
+      Name = "hypha-fresh-synapse-data"
+    }
+  }
 
-  tags = merge(local.tags, { Name = "${local.name_prefix}-ec2" })
+  depends_on = [
+    aws_iam_role_policy_attachment.ssm,
+    aws_iam_role_policy.matrix_secret,
+  ]
+
+  tags = { Name = "hypha-fresh-synapse" }
 }
 
-# Elastic IP for stable DNS target
 resource "aws_eip" "matrix" {
-  instance = aws_instance.matrix.id
+  count = var.enable_runtime ? 1 : 0
+
+  instance = aws_instance.matrix[0].id
   domain   = "vpc"
 
-  tags = merge(local.tags, { Name = "${local.name_prefix}-eip" })
+  tags = { Name = "hypha-fresh-synapse" }
 }

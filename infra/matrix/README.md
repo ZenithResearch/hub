@@ -37,71 +37,111 @@ curl http://localhost:8008/health
 
 ---
 
-## AWS (EC2 + Terraform)
+## AWS: fresh standalone Synapse
 
-Synapse is stateful (Postgres + media store on EBS). EC2 is simpler than Fargate for this workload.
+`infra/matrix/aws` is intentionally a fresh, single-instance deployment for AWS
+account `610992396917` in `us-east-1`. It does not import or refer to any old
+Matrix state. It creates a dedicated VPC, public subnet, Elastic IP, Caddy TLS
+edge, Synapse, and PostgreSQL on one EC2 instance.
 
-**What gets created:**
-- EC2 instance (default: `t3.small`, Amazon Linux 2023)
-- Encrypted EBS data volume (default: 30 GB)
-- Elastic IP (stable DNS target)
-- Security group (ports 8008, 8448, optional 22)
-- Optional: VPC + subnet + IGW (if no existing VPC provided)
+Security boundaries:
 
-**DNS setup after deploy:**
-```
-A record:   matrix.yourdomain.com → <elastic_ip output>
-SRV record: _matrix._tcp.yourdomain.com → matrix.yourdomain.com:8448  (federation)
-```
+- the AWS provider rejects every account except `610992396917` and the region
+  variable rejects every region except `us-east-1`;
+- the operator must supply a reviewed, explicit Amazon Linux 2023 `ami_id`;
+- only TCP 80 and 443 are public, and only Caddy publishes host ports;
+- administration uses Session Manager through the instance role; there is no
+  SSH key or port 22 path;
+- a CloudFormation-owned permissions boundary caps the instance role at SSM
+  core, exact runtime-secret read, and attached-volume discovery even if an
+  inline role policy is changed; routine deployment cannot terminate or stop
+  EC2 instances, and security-group changes/reboots require the exact Synapse
+  resource tags;
+- Synapse uses native password authentication with public registration off;
+  MAS, delegated authentication, and MSC4108 are not installed or configured;
+- all three container defaults are immutable digest references;
+- PostgreSQL and Synapse data live on an encrypted, delete-on-termination EBS
+  block device. Bootstrap requires exactly one volume attached to the instance
+  with the `hypha-fresh-synapse-data` tag, resolves that exact volume's Nitro
+  by-id device, formats a blank device with the deployment-specific
+  `hypha-matrix` XFS label, accepts only that exact label on a retry, and
+  persists one required UUID mount entry;
+- Docker has a persistent `RequiresMountsFor=/opt/matrix-data` dependency, so
+  PostgreSQL, Synapse, and Caddy cannot start against empty root-filesystem
+  directories after a data-volume mount failure;
+- Terraform creates only the Secrets Manager container. Secret values are
+  fetched on the instance at runtime and never enter Terraform variables,
+  state, user data, or bootstrap logs.
 
-**Deploy:**
+### One-command deployment
 
-```bash
-cd infra/matrix/aws
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars — set server name, secrets, region
-
-terraform init
-terraform plan
-terraform apply
-
-# After apply — get the IP
-terraform output elastic_ip
-```
-
-**First admin account (SSH into instance):**
-```bash
-docker exec -it matrix-synapse \
-  register_new_matrix_user -c /data/homeserver.yaml http://localhost:8008 \
-  -u admin -p YOUR_PASSWORD -a
-```
-
-**Secrets management:** In production, store secrets in AWS Secrets Manager and inject via user data or SSM Parameter Store. The current setup injects from Terraform variables — keep `terraform.tfvars` out of version control.
-
----
-
-## Architecture notes
-
-- Federation enabled by default — enables hub-to-hub messaging across the Zenith network
-- Public registration disabled by default — accounts created via admin API only
-- Local: joins existing `agentnet` bridge so hub services reach Matrix at `matrix-synapse:8008`
-- AWS: separate bridge network; hub services reach via Elastic IP or DNS
-
-## Upgrading Synapse
+Requirements are Python 3, AWS CLI, Terraform, and a configured
+`zenith-hypha-free` profile for the target account. Supply only the reviewed
+AMI and public hostname:
 
 ```bash
-# Local
-docker compose -f infra/matrix/docker-compose.yml pull && \
-  docker compose -f infra/matrix/docker-compose.yml up -d
-
-# AWS
-ssh ec2-user@<elastic_ip>
-docker compose -f /opt/docker-compose.matrix.yml pull && \
-  docker compose -f /opt/docker-compose.matrix.yml up -d
+python3 scripts/deploy_fresh_synapse.py \
+  --profile zenith-hypha-free \
+  --region us-east-1 \
+  --hostname synapse.zenith-research.ca \
+  --ami-id ami-0332d564d76dbd8d6
 ```
 
-## Backup
+On the first run, the launcher invokes the guarded bootstrap and privately
+prompts for the budget/expiry-alert email. CloudFormation creates the retained
+state bucket, the credential-only `HyphaSynapseTerraformSource` user, and the
+exact-trust `HyphaSynapseDeploymentRole`. The bootstrap creates at most one
+access key, writes it directly to the mode-0600 local AWS credentials file,
+configures the source and assumed-role profiles, and verifies both identities.
+No manual IAM user, access-key, profile, backend, or variable-file setup is
+required. Once those exact profiles are installed, routine launcher reruns do
+not invoke root bootstrap; run the bootstrap script directly only to create or
+repair that authority chain.
 
-**Local:** `docker run --rm -v matrix-db-data:/var/lib/postgresql/data -v $(pwd):/backup alpine tar czf /backup/matrix-db-$(date +%Y%m%d).tar.gz /var/lib/postgresql/data`
+The launcher then initializes isolated state, validates each saved Terraform
+plan against exact resource/action allowlists, creates the base resources,
+populates the runtime secret directly into Secrets Manager, and launches one
+EC2 instance plus one Elastic IP. It never reads `SecretString` into Terraform
+state and never provisions a Matrix administrator. Reruns are idempotent and
+complete partial base applies before runtime activation. Before reporting
+success it requires SSM/cloud-init readiness, the exact XFS mount, Docker,
+healthy PostgreSQL and Synapse containers, and an internal Matrix HTTP 200.
+Its final JSON contains only the instance identifier, public URL, and exact DNS
+A record.
 
-**AWS:** Snapshot the EBS volume — `aws ec2 create-snapshot --volume-id <ebs_volume_id_output> --description "matrix-backup-$(date +%Y%m%d)"`
+User data is first-boot input. Because the persistent data EBS block is inline
+and replacement would delete it, Terraform ignores later user-data diffs on an
+existing host. Reconcile boot-policy changes through SSM, verify the live files,
+and repeat controlled-reboot acceptance; fresh instances receive the current
+template directly.
+
+The bootstrap also creates a `$30` monthly budget and SNS-backed Free Plan
+expiry alerts at 60, 30, 14, and 7 days. Email confirmation is recommended but
+does not block the runtime. Verify it without disclosing the endpoint:
+
+```bash
+python3 scripts/verify_fresh_synapse_alerts.py \
+  --profile zenith-hypha-synapse --region us-east-1
+```
+
+After setting the emitted A record, Caddy obtains and renews TLS automatically;
+the public endpoint is the HTTPS-only `matrix_url` output.
+
+The EC2 role has the AWS-managed `AmazonSSMManagedInstanceCore` policy. Its
+inline policy permits `secretsmanager:GetSecretValue` only on the exact
+module-created secret ARN and read-only `ec2:DescribeVolumes` solely to bind
+bootstrap to its tagged attached data volume. It has no wildcard secret access.
+
+### Administration
+
+There is no SSH configuration and the launcher creates no Matrix users or
+administrators. Account provisioning is a separate, explicit native-Synapse
+operation after public TLS is valid. Use the `instance_id` output for Session
+Manager administration.
+
+### Destruction and persistence
+
+This module is for a new disposable homeserver. The root and Matrix data EBS
+volumes are encrypted and deleted with the instance. Export or back up anything
+that must survive before destroying the stack. The Secrets Manager secret uses
+a seven-day recovery window.

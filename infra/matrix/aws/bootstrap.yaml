@@ -1,0 +1,497 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Root-authorized bootstrap for isolated Hypha Synapse Terraform state and deployment authority.
+
+Parameters:
+  AlertEmail:
+    Type: String
+    NoEcho: true
+    Description: Primary account email for cost and expiry notifications.
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+
+Resources:
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: hypha-synapse-terraform-state-610992396917-us-east-1
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  TerraformStateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TerraformStateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt TerraformStateBucket.Arn
+              - !Sub "${TerraformStateBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  HyphaSynapseTerraformSource:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: HyphaSynapseTerraformSource
+      Policies:
+        - PolicyName: AssumeHyphaSynapseDeploymentRole
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: arn:aws:iam::610992396917:role/HyphaSynapseDeploymentRole
+
+  HyphaSynapseInstanceBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: HyphaSynapseInstanceBoundary
+      Description: Maximum permissions available to the fresh Synapse EC2 instance role.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SsmManagedInstanceCore
+            Effect: Allow
+            Action:
+              - ssm:DescribeAssociation
+              - ssm:GetDeployablePatchSnapshotForInstance
+              - ssm:GetDocument
+              - ssm:DescribeDocument
+              - ssm:GetManifest
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:ListAssociations
+              - ssm:ListInstanceAssociations
+              - ssm:PutInventory
+              - ssm:PutComplianceItems
+              - ssm:PutConfigurePackageResult
+              - ssm:UpdateAssociationStatus
+              - ssm:UpdateInstanceAssociationStatus
+              - ssm:UpdateInstanceInformation
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
+              - ec2messages:AcknowledgeMessage
+              - ec2messages:DeleteMessage
+              - ec2messages:FailMessage
+              - ec2messages:GetEndpoint
+              - ec2messages:GetMessages
+              - ec2messages:SendReply
+            Resource: "*"
+          - Sid: ReadExactRuntimeSecret
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: arn:aws:secretsmanager:us-east-1:610992396917:secret:hypha/fresh-synapse/runtime-*
+          - Sid: DiscoverAttachedDataVolume
+            Effect: Allow
+            Action: ec2:DescribeVolumes
+            Resource: "*"
+
+  HyphaSynapseDeploymentRole:
+    Type: AWS::IAM::Role
+    DependsOn: HyphaSynapseTerraformSource
+    Properties:
+      RoleName: HyphaSynapseDeploymentRole
+      Description: Bounded Terraform deployment authority for the production Hypha Matrix stack.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ExactTerraformSourceOnly
+            Effect: Allow
+            Principal:
+              AWS: arn:aws:iam::610992396917:user/HyphaSynapseTerraformSource
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: HyphaSynapseBoundedDeployment
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Ec2ReadInTargetRegion
+                Effect: Allow
+                Action:
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeAddressesAttribute
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeIamInstanceProfileAssociations
+                  - ec2:DescribeImages
+                  - ec2:DescribeInstanceCreditSpecifications
+                  - ec2:DescribeInstanceAttribute
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceTypes
+                  - ec2:DescribeInternetGateways
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeTags
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVpcAttribute
+                  - ec2:DescribeVpcs
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: us-east-1
+              - Sid: CreateSynapseInfrastructureInTargetRegion
+                Effect: Allow
+                Action:
+                  - ec2:AllocateAddress
+                  - ec2:CreateInternetGateway
+                  - ec2:CreateRouteTable
+                  - ec2:CreateSecurityGroup
+                  - ec2:CreateSubnet
+                  - ec2:CreateVolume
+                  - ec2:CreateVpc
+                  - ec2:RunInstances
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/Project: hypha
+                    aws:RequestTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: TagOnlyDuringSynapseResourceCreation
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource:
+                  - arn:aws:ec2:us-east-1:610992396917:elastic-ip/*
+                  - arn:aws:ec2:us-east-1:610992396917:internet-gateway/*
+                  - arn:aws:ec2:us-east-1:610992396917:instance/*
+                  - arn:aws:ec2:us-east-1:610992396917:route-table/*
+                  - arn:aws:ec2:us-east-1:610992396917:security-group/*
+                  - arn:aws:ec2:us-east-1:610992396917:subnet/*
+                  - arn:aws:ec2:us-east-1:610992396917:volume/*
+                  - arn:aws:ec2:us-east-1:610992396917:vpc/*
+                Condition:
+                  StringEquals:
+                    ec2:CreateAction:
+                      - AllocateAddress
+                      - CreateInternetGateway
+                      - CreateRouteTable
+                      - CreateSecurityGroup
+                      - CreateSubnet
+                      - CreateVolume
+                      - CreateVpc
+                      - RunInstances
+                    aws:RequestTag/Project: hypha
+                    aws:RequestTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: ConfigureTaggedSynapseInfrastructure
+                Effect: Allow
+                Action:
+                  - ec2:AssociateAddress
+                  - ec2:AssociateIamInstanceProfile
+                  - ec2:AssociateRouteTable
+                  - ec2:AttachInternetGateway
+                  - ec2:AttachVolume
+                  - ec2:CreateRoute
+                  - ec2:ModifySubnetAttribute
+                  - ec2:ModifyVpcAttribute
+                Resource:
+                  - arn:aws:ec2:us-east-1:610992396917:elastic-ip/*
+                  - arn:aws:ec2:us-east-1:610992396917:internet-gateway/*
+                  - arn:aws:ec2:us-east-1:610992396917:instance/*
+                  - arn:aws:ec2:us-east-1:610992396917:route-table/*
+                  - arn:aws:ec2:us-east-1:610992396917:subnet/*
+                  - arn:aws:ec2:us-east-1:610992396917:volume/*
+                  - arn:aws:ec2:us-east-1:610992396917:vpc/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: hypha
+                    ec2:ResourceTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: RebootTaggedSynapseInstance
+                Effect: Allow
+                Action: ec2:RebootInstances
+                Resource: arn:aws:ec2:us-east-1:610992396917:instance/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: hypha
+                    ec2:ResourceTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: ManageTaggedSynapseSecurityGroupRules
+                Effect: Allow
+                Action:
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupIngress
+                Resource: arn:aws:ec2:us-east-1:610992396917:security-group/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: hypha
+                    ec2:ResourceTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: CreateExactProductionRoleWithBoundary
+                Effect: Allow
+                Action: iam:CreateRole
+                Resource: arn:aws:iam::610992396917:role/hypha-fresh-synapse
+                Condition:
+                  ArnEquals:
+                    iam:PermissionsBoundary: !Ref HyphaSynapseInstanceBoundary
+              - Sid: SetOnlyExactProductionBoundary
+                Effect: Allow
+                Action: iam:PutRolePermissionsBoundary
+                Resource: arn:aws:iam::610992396917:role/hypha-fresh-synapse
+                Condition:
+                  ArnEquals:
+                    iam:PermissionsBoundary: !Ref HyphaSynapseInstanceBoundary
+              - Sid: AttachOnlySsmCorePolicy
+                Effect: Allow
+                Action:
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                Resource: arn:aws:iam::610992396917:role/hypha-fresh-synapse
+                Condition:
+                  ArnEquals:
+                    iam:PolicyARN: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+              - Sid: PassExactProductionRoleToEc2
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: arn:aws:iam::610992396917:role/hypha-fresh-synapse
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ec2.amazonaws.com
+              - Sid: ExactProductionIamRoleAndProfile
+                Effect: Allow
+                Action:
+                  - iam:AddRoleToInstanceProfile
+                  - iam:CreateInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:ListAttachedRolePolicies
+                  - iam:ListInstanceProfilesForRole
+                  - iam:ListRolePolicies
+                  - iam:PutRolePolicy
+                  - iam:TagInstanceProfile
+                  - iam:TagRole
+                Resource:
+                  - arn:aws:iam::610992396917:role/hypha-fresh-synapse
+                  - arn:aws:iam::610992396917:instance-profile/hypha-fresh-synapse
+              - Sid: ReadExactInstanceBoundary
+                Effect: Allow
+                Action:
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                Resource: !Ref HyphaSynapseInstanceBoundary
+              - Sid: ProductionMatrixSecrets
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:TagResource
+                  - secretsmanager:UpdateSecret
+                Resource: arn:aws:secretsmanager:us-east-1:610992396917:secret:hypha/fresh-synapse/runtime-*
+              - Sid: SsmManagedInstanceMetadata
+                Effect: Allow
+                Action:
+                  - ssm:DescribeInstanceInformation
+                  - ssm:ListCommands
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: us-east-1
+              - Sid: SsmRunShellDocument
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource: arn:aws:ssm:us-east-1::document/AWS-RunShellScript
+              - Sid: SsmInteractiveSessionDocument
+                Effect: Allow
+                Action: ssm:StartSession
+                Resource: arn:aws:ssm:us-east-1:610992396917:document/SSM-SessionManagerRunShell
+              - Sid: SsmTaggedSynapseInstance
+                Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:StartSession
+                Resource: arn:aws:ec2:us-east-1:610992396917:instance/*
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/Project: hypha
+                    ssm:resourceTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: SsmOwnedSessions
+                Effect: Allow
+                Action:
+                  - ssm:ResumeSession
+                  - ssm:TerminateSession
+                Resource: arn:aws:ssm:us-east-1:610992396917:session/hypha-synapse-deploy-*
+              - Sid: VerifyMonthlyBudget
+                Effect: Allow
+                Action: budgets:ViewBudget
+                Resource: arn:aws:budgets::610992396917:budget/hypha-synapse-monthly
+              - Sid: VerifyExpirySubscription
+                Effect: Allow
+                Action: sns:ListSubscriptionsByTopic
+                Resource: arn:aws:sns:us-east-1:610992396917:hypha-synapse-expiry-alerts
+              - Sid: VerifyExpirySchedules
+                Effect: Allow
+                Action: scheduler:GetSchedule
+                Resource: arn:aws:scheduler:us-east-1:610992396917:schedule/default/hypha-synapse-expiry-*
+              - Sid: ExactTerraformStateBucket
+                Effect: Allow
+                Action:
+                  - s3:GetEncryptionConfiguration
+                  - s3:GetBucketLocation
+                  - s3:GetBucketVersioning
+                  - s3:ListBucket
+                Resource: arn:aws:s3:::hypha-synapse-terraform-state-610992396917-us-east-1
+              - Sid: ExactTerraformStateObjects
+                Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: arn:aws:s3:::hypha-synapse-terraform-state-610992396917-us-east-1/*
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: hypha-synapse-monthly
+        BudgetLimit:
+          Amount: 30
+          Unit: USD
+        BudgetType: COST
+        TimeUnit: MONTHLY
+      NotificationsWithSubscribers:
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref AlertEmail
+              SubscriptionType: EMAIL
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref AlertEmail
+              SubscriptionType: EMAIL
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: FORECASTED
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref AlertEmail
+              SubscriptionType: EMAIL
+
+  ExpiryAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: hypha-synapse-expiry-alerts
+
+  ExpiryAlertSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+      TopicArn: !Ref ExpiryAlertTopic
+
+  ExpirySchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: HyphaSynapseExpirySchedulerRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PublishHyphaSynapseExpiryAlerts
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref ExpiryAlertTopic
+
+  ExpiryAlert60Days:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: hypha-synapse-expiry-60-days
+      FlexibleTimeWindow: { Mode: "OFF" }
+      ScheduleExpression: "at(2026-12-19T20:08:42)"
+      ScheduleExpressionTimezone: UTC
+      Target:
+        Arn: !Ref ExpiryAlertTopic
+        RoleArn: !GetAtt ExpirySchedulerRole.Arn
+        Input: '{"alert":"Hypha Synapse AWS Free Plan expires in 60 days on 2027-02-17."}'
+
+  ExpiryAlert30Days:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: hypha-synapse-expiry-30-days
+      FlexibleTimeWindow: { Mode: "OFF" }
+      ScheduleExpression: "at(2027-01-18T20:08:42)"
+      ScheduleExpressionTimezone: UTC
+      Target:
+        Arn: !Ref ExpiryAlertTopic
+        RoleArn: !GetAtt ExpirySchedulerRole.Arn
+        Input: '{"alert":"Hypha Synapse AWS Free Plan expires in 30 days on 2027-02-17."}'
+
+  ExpiryAlert14Days:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: hypha-synapse-expiry-14-days
+      FlexibleTimeWindow: { Mode: "OFF" }
+      ScheduleExpression: "at(2027-02-03T20:08:42)"
+      ScheduleExpressionTimezone: UTC
+      Target:
+        Arn: !Ref ExpiryAlertTopic
+        RoleArn: !GetAtt ExpirySchedulerRole.Arn
+        Input: '{"alert":"Hypha Synapse AWS Free Plan expires in 14 days on 2027-02-17."}'
+
+  ExpiryAlert7Days:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: hypha-synapse-expiry-7-days
+      FlexibleTimeWindow: { Mode: "OFF" }
+      ScheduleExpression: "at(2027-02-10T20:08:42)"
+      ScheduleExpressionTimezone: UTC
+      Target:
+        Arn: !Ref ExpiryAlertTopic
+        RoleArn: !GetAtt ExpirySchedulerRole.Arn
+        Input: '{"alert":"Hypha Synapse AWS Free Plan expires in 7 days on 2027-02-17."}'
+
+Outputs:
+  StateBucketName:
+    Description: Private versioned S3 bucket for the isolated Terraform backend.
+    Value: !Ref TerraformStateBucket
+  DeploymentRoleArn:
+    Description: Bounded deployment role trusted only by the CloudFormation-managed Terraform source user.
+    Value: !GetAtt HyphaSynapseDeploymentRole.Arn
+  DeploymentSourceUserName:
+    Description: Credential-only IAM user used locally to assume the bounded deployment role.
+    Value: !Ref HyphaSynapseTerraformSource
+  ExpiryAlertTopicArn:
+    Description: SNS topic whose email subscription must be confirmed for dated expiry alerts.
+    Value: !Ref ExpiryAlertTopic
