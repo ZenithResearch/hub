@@ -151,31 +151,24 @@ def deploy(template: Path, alert_email: Optional[str]) -> None:
         raise BootstrapError("bootstrap template is missing")
     parameter_path: Optional[str] = None
     try:
-        with NamedTemporaryFile(mode="w", encoding="utf-8", prefix="hypha-synapse-bootstrap-", delete=False) as handle:
-            parameter_path = handle.name
-            os.chmod(parameter_path, 0o600)
-            parameter = (
-                "AlertEmail=" + alert_email
-                if alert_email is not None
-                else "ParameterKey=AlertEmail,UsePreviousValue=true"
-            )
-            json.dump([parameter], handle)
-            handle.write("\n")
-        _run_aws(
-            (
-                "cloudformation",
-                "deploy",
-                "--stack-name",
-                STACK_NAME,
-                "--template-file",
-                str(template),
-                "--capabilities",
-                "CAPABILITY_NAMED_IAM",
-                "--parameter-overrides",
-                "file://" + parameter_path,
-                "--no-fail-on-empty-changeset",
-            )
+        arguments = (
+            "cloudformation",
+            "deploy",
+            "--stack-name",
+            STACK_NAME,
+            "--template-file",
+            str(template),
+            "--capabilities",
+            "CAPABILITY_NAMED_IAM",
         )
+        if alert_email is not None:
+            with NamedTemporaryFile(mode="w", encoding="utf-8", prefix="hypha-synapse-bootstrap-", delete=False) as handle:
+                parameter_path = handle.name
+                os.chmod(parameter_path, 0o600)
+                json.dump(["AlertEmail=" + alert_email], handle)
+                handle.write("\n")
+            arguments += ("--parameter-overrides", "file://" + parameter_path)
+        _run_aws(arguments + ("--no-fail-on-empty-changeset",))
     finally:
         if parameter_path is not None:
             try:

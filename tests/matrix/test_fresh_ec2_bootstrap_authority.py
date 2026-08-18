@@ -113,7 +113,6 @@ def test_bootstrap_script_fails_closed_on_profile_account_region_and_principal()
         "hypha-synapse-bootstrap",
         "getpass.getpass",
         "AlertEmail=",
-        "ParameterKey=AlertEmail,UsePreviousValue=true",
         "if not stack_exists():",
         "NamedTemporaryFile",
         "os.chmod",
@@ -136,6 +135,28 @@ def test_bootstrap_script_fails_closed_on_profile_account_region_and_principal()
     assert "print(credentials" not in script
     assert "print(alert_email" not in script
     assert "print(stored_secret" not in script
+
+
+def test_bootstrap_deploy_uses_alert_parameter_only_for_first_creation(monkeypatch, tmp_path):
+    bootstrap = load_bootstrap()
+    template = tmp_path / "bootstrap.yaml"
+    template.write_text("Resources: {}\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(arguments):
+        calls.append(tuple(arguments))
+        if "--parameter-overrides" in arguments:
+            parameter_path = Path(arguments[arguments.index("--parameter-overrides") + 1].removeprefix("file://"))
+            assert json.loads(parameter_path.read_text(encoding="utf-8")) == ["AlertEmail=operator@example.com"]
+        return ""
+
+    monkeypatch.setattr(bootstrap, "_run_aws", fake_run)
+
+    bootstrap.deploy(template, "operator@example.com")
+    assert "--parameter-overrides" in calls[-1]
+
+    bootstrap.deploy(template, None)
+    assert "--parameter-overrides" not in calls[-1]
 
 
 def test_bootstrap_rotates_one_orphaned_remote_key_before_local_install(monkeypatch, tmp_path):
