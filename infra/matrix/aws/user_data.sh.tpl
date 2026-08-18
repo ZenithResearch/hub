@@ -1,58 +1,123 @@
 #!/bin/bash
 set -euo pipefail
+umask 077
 
-# ──────────────────────────────────────────────
-# Hub Matrix bootstrap — Amazon Linux 2023
-# ──────────────────────────────────────────────
+exec 3>&1 4>&2
+set +x
 
-# Mount and format the data EBS volume
-DATA_DEVICE="/dev/xvdf"
-DATA_MOUNT="/opt/matrix-data"
+DATA_MOUNT=/opt/matrix-data
+MATRIX_DIR=/opt/matrix
+SECRET_JSON=$(mktemp /run/matrix-secret.XXXXXX)
+trap 'rm -f "$SECRET_JSON"' EXIT
 
-if ! blkid "$DATA_DEVICE"; then
-  mkfs.xfs "$DATA_DEVICE"
+dnf install -y awscli curl docker jq xfsprogs
+
+# Resolve only the tagged data volume attached to this instance. Nitro names
+# EBS devices by volume ID, so never trust the requested /dev/sdX alias.
+IMDS_TOKEN=$(curl -fsS --max-time 5 -X PUT \
+  -H 'X-aws-ec2-metadata-token-ttl-seconds: 300' \
+  http://169.254.169.254/latest/api/token)
+INSTANCE_ID=$(curl -fsS --max-time 5 \
+  -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+  http://169.254.169.254/latest/meta-data/instance-id)
+mapfile -t VOLUME_IDS < <(aws ec2 describe-volumes \
+  --region '${aws_region}' \
+  --filters \
+    "Name=attachment.instance-id,Values=$INSTANCE_ID" \
+    'Name=tag:Name,Values=hypha-fresh-synapse-data' \
+  --query 'Volumes[].VolumeId' \
+  --output text | tr '\t' '\n')
+[ "$${#VOLUME_IDS[@]}" -eq 1 ] || { echo "Expected exactly one tagged EBS data volume" >&2; exit 1; }
+EXPECTED_VOLUME_ID="$${VOLUME_IDS[0]}"
+EXPECTED_BY_ID="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${EXPECTED_VOLUME_ID//-/}"
+export EXPECTED_BY_ID
+timeout 120 bash -c 'until [ -e "$EXPECTED_BY_ID" ]; do sleep 2; done'
+DATA_DEVICE=$(readlink -f "$EXPECTED_BY_ID")
+[ -b "$DATA_DEVICE" ] || { echo "Tagged EBS data device not found" >&2; exit 1; }
+FILESYSTEM_TYPE=$(blkid -s TYPE -o value "$DATA_DEVICE" 2>/dev/null || true)
+FILESYSTEM_LABEL=$(blkid -s LABEL -o value "$DATA_DEVICE" 2>/dev/null || true)
+if [ -z "$FILESYSTEM_TYPE" ]; then
+  mkfs.xfs -L hypha-matrix-data "$DATA_DEVICE" >/dev/null
+  FILESYSTEM_TYPE="xfs"
+  FILESYSTEM_LABEL="hypha-matrix-data"
 fi
-
+[ "$FILESYSTEM_TYPE" = "xfs" ] && [ "$FILESYSTEM_LABEL" = "hypha-matrix-data" ] || {
+  echo "Refusing unexpected filesystem on tagged EBS data volume" >&2
+  exit 1
+}
+DATA_UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
 mkdir -p "$DATA_MOUNT"
-mount "$DATA_DEVICE" "$DATA_MOUNT"
-echo "$DATA_DEVICE $DATA_MOUNT xfs defaults,nofail 0 2" >> /etc/fstab
+grep -Fq "UUID=$DATA_UUID " /etc/fstab || \
+  echo "UUID=$DATA_UUID $DATA_MOUNT xfs defaults,nofail,nodev,nosuid 0 2" >> /etc/fstab
+mountpoint -q "$DATA_MOUNT" || mount "$DATA_MOUNT"
+findmnt --verify --verbose >/dev/null
 
-# Subdirs for Synapse and Postgres
-mkdir -p "$DATA_MOUNT/synapse" "$DATA_MOUNT/postgres"
+mkdir -p "$MATRIX_DIR" "$DATA_MOUNT/postgres" "$DATA_MOUNT/synapse" "$DATA_MOUNT/caddy-data" "$DATA_MOUNT/caddy-config"
+chmod 700 "$MATRIX_DIR" "$DATA_MOUNT"
+chown 991:991 "$DATA_MOUNT/synapse"
 
-# Install Docker
-dnf install -y docker
 systemctl enable --now docker
 
-# Install Docker Compose plugin
-COMPOSE_VERSION="2.27.0"
-mkdir -p /usr/local/lib/docker/cli-plugins
-curl -fsSL "https://github.com/docker/compose/releases/download/v$${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
+COMPOSE_VERSION=2.27.0
+COMPOSE_SHA256=f3ba3bf1e4ab18e96c2d36526a075a02a78fb5f8e80d3e3ca9c5bf256d81d0a0
+install -d -m 0755 /usr/local/lib/docker/cli-plugins
+curl -fsSL "https://github.com/docker/compose/releases/download/v$COMPOSE_VERSION/docker-compose-linux-x86_64" \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
-chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+printf '%s  %s\n' "$COMPOSE_SHA256" /usr/local/lib/docker/cli-plugins/docker-compose | sha256sum -c -
+chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose
 
-# Write environment file (secrets injected by Terraform templatefile)
-cat > /opt/matrix.env << 'ENVEOF'
-MATRIX_SERVER_NAME=${matrix_server_name}
-MATRIX_DB_PASSWORD=${matrix_db_password}
-MATRIX_DB_USER=synapse
-MATRIX_DB_NAME=synapse
-MATRIX_DB_HOST=matrix-db
-MATRIX_DB_PORT=5432
-MATRIX_REGISTRATION_SECRET=${matrix_registration_secret}
-MATRIX_MACAROON_SECRET=${matrix_macaroon_secret}
-MATRIX_FORM_SECRET=${matrix_form_secret}
-MATRIX_FEDERATION_ENABLED=${matrix_federation_enabled}
-MATRIX_ENABLE_REGISTRATION=${matrix_enable_registration}
-ENVEOF
-chmod 600 /opt/matrix.env
+# Fetch AWSCURRENT only at runtime. Neither SecretString nor derived values are
+# printed. A bounded wait gates all containers until the secret is populated.
+SECRET_READY=false
+for _attempt in $(seq 1 30); do
+  if aws secretsmanager get-secret-value \
+    --region '${aws_region}' \
+    --secret-id '${secret_arn}' \
+    --version-stage AWSCURRENT \
+    --query SecretString \
+    --output text > "$SECRET_JSON" 2>/dev/null; then
+    SECRET_READY=true
+    break
+  fi
+  sleep 10
+done
+[ "$SECRET_READY" = true ] || { echo "AWSCURRENT Matrix secret version unavailable" >&2; exit 1; }
+chmod 600 "$SECRET_JSON"
 
-# Write Synapse homeserver config (env vars substituted at runtime by Synapse's SYNAPSE_CONFIG_PATH handling)
-mkdir -p /opt/matrix-config
-cat > /opt/matrix-config/homeserver.yaml << 'HOMEEOF'
-server_name: "${matrix_server_name}"
+python3 - "$SECRET_JSON" "$MATRIX_DIR" <<'PY'
+import json
+import os
+import re
+import sys
+
+secret_path, matrix_dir = sys.argv[1:]
+required = {
+    "POSTGRES_PASSWORD",
+    "REGISTRATION_SHARED_SECRET",
+    "MACAROON_SECRET_KEY",
+    "FORM_SECRET",
+}
+with open(secret_path, encoding="utf-8") as handle:
+    values = json.load(handle)
+if not isinstance(values, dict) or set(values) != required:
+    raise SystemExit("Secret JSON must contain exactly the documented keys")
+if any(not isinstance(values[key], str) or not re.fullmatch(r"[A-Za-z0-9._~!@#%^*+=:-]{32,}", values[key]) for key in required):
+    raise SystemExit("Every secret value must be a nonempty, shell-safe string of at least 32 characters")
+
+def quoted(value):
+    return json.dumps(value)
+
+env_path = os.path.join(matrix_dir, ".env")
+with open(env_path, "w", encoding="utf-8") as handle:
+    handle.write("POSTGRES_PASSWORD=" + values["POSTGRES_PASSWORD"] + "\n")
+os.chmod(env_path, 0o600)
+
+config_path = os.path.join(matrix_dir, "homeserver.yaml")
+with open(config_path, "w", encoding="utf-8") as handle:
+    handle.write(f'''server_name: ${matrix_server_name_json}
 pid_file: /data/homeserver.pid
-
+public_baseurl: ${matrix_public_url_json}
+serve_server_wellknown: true
 listeners:
   - port: 8008
     tls: false
@@ -60,131 +125,119 @@ listeners:
     x_forwarded: true
     resources:
       - names: [client, federation]
-        compress: false
-  - port: 8448
-    tls: false
-    type: http
-    x_forwarded: true
-    resources:
-      - names: [federation]
-        compress: false
-
 database:
   name: psycopg2
   args:
-    user: "synapse"
-    password: "${matrix_db_password}"
-    database: "synapse"
-    host: "matrix-db"
-    port: "5432"
-    cp_min: 5
-    cp_max: 10
-
-log_config: "/data/log.config"
-media_store_path: "/data/media_store"
-registration_shared_secret: "${matrix_registration_secret}"
+    user: synapse
+    password: {quoted(values["POSTGRES_PASSWORD"])}
+    database: synapse
+    host: matrix-db
+    port: 5432
+log_config: /config/log.config
+media_store_path: /data/media_store
+signing_key_path: /data/server.signing.key
+registration_shared_secret: {quoted(values["REGISTRATION_SHARED_SECRET"])}
+macaroon_secret_key: {quoted(values["MACAROON_SECRET_KEY"])}
+form_secret: {quoted(values["FORM_SECRET"])}
+password_config:
+  enabled: true
+enable_registration: false
 report_stats: false
-macaroon_secret_key: "${matrix_macaroon_secret}"
-form_secret: "${matrix_form_secret}"
-signing_key_path: "/data/${matrix_server_name}.signing.key"
-
 trusted_key_servers:
-  - server_name: "matrix.org"
+  - server_name: matrix.org
+''')
+os.chown(config_path, 0, 991)
+os.chmod(config_path, 0o640)
+PY
+chmod 600 /opt/matrix/.env
 
-federation_enabled: ${matrix_federation_enabled}
-enable_registration: ${matrix_enable_registration}
-HOMEEOF
-
-cat > /opt/matrix-config/log.config << 'LOGEOF'
+cat > "$MATRIX_DIR/log.config" <<'EOF_LOG'
 version: 1
 formatters:
-  precise:
-    format: '%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(request)s - %(message)s'
+  normal:
+    format: '%(asctime)s %(name)s %(levelname)s %(message)s'
 handlers:
   console:
     class: logging.StreamHandler
-    formatter: precise
-loggers:
-  synapse.storage.SQL:
-    level: WARNING
+    formatter: normal
 root:
   level: WARNING
   handlers: [console]
 disable_existing_loggers: false
-LOGEOF
+EOF_LOG
+chown root:991 "$MATRIX_DIR/log.config"
+chmod 640 "$MATRIX_DIR/log.config"
 
-# Write Docker Compose file
-cat > /opt/docker-compose.matrix.yml << 'COMPOSEEOF'
-version: "3.8"
+cat > "$MATRIX_DIR/Caddyfile" <<'EOF_CADDY'
+${matrix_server_name} {
+  encode zstd gzip
+  reverse_proxy matrix-synapse:8008
+}
+EOF_CADDY
 
+cat > "$MATRIX_DIR/compose.yaml" <<'EOF_COMPOSE'
 services:
   matrix-db:
-    image: postgres:16-alpine
+    image: ${postgres_image}
     container_name: matrix-db
     restart: unless-stopped
+    env_file: .env
     environment:
       POSTGRES_USER: synapse
-      POSTGRES_PASSWORD: ${matrix_db_password}
       POSTGRES_DB: synapse
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+      POSTGRES_PASSWORD: "$${POSTGRES_PASSWORD}"
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     volumes:
       - /opt/matrix-data/postgres:/var/lib/postgresql/data
-    networks:
-      - matrix-net
+    networks: [matrix-internal]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U synapse"]
+      test: ["CMD-SHELL", "pg_isready -U synapse -d synapse"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 12
 
   matrix-synapse:
-    image: matrixdotorg/synapse:latest
+    image: ${synapse_image}
     container_name: matrix-synapse
     restart: unless-stopped
     depends_on:
       matrix-db:
         condition: service_healthy
+    environment:
+      SYNAPSE_CONFIG_PATH: /config/homeserver.yaml
     volumes:
       - /opt/matrix-data/synapse:/data
-      - /opt/matrix-config/homeserver.yaml:/data/homeserver.yaml:ro
-      - /opt/matrix-config/log.config:/data/log.config:ro
+      - /opt/matrix/homeserver.yaml:/config/homeserver.yaml:ro
+      - /opt/matrix/log.config:/config/log.config:ro
+    networks: [matrix-internal]
+
+  caddy:
+    image: ${caddy_image}
+    container_name: matrix-caddy
+    restart: unless-stopped
+    depends_on: [matrix-synapse]
     ports:
-      - "8008:8008"
-      - "8448:8448"
-    networks:
-      - matrix-net
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /opt/matrix/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/matrix-data/caddy-data:/data
+      - /opt/matrix-data/caddy-config:/config
+    networks: [edge, matrix-internal]
 
 networks:
-  matrix-net:
-    driver: bridge
-COMPOSEEOF
+  edge:
+  matrix-internal:
+    internal: true
+EOF_COMPOSE
 
-# Generate signing key and run first-time setup
+# Generate only the fresh signing material before using the hardened config.
 docker run --rm \
-  -v /opt/matrix-data/synapse:/data \
-  -v /opt/matrix-config/homeserver.yaml:/data/homeserver.yaml:ro \
-  -e SYNAPSE_SERVER_NAME="${matrix_server_name}" \
+  -v "$DATA_MOUNT/synapse:/data" \
+  -e SYNAPSE_SERVER_NAME='${matrix_server_name}' \
   -e SYNAPSE_REPORT_STATS=no \
-  matrixdotorg/synapse:latest generate
+  '${synapse_image}' generate >/dev/null
+rm -f "$DATA_MOUNT/synapse/homeserver.yaml" "$DATA_MOUNT/synapse"/*.log.config
 
-# Start services
-docker compose -f /opt/docker-compose.matrix.yml up -d
-
-# Enable restart on reboot via systemd
-cat > /etc/systemd/system/matrix.service << 'SVCEOF'
-[Unit]
-Description=Hub Matrix Server
-After=docker.service
-Requires=docker.service
-
-[Service]
-Restart=always
-ExecStart=/usr/local/lib/docker/cli-plugins/docker-compose -f /opt/docker-compose.matrix.yml up
-ExecStop=/usr/local/lib/docker/cli-plugins/docker-compose -f /opt/docker-compose.matrix.yml down
-WorkingDirectory=/opt
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
-
-systemctl enable matrix
+docker compose --project-directory "$MATRIX_DIR" -f "$MATRIX_DIR/compose.yaml" config --quiet
+docker compose --project-directory "$MATRIX_DIR" -f "$MATRIX_DIR/compose.yaml" up -d

@@ -1,110 +1,77 @@
-variable "project_name" {
-  description = "Project name prefix for all resources"
-  type        = string
-  default     = "hub"
-}
-
-variable "environment" {
-  description = "Deployment environment (prod, staging)"
-  type        = string
-  default     = "prod"
-}
-
 variable "aws_region" {
-  description = "AWS region"
+  description = "AWS region in which the standalone homeserver is created."
   type        = string
   default     = "us-east-1"
+
+  validation {
+    condition     = var.aws_region == "us-east-1"
+    error_message = "This module is intentionally restricted to us-east-1."
+  }
 }
 
-# Networking — defaults assume an existing VPC; can be left null to create new
-variable "vpc_id" {
-  description = "Existing VPC ID. Leave null to create a minimal VPC."
+variable "ami_id" {
+  description = "Explicit, reviewed Amazon Linux 2023 x86_64 AMI ID for us-east-1."
   type        = string
-  default     = null
+
+  validation {
+    condition     = startswith(var.ami_id, "ami-")
+    error_message = "ami_id must be an explicit EC2 AMI ID."
+  }
 }
 
-variable "subnet_id" {
-  description = "Subnet ID for the EC2 instance (should be public if federation is enabled)"
-  type        = string
-  default     = null
-}
-
-variable "vpc_cidr" {
-  description = "CIDR block for a new VPC (used only when vpc_id is null)"
-  type        = string
-  default     = "10.10.0.0/16"
-}
-
-# EC2
-variable "instance_type" {
-  description = "EC2 instance type. t3.small sufficient for a single-hub Matrix server."
-  type        = string
-  default     = "t3.small"
-}
-
-variable "key_name" {
-  description = "EC2 key pair name for SSH access (leave null to disable SSH)"
-  type        = string
-  default     = null
-}
-
-variable "ebs_size_gb" {
-  description = "Size of the data EBS volume in GB (media store + Postgres)"
-  type        = number
-  default     = 30
-}
-
-# Matrix config
 variable "matrix_server_name" {
-  description = "Matrix server name (e.g. matrix.yourdomain.com)"
+  description = "Public DNS hostname for Synapse and Caddy TLS (for example matrix.example.com)."
   type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$", var.matrix_server_name))
+    error_message = "matrix_server_name must be a lowercase fully-qualified DNS hostname."
+  }
 }
 
-variable "matrix_db_password" {
-  description = "Postgres password for the synapse user"
-  type        = string
-  sensitive   = true
-}
-
-variable "matrix_registration_secret" {
-  description = "Synapse registration shared secret (openssl rand -hex 32)"
-  type        = string
-  sensitive   = true
-}
-
-variable "matrix_macaroon_secret" {
-  description = "Synapse macaroon secret (openssl rand -hex 32)"
-  type        = string
-  sensitive   = true
-}
-
-variable "matrix_form_secret" {
-  description = "Synapse form secret (openssl rand -hex 32)"
-  type        = string
-  sensitive   = true
-}
-
-variable "matrix_federation_enabled" {
-  description = "Enable Matrix federation (hub-to-hub messaging across Zenith network)"
-  type        = bool
-  default     = true
-}
-
-variable "matrix_enable_registration" {
-  description = "Allow public registration (keep false — use admin API)"
+variable "enable_runtime" {
+  description = "Create the EC2 runtime only after the module-managed secret has a populated AWSCURRENT version."
   type        = bool
   default     = false
 }
 
-# Access
-variable "allowed_cidr_blocks" {
-  description = "CIDRs allowed to reach port 8008/8448. Defaults to open (use behind ALB or VPN in prod)."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
+variable "instance_type" {
+  description = "EC2 instance type for the standalone homeserver."
+  type        = string
+  default     = "t3.small"
 }
 
-variable "ssh_cidr_blocks" {
-  description = "CIDRs allowed SSH access (port 22). Empty list disables SSH ingress."
-  type        = list(string)
-  default     = []
+variable "vpc_cidr" {
+  description = "CIDR for the dedicated VPC."
+  type        = string
+  default     = "10.10.0.0/16"
+}
+
+variable "data_volume_size_gb" {
+  description = "Size of the encrypted disposable data volume."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.data_volume_size_gb >= 20
+    error_message = "data_volume_size_gb must be at least 20 GiB."
+  }
+}
+
+variable "synapse_image" {
+  description = "Immutable Synapse container image."
+  type        = string
+  default     = "matrixdotorg/synapse@sha256:6882d26594b87171e0fe807ac6bd7f0000665cd70e73fb88c58ec9bff14c19ce"
+}
+
+variable "postgres_image" {
+  description = "Immutable PostgreSQL container image."
+  type        = string
+  default     = "postgres:16.10-alpine@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297"
+}
+
+variable "caddy_image" {
+  description = "Immutable Caddy container image."
+  type        = string
+  default     = "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"
 }

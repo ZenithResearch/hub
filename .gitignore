@@ -9,6 +9,7 @@ terraform.tfvars
 *.tfvars
 *.tfvars.json
 *.tfbackend.local
+backend.hcl
 infra/aws_baseline_80/last-image-tag.local
 .venv*
 __pycache__/

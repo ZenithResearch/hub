@@ -1,29 +1,19 @@
-output "instance_id" {
-  description = "EC2 instance ID"
-  value       = aws_instance.matrix.id
+output "matrix_url" {
+  description = "HTTPS-only public Matrix endpoint."
+  value       = "https://${var.matrix_server_name}"
 }
 
 output "elastic_ip" {
-  description = "Elastic IP — point your DNS A record here"
-  value       = aws_eip.matrix.public_ip
+  description = "Elastic IP to use for the hostname A record; null before runtime is enabled."
+  value       = try(aws_eip.matrix[0].public_ip, null)
 }
 
-output "matrix_client_url" {
-  description = "Matrix client API endpoint"
-  value       = "http://${aws_eip.matrix.public_ip}:8008"
+output "instance_id" {
+  description = "SSM-managed EC2 instance ID; null before runtime is enabled."
+  value       = try(aws_instance.matrix[0].id, null)
 }
 
-output "matrix_federation_url" {
-  description = "Matrix federation endpoint (point _matrix._tcp SRV record here)"
-  value       = "http://${aws_eip.matrix.public_ip}:8448"
-}
-
-output "security_group_id" {
-  description = "Security group ID"
-  value       = aws_security_group.matrix.id
-}
-
-output "ebs_volume_id" {
-  description = "Data EBS volume ID (Postgres + media store)"
-  value       = aws_ebs_volume.matrix_data.id
+output "secret_arn" {
+  description = "Secret to populate out of band before enabling the runtime."
+  value       = aws_secretsmanager_secret.matrix.arn
 }
