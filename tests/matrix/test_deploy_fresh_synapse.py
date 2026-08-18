@@ -101,5 +101,8 @@ def test_runtime_acceptance_requires_mount_containers_and_internal_synapse():
         "matrix-db",
         "matrix-synapse",
         "/_matrix/client/versions",
+        "for attempt in $(seq 1 120)",
+        "sleep 5",
+        "runtime did not become healthy",
     ]:
         assert marker in commands

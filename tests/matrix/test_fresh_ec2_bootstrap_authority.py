@@ -1,3 +1,5 @@
+import importlib.util
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -5,6 +7,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def read(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
+
+
+def load_bootstrap():
+    path = ROOT / "scripts/bootstrap_fresh_synapse_account.py"
+    spec = importlib.util.spec_from_file_location("bootstrap_fresh_synapse_account", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_bootstrap_template_creates_private_durable_state_and_non_root_role():
@@ -84,6 +95,8 @@ def test_bootstrap_script_fails_closed_on_profile_account_region_and_principal()
         'SOURCE_PROFILE = "zenith-hypha-bootstrap"',
         'DEPLOYMENT_PROFILE = "zenith-hypha-synapse"',
         '"iam", "create-access-key"',
+        '"delete-access-key"',
+        "stored_key_id != live_key_id",
         '"sts", "get-caller-identity"',
         'config.set(deployment_section, "role_arn", EXPECTED_ROLE_ARN)',
         'os.chmod(path, 0o600)',
@@ -93,6 +106,48 @@ def test_bootstrap_script_fails_closed_on_profile_account_region_and_principal()
     assert "print(credentials" not in script
     assert "print(alert_email" not in script
     assert "print(stored_secret" not in script
+
+
+def test_bootstrap_rotates_one_orphaned_remote_key_before_local_install(monkeypatch, tmp_path):
+    bootstrap = load_bootstrap()
+    calls = []
+
+    def fake_root_aws(arguments):
+        calls.append(tuple(arguments))
+        if arguments[:2] == ("iam", "list-access-keys"):
+            return json.dumps({"AccessKeyMetadata": [{"AccessKeyId": "ORPHANED"}]})
+        if arguments[:2] == ("iam", "delete-access-key"):
+            return ""
+        if arguments[:2] == ("iam", "create-access-key"):
+            return json.dumps(
+                {"AccessKey": {"AccessKeyId": "REPLACEMENT", "SecretAccessKey": "replacement-secret"}}
+            )
+        raise AssertionError(arguments)
+
+    def fake_profile_aws(profile, arguments):
+        if profile == bootstrap.SOURCE_PROFILE:
+            return json.dumps(
+                {"Account": bootstrap.EXPECTED_ACCOUNT, "Arn": "arn:aws:iam::610992396917:user/HyphaSynapseTerraformSource"}
+            )
+        return json.dumps(
+            {
+                "Account": bootstrap.EXPECTED_ACCOUNT,
+                "Arn": "arn:aws:sts::610992396917:assumed-role/HyphaSynapseDeploymentRole/test",
+            }
+        )
+
+    monkeypatch.setattr(bootstrap.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(bootstrap, "_run_aws", fake_root_aws)
+    monkeypatch.setattr(bootstrap, "_run_aws_profile", fake_profile_aws)
+
+    bootstrap._configure_local_profiles()
+
+    credentials = (tmp_path / ".aws/credentials").read_text(encoding="utf-8")
+    assert "REPLACEMENT" in credentials
+    assert "replacement-secret" in credentials
+    assert "ORPHANED" not in credentials
+    assert any(call[:2] == ("iam", "delete-access-key") for call in calls)
+    assert any(call[:2] == ("iam", "create-access-key") for call in calls)
 
 
 def test_bootstrap_creates_budget_and_dated_expiry_alerts_without_storing_email_in_source():

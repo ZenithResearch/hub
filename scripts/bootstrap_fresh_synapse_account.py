@@ -260,9 +260,25 @@ def _configure_local_profiles() -> None:
     stored_secret = credentials.get(SOURCE_PROFILE, "aws_secret_access_key", fallback=None)
     if keys:
         live_key_id = keys[0].get("AccessKeyId") if isinstance(keys[0], dict) else None
-        if not live_key_id or stored_key_id != live_key_id or not stored_secret:
-            raise BootstrapError("deployment source key exists but is not installed in the exact local profile")
-    else:
+        if not live_key_id:
+            raise BootstrapError("AWS returned invalid deployment source access-key metadata")
+        if stored_key_id != live_key_id or not stored_secret:
+            # AWS reveals a secret access key only once. If bootstrap was
+            # interrupted after remote creation but before the mode-0600 local
+            # write, the sole unmatched key is unrecoverable and must be
+            # rotated before this single-operator profile can proceed.
+            _run_aws(
+                (
+                    "iam",
+                    "delete-access-key",
+                    "--user-name",
+                    EXPECTED_SOURCE_USER,
+                    "--access-key-id",
+                    live_key_id,
+                )
+            )
+            keys = []
+    if not keys:
         created = _parse_json_object(
             _run_aws(("iam", "create-access-key", "--user-name", EXPECTED_SOURCE_USER, "--output", "json")),
             "deployment source access key",

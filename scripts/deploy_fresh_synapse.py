@@ -139,12 +139,15 @@ def runtime_verification_commands() -> tuple[str, ...]:
         'test "$(findmnt -n -o FSTYPE /opt/matrix-data)" = "xfs"',
         'test "$(findmnt -n -o LABEL /opt/matrix-data)" = "hypha-matrix"',
         'test "$(systemctl is-active docker)" = "active"',
-        'test "$(docker inspect --format=\'{{.State.Health.Status}}\' matrix-db)" = "healthy"',
-        'test "$(docker inspect --format=\'{{.State.Health.Status}}\' matrix-synapse)" = "healthy"',
         (
+            "for attempt in $(seq 1 120); do "
+            "db_health=$(docker inspect --format='{{.State.Health.Status}}' matrix-db 2>/dev/null || true); "
+            "synapse_health=$(docker inspect --format='{{.State.Health.Status}}' matrix-synapse 2>/dev/null || true); "
+            "if [ \"$db_health\" = healthy ] && [ \"$synapse_health\" = healthy ] && "
             "docker exec matrix-synapse python -c \"import urllib.request; "
             "r=urllib.request.urlopen('http://127.0.0.1:8008/_matrix/client/versions', timeout=10); "
-            "assert r.status == 200\""
+            "assert r.status == 200\" >/dev/null 2>&1; then exit 0; fi; "
+            "sleep 5; done; echo 'runtime did not become healthy' >&2; exit 1"
         ),
     )
 
