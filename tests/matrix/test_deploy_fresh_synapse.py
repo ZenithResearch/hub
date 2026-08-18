@@ -28,7 +28,10 @@ def test_launcher_is_single_command_configured_and_secret_safe():
         '"terraform", "plan"',
         '"terraform", "apply"',
         '"terraform", "state", "list"',
-        'if "aws_secretsmanager_secret.matrix" not in state:',
+        "if needs_base_stage(state):",
+        "runtime_verification_commands()",
+        '"ssm",\n                "send-command"',
+        '"get-command-invocation"',
         '"secretsmanager",\n            "describe-secret"',
         '"AWSCURRENT"',
         '"dns": {"type": "A"',
@@ -75,3 +78,28 @@ def test_plan_validator_rejects_unexpected_resource():
     }
     with pytest.raises(deployer.DeploymentError):
         deployer.validate_plan(plan, deployer.BASE_CREATES)
+
+
+def test_partial_base_state_is_completed_before_runtime_activation():
+    deployer = load_deployer()
+
+    assert deployer.needs_base_stage([])
+    assert deployer.needs_base_stage(["aws_secretsmanager_secret.matrix"])
+    assert not deployer.needs_base_stage(["aws_instance.matrix[0]"])
+    assert not deployer.needs_base_stage(["aws_eip.matrix[0]"])
+
+
+def test_runtime_acceptance_requires_mount_containers_and_internal_synapse():
+    deployer = load_deployer()
+    commands = "\n".join(deployer.runtime_verification_commands())
+
+    for marker in [
+        "cloud-init status --wait",
+        "findmnt -n -o FSTYPE /opt/matrix-data",
+        "findmnt -n -o LABEL /opt/matrix-data",
+        "systemctl is-active docker",
+        "matrix-db",
+        "matrix-synapse",
+        "/_matrix/client/versions",
+    ]:
+        assert marker in commands

@@ -61,6 +61,52 @@ Resources:
                 Action: sts:AssumeRole
                 Resource: arn:aws:iam::610992396917:role/HyphaSynapseDeploymentRole
 
+  HyphaSynapseInstanceBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: HyphaSynapseInstanceBoundary
+      Description: Maximum permissions available to the fresh Synapse EC2 instance role.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SsmManagedInstanceCore
+            Effect: Allow
+            Action:
+              - ssm:DescribeAssociation
+              - ssm:GetDeployablePatchSnapshotForInstance
+              - ssm:GetDocument
+              - ssm:DescribeDocument
+              - ssm:GetManifest
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:ListAssociations
+              - ssm:ListInstanceAssociations
+              - ssm:PutInventory
+              - ssm:PutComplianceItems
+              - ssm:PutConfigurePackageResult
+              - ssm:UpdateAssociationStatus
+              - ssm:UpdateInstanceAssociationStatus
+              - ssm:UpdateInstanceInformation
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
+              - ec2messages:AcknowledgeMessage
+              - ec2messages:DeleteMessage
+              - ec2messages:FailMessage
+              - ec2messages:GetEndpoint
+              - ec2messages:GetMessages
+              - ec2messages:SendReply
+            Resource: "*"
+          - Sid: ReadExactRuntimeSecret
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: arn:aws:secretsmanager:us-east-1:610992396917:secret:hypha/fresh-synapse/runtime-*
+          - Sid: DiscoverAttachedDataVolume
+            Effect: Allow
+            Action: ec2:DescribeVolumes
+            Resource: "*"
+
   HyphaSynapseDeploymentRole:
     Type: AWS::IAM::Role
     DependsOn: HyphaSynapseTerraformSource
@@ -81,7 +127,7 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: Ec2InfrastructureInTargetRegion
+              - Sid: Ec2ReadAndCreateInTargetRegion
                 Effect: Allow
                 Action:
                   - ec2:AllocateAddress
@@ -90,8 +136,6 @@ Resources:
                   - ec2:AssociateRouteTable
                   - ec2:AttachInternetGateway
                   - ec2:AttachVolume
-                  - ec2:AuthorizeSecurityGroupEgress
-                  - ec2:AuthorizeSecurityGroupIngress
                   - ec2:CreateInternetGateway
                   - ec2:CreateRoute
                   - ec2:CreateRouteTable
@@ -100,14 +144,7 @@ Resources:
                   - ec2:CreateTags
                   - ec2:CreateVolume
                   - ec2:CreateVpc
-                  - ec2:DeleteInternetGateway
-                  - ec2:DeleteRoute
-                  - ec2:DeleteRouteTable
-                  - ec2:DeleteSecurityGroup
-                  - ec2:DeleteSubnet
                   - ec2:DeleteTags
-                  - ec2:DeleteVolume
-                  - ec2:DeleteVpc
                   - ec2:DescribeAddresses
                   - ec2:DescribeAddressesAttribute
                   - ec2:DescribeAvailabilityZones
@@ -126,45 +163,82 @@ Resources:
                   - ec2:DescribeVolumes
                   - ec2:DescribeVpcAttribute
                   - ec2:DescribeVpcs
-                  - ec2:DetachInternetGateway
-                  - ec2:DetachVolume
-                  - ec2:DisassociateAddress
-                  - ec2:DisassociateIamInstanceProfile
-                  - ec2:DisassociateRouteTable
                   - ec2:ModifyInstanceAttribute
                   - ec2:ModifySubnetAttribute
                   - ec2:ModifyVolume
                   - ec2:ModifyVpcAttribute
-                  - ec2:ReleaseAddress
                   - ec2:ReplaceIamInstanceProfileAssociation
-                  - ec2:RebootInstances
-                  - ec2:RevokeSecurityGroupEgress
-                  - ec2:RevokeSecurityGroupIngress
                   - ec2:RunInstances
-                  - ec2:StopInstances
-                  - ec2:TerminateInstances
                 Resource: "*"
                 Condition:
                   StringEquals:
                     aws:RequestedRegion: us-east-1
+              - Sid: RebootTaggedSynapseInstance
+                Effect: Allow
+                Action: ec2:RebootInstances
+                Resource: arn:aws:ec2:us-east-1:610992396917:instance/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: hypha
+                    ec2:ResourceTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: ManageTaggedSynapseSecurityGroupRules
+                Effect: Allow
+                Action:
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupIngress
+                Resource: arn:aws:ec2:us-east-1:610992396917:security-group/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: hypha
+                    ec2:ResourceTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: CreateExactProductionRoleWithBoundary
+                Effect: Allow
+                Action: iam:CreateRole
+                Resource: arn:aws:iam::610992396917:role/hypha-fresh-synapse
+                Condition:
+                  ArnEquals:
+                    iam:PermissionsBoundary: !Ref HyphaSynapseInstanceBoundary
+              - Sid: SetOnlyExactProductionBoundary
+                Effect: Allow
+                Action: iam:PutRolePermissionsBoundary
+                Resource: arn:aws:iam::610992396917:role/hypha-fresh-synapse
+                Condition:
+                  ArnEquals:
+                    iam:PermissionsBoundary: !Ref HyphaSynapseInstanceBoundary
+              - Sid: AttachOnlySsmCorePolicy
+                Effect: Allow
+                Action:
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                Resource: arn:aws:iam::610992396917:role/hypha-fresh-synapse
+                Condition:
+                  ArnEquals:
+                    iam:PolicyARN: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+              - Sid: PassExactProductionRoleToEc2
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: arn:aws:iam::610992396917:role/hypha-fresh-synapse
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ec2.amazonaws.com
               - Sid: ExactProductionIamRoleAndProfile
                 Effect: Allow
                 Action:
                   - iam:AddRoleToInstanceProfile
-                  - iam:AttachRolePolicy
                   - iam:CreateInstanceProfile
-                  - iam:CreateRole
                   - iam:DeleteInstanceProfile
                   - iam:DeleteRole
                   - iam:DeleteRolePolicy
-                  - iam:DetachRolePolicy
                   - iam:GetInstanceProfile
                   - iam:GetRole
                   - iam:GetRolePolicy
                   - iam:ListAttachedRolePolicies
                   - iam:ListInstanceProfilesForRole
                   - iam:ListRolePolicies
-                  - iam:PassRole
                   - iam:PutRolePolicy
                   - iam:RemoveRoleFromInstanceProfile
                   - iam:TagInstanceProfile
@@ -176,6 +250,12 @@ Resources:
                 Resource:
                   - arn:aws:iam::610992396917:role/hypha-fresh-synapse
                   - arn:aws:iam::610992396917:instance-profile/hypha-fresh-synapse
+              - Sid: ReadExactInstanceBoundary
+                Effect: Allow
+                Action:
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                Resource: !Ref HyphaSynapseInstanceBoundary
               - Sid: ProductionMatrixSecrets
                 Effect: Allow
                 Action:

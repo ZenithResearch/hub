@@ -111,7 +111,8 @@ data "aws_secretsmanager_secret_version" "matrix" {
 }
 
 resource "aws_iam_role" "matrix" {
-  name = "hypha-fresh-synapse"
+  name                 = "hypha-fresh-synapse"
+  permissions_boundary = "arn:aws:iam::610992396917:policy/HyphaSynapseInstanceBoundary"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

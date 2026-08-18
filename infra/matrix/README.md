@@ -52,6 +52,11 @@ Security boundaries:
 - only TCP 80 and 443 are public, and only Caddy publishes host ports;
 - administration uses Session Manager through the instance role; there is no
   SSH key or port 22 path;
+- a CloudFormation-owned permissions boundary caps the instance role at SSM
+  core, exact runtime-secret read, and attached-volume discovery even if an
+  inline role policy is changed; routine deployment cannot terminate or stop
+  EC2 instances, and security-group changes/reboots require the exact Synapse
+  resource tags;
 - Synapse uses native password authentication with public registration off;
   MAS, delegated authentication, and MSC4108 are not installed or configured;
 - all three container defaults are immutable digest references;
@@ -93,8 +98,11 @@ plan against exact resource/action allowlists, creates the base resources,
 populates the runtime secret directly into Secrets Manager, and launches one
 EC2 instance plus one Elastic IP. It never reads `SecretString` into Terraform
 state and never provisions a Matrix administrator. Reruns are idempotent and
-skip the base stage once its state exists. Its final JSON contains only the
-instance identifier, public URL, and exact DNS A record.
+complete partial base applies before runtime activation. Before reporting
+success it requires SSM/cloud-init readiness, the exact XFS mount, Docker,
+healthy PostgreSQL and Synapse containers, and an internal Matrix HTTP 200.
+Its final JSON contains only the instance identifier, public URL, and exact DNS
+A record.
 
 The bootstrap also creates a `$30` monthly budget and SNS-backed Free Plan
 expiry alerts at 60, 30, 14, and 7 days. Email confirmation is recommended but

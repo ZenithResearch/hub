@@ -88,6 +88,7 @@ def test_data_volume_is_encrypted_disposable_and_mounted_by_nitro_id_and_uuid():
     main = read("infra/matrix/aws/main.tf")
     user_data = read("infra/matrix/aws/user_data.sh.tpl")
 
+    assert 'permissions_boundary = "arn:aws:iam::610992396917:policy/HyphaSynapseInstanceBoundary"' in main
     assert "dnf install -y awscli docker jq xfsprogs" in user_data
     assert "dnf install -y awscli curl" not in user_data
 

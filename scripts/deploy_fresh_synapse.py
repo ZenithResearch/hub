@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+import time
 from typing import Any, Sequence
 
 EXPECTED_PROFILE = "zenith-hypha-free"
@@ -124,6 +125,123 @@ def validate_plan(plan: dict[str, Any], allowed_creates: set[str]) -> dict[str, 
     if unexpected or any(actions != ["create"] for actions in changes.values()):
         raise DeploymentError("Terraform plan contains an unapproved action")
     return changes
+
+
+def needs_base_stage(state: Sequence[str]) -> bool:
+    return not any(address in state for address in RUNTIME_CREATES)
+
+
+def runtime_verification_commands() -> tuple[str, ...]:
+    return (
+        "set -euo pipefail",
+        "cloud-init status --wait",
+        'test "$(cloud-init status)" = "status: done"',
+        'test "$(findmnt -n -o FSTYPE /opt/matrix-data)" = "xfs"',
+        'test "$(findmnt -n -o LABEL /opt/matrix-data)" = "hypha-matrix"',
+        'test "$(systemctl is-active docker)" = "active"',
+        'test "$(docker inspect --format=\'{{.State.Health.Status}}\' matrix-db)" = "healthy"',
+        'test "$(docker inspect --format=\'{{.State.Health.Status}}\' matrix-synapse)" = "healthy"',
+        (
+            "docker exec matrix-synapse python -c \"import urllib.request; "
+            "r=urllib.request.urlopen('http://127.0.0.1:8008/_matrix/client/versions', timeout=10); "
+            "assert r.status == 200\""
+        ),
+    )
+
+
+def _verify_runtime(root: Path, instance_id: str) -> None:
+    online_deadline = time.monotonic() + 600
+    while time.monotonic() < online_deadline:
+        raw = _run(
+            (
+                "aws",
+                "ssm",
+                "describe-instance-information",
+                "--filters",
+                "Key=InstanceIds,Values=" + instance_id,
+                "--output",
+                "json",
+            ),
+            cwd=root,
+            profile=EXPECTED_DEPLOYMENT_PROFILE,
+            capture=True,
+        )
+        try:
+            rows = json.loads(raw).get("InstanceInformationList", [])
+        except (AttributeError, json.JSONDecodeError) as exc:
+            raise DeploymentError("AWS returned invalid managed-instance metadata") from exc
+        if rows and isinstance(rows[0], dict) and rows[0].get("PingStatus") == "Online":
+            break
+        time.sleep(5)
+    else:
+        raise DeploymentError("runtime did not become available through SSM")
+
+    with TemporaryDirectory(prefix="hypha-synapse-verify-") as temporary_name:
+        parameter_path = Path(temporary_name) / "commands.json"
+        parameter_path.write_text(
+            json.dumps({"commands": list(runtime_verification_commands())}),
+            encoding="utf-8",
+        )
+        os.chmod(parameter_path, 0o600)
+        raw = _run(
+            (
+                "aws",
+                "ssm",
+                "send-command",
+                "--instance-ids",
+                instance_id,
+                "--document-name",
+                "AWS-RunShellScript",
+                "--comment",
+                "Verify fresh Synapse runtime",
+                "--parameters",
+                "file://" + str(parameter_path),
+                "--output",
+                "json",
+            ),
+            cwd=root,
+            profile=EXPECTED_DEPLOYMENT_PROFILE,
+            capture=True,
+        )
+    try:
+        command_id = json.loads(raw)["Command"]["CommandId"]
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise DeploymentError("AWS returned invalid runtime verification metadata") from exc
+    if not isinstance(command_id, str) or not command_id:
+        raise DeploymentError("AWS returned invalid runtime verification metadata")
+
+    command_deadline = time.monotonic() + 900
+    while time.monotonic() < command_deadline:
+        try:
+            raw = _run(
+                (
+                    "aws",
+                    "ssm",
+                    "get-command-invocation",
+                    "--command-id",
+                    command_id,
+                    "--instance-id",
+                    instance_id,
+                    "--output",
+                    "json",
+                ),
+                cwd=root,
+                profile=EXPECTED_DEPLOYMENT_PROFILE,
+                capture=True,
+            )
+        except DeploymentError:
+            time.sleep(5)
+            continue
+        try:
+            status = json.loads(raw).get("Status")
+        except (AttributeError, json.JSONDecodeError) as exc:
+            raise DeploymentError("AWS returned invalid runtime verification status") from exc
+        if status == "Success":
+            return
+        if status in {"Cancelled", "Cancelling", "Failed", "TimedOut"}:
+            raise DeploymentError("runtime verification failed")
+        time.sleep(5)
+    raise DeploymentError("runtime verification timed out")
 
 
 def _plan_and_apply(aws_dir: Path, temporary: Path, name: str, allowed_creates: set[str]) -> None:
@@ -261,7 +379,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 profile=EXPECTED_DEPLOYMENT_PROFILE,
                 capture=True,
             ).splitlines()
-            if "aws_secretsmanager_secret.matrix" not in state:
+            if needs_base_stage(state):
                 _write_configuration(
                     aws_dir,
                     args.hostname,
@@ -287,6 +405,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_configuration(aws_dir, args.hostname, args.ami_id, args.instance_type, args.data_volume_size_gb, True)
             _plan_and_apply(aws_dir, temporary, "runtime", RUNTIME_CREATES)
         outputs = _safe_outputs(aws_dir)
+        _verify_runtime(root, outputs["instance_id"])
     except (DeploymentError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

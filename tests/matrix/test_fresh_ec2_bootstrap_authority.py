@@ -19,6 +19,10 @@ def test_bootstrap_template_creates_private_durable_state_and_non_root_role():
     assert "AWS::IAM::Role" in template
     assert "AWS::IAM::User" in template
     assert "HyphaSynapseTerraformSource" in template
+    assert "HyphaSynapseInstanceBoundary" in template
+    assert "iam:PermissionsBoundary" in template
+    assert "iam:PassedToService: ec2.amazonaws.com" in template
+    assert "iam:PolicyARN: arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" in template
     assert "HyphaSynapseDeploymentRole" in template
     assert "DependsOn: HyphaSynapseTerraformSource" in template
     assert "sts:AssumeRole" in template
@@ -41,6 +45,12 @@ def test_deployment_policy_is_service_bounded_and_cannot_touch_castalia_bucket()
     assert "ec2:DescribeInstanceCreditSpecifications" in template
     assert "ec2:DescribeAddressesAttribute" in template
     assert "ec2:RebootInstances" in template
+    assert "ec2:ResourceTag/Project: hypha" in template
+    assert "ec2:ResourceTag/Component: fresh-synapse" in template
+    assert "ManageTaggedSynapseSecurityGroupRules" in template
+    assert "ec2:TerminateInstances" not in template
+    assert "ec2:StopInstances" not in template
+    assert "iam:DeleteRolePermissionsBoundary" not in template
     assert "arn:aws:iam::610992396917:role/hypha-fresh-synapse" in template
     assert "arn:aws:iam::610992396917:instance-profile/hypha-fresh-synapse" in template
     assert "ssm:StartSession" in template
