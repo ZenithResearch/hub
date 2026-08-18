@@ -64,6 +64,11 @@ def test_deployment_policy_is_service_bounded_and_cannot_touch_castalia_bucket()
     assert "aws:RequestTag/Project: hypha" in template
     assert "aws:RequestTag/Component: fresh-synapse" in template
     assert "ConfigureTaggedSynapseInfrastructure" in template
+    create_start = template.index("- Sid: CreateSynapseInfrastructureInTargetRegion")
+    create_end = template.index("- Sid: TagOnlyDuringSynapseResourceCreation")
+    create_statement = template[create_start:create_end]
+    assert "aws:RequestTag/Project: hypha" in create_statement
+    assert "aws:RequestTag/Component: fresh-synapse" in create_statement
     assert "SsmTaggedSynapseInstance" in template
     assert "ssm:resourceTag/Project: hypha" in template
     assert "ssm:resourceTag/Component: fresh-synapse" in template

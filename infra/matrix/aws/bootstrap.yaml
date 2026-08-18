@@ -166,6 +166,8 @@ Resources:
                 Resource: "*"
                 Condition:
                   StringEquals:
+                    aws:RequestTag/Project: hypha
+                    aws:RequestTag/Component: fresh-synapse
                     aws:RequestedRegion: us-east-1
               - Sid: TagOnlyDuringSynapseResourceCreation
                 Effect: Allow
