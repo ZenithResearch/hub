@@ -88,6 +88,9 @@ def test_data_volume_is_encrypted_disposable_and_mounted_by_nitro_id_and_uuid():
     main = read("infra/matrix/aws/main.tf")
     user_data = read("infra/matrix/aws/user_data.sh.tpl")
 
+    assert "dnf install -y awscli docker jq xfsprogs" in user_data
+    assert "dnf install -y awscli curl" not in user_data
+
     assert 'ebs_block_device {' in main
     assert 'encrypted             = true' in main
     assert 'delete_on_termination = true' in main
@@ -96,9 +99,10 @@ def test_data_volume_is_encrypted_disposable_and_mounted_by_nitro_id_and_uuid():
     assert "describe-volumes" in user_data
     assert "hypha-fresh-synapse-data" in user_data
     assert "EXPECTED_VOLUME_ID" in user_data
-    assert "hypha-matrix-data" in user_data
+    assert "hypha-matrix" in user_data
+    assert "hypha-matrix-data" not in user_data
     assert 'FILESYSTEM_TYPE="xfs"' in user_data
-    assert 'FILESYSTEM_LABEL="hypha-matrix-data"' in user_data
+    assert 'FILESYSTEM_LABEL="hypha-matrix"' in user_data
     assert 'grep -Fq "UUID=$DATA_UUID " /etc/fstab' in user_data
     assert "findmnt" in user_data
     assert 'blkid -s UUID -o value' in user_data

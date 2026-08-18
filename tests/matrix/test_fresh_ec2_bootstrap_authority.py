@@ -17,9 +17,13 @@ def test_bootstrap_template_creates_private_durable_state_and_non_root_role():
     assert "PublicAccessBlockConfiguration:" in template
     assert template.count("DeletionPolicy: Retain") >= 1
     assert "AWS::IAM::Role" in template
+    assert "AWS::IAM::User" in template
+    assert "HyphaSynapseTerraformSource" in template
     assert "HyphaSynapseDeploymentRole" in template
+    assert "DependsOn: HyphaSynapseTerraformSource" in template
     assert "sts:AssumeRole" in template
-    assert "arn:aws:iam::610992396917:root" in template
+    assert "arn:aws:iam::610992396917:user/HyphaSynapseTerraformSource" in template
+    assert "arn:aws:iam::610992396917:root" not in template
 
 
 def test_deployment_policy_is_service_bounded_and_cannot_touch_castalia_bucket():
@@ -34,6 +38,9 @@ def test_deployment_policy_is_service_bounded_and_cannot_touch_castalia_bucket()
     assert "hypha-synapse-terraform-state" in template
     assert "hypha/fresh-synapse/runtime" in template
     assert "iam:PassRole" in template
+    assert "ec2:DescribeInstanceCreditSpecifications" in template
+    assert "ec2:DescribeAddressesAttribute" in template
+    assert "ec2:RebootInstances" in template
     assert "arn:aws:iam::610992396917:role/hypha-fresh-synapse" in template
     assert "arn:aws:iam::610992396917:instance-profile/hypha-fresh-synapse" in template
     assert "ssm:StartSession" in template
@@ -56,18 +63,26 @@ def test_bootstrap_script_fails_closed_on_profile_account_region_and_principal()
         "hypha-synapse-bootstrap",
         "getpass.getpass",
         "AlertEmail=",
+        "ParameterKey=AlertEmail,UsePreviousValue=true",
+        "if not stack_exists():",
         "NamedTemporaryFile",
         "os.chmod",
         "0o600",
         '"file://" + parameter_path',
         "os.unlink(parameter_path)",
+        'EXPECTED_SOURCE_USER = "HyphaSynapseTerraformSource"',
+        'SOURCE_PROFILE = "zenith-hypha-bootstrap"',
+        'DEPLOYMENT_PROFILE = "zenith-hypha-synapse"',
+        '"iam", "create-access-key"',
+        '"sts", "get-caller-identity"',
+        'config.set(deployment_section, "role_arn", EXPECTED_ROLE_ARN)',
+        'os.chmod(path, 0o600)',
     ]:
         assert marker in script
-    assert "AccessKeyId" not in script
-    assert "SecretAccessKey" not in script
     assert "SessionToken" not in script
     assert "print(credentials" not in script
     assert "print(alert_email" not in script
+    assert "print(stored_secret" not in script
 
 
 def test_bootstrap_creates_budget_and_dated_expiry_alerts_without_storing_email_in_source():

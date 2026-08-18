@@ -10,7 +10,7 @@ MATRIX_DIR=/opt/matrix
 SECRET_JSON=$(mktemp /run/matrix-secret.XXXXXX)
 trap 'rm -f "$SECRET_JSON"' EXIT
 
-dnf install -y awscli curl docker jq xfsprogs
+dnf install -y awscli docker jq xfsprogs
 
 # Resolve only the tagged data volume attached to this instance. Nitro names
 # EBS devices by volume ID, so never trust the requested /dev/sdX alias.
@@ -37,11 +37,11 @@ DATA_DEVICE=$(readlink -f "$EXPECTED_BY_ID")
 FILESYSTEM_TYPE=$(blkid -s TYPE -o value "$DATA_DEVICE" 2>/dev/null || true)
 FILESYSTEM_LABEL=$(blkid -s LABEL -o value "$DATA_DEVICE" 2>/dev/null || true)
 if [ -z "$FILESYSTEM_TYPE" ]; then
-  mkfs.xfs -L hypha-matrix-data "$DATA_DEVICE" >/dev/null
+  mkfs.xfs -L hypha-matrix "$DATA_DEVICE" >/dev/null
   FILESYSTEM_TYPE="xfs"
-  FILESYSTEM_LABEL="hypha-matrix-data"
+  FILESYSTEM_LABEL="hypha-matrix"
 fi
-[ "$FILESYSTEM_TYPE" = "xfs" ] && [ "$FILESYSTEM_LABEL" = "hypha-matrix-data" ] || {
+[ "$FILESYSTEM_TYPE" = "xfs" ] && [ "$FILESYSTEM_LABEL" = "hypha-matrix" ] || {
   echo "Refusing unexpected filesystem on tagged EBS data volume" >&2
   exit 1
 }

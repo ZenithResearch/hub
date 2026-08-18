@@ -59,49 +59,54 @@ Security boundaries:
   block device. Bootstrap requires exactly one volume attached to the instance
   with the `hypha-fresh-synapse-data` tag, resolves that exact volume's Nitro
   by-id device, formats a blank device with the deployment-specific
-  `hypha-matrix-data` XFS label, accepts only that exact label on a retry, and
+  `hypha-matrix` XFS label, accepts only that exact label on a retry, and
   persists one UUID mount entry;
 - Terraform creates only the Secrets Manager container. Secret values are
   fetched on the instance at runtime and never enter Terraform variables,
   state, user data, or bootstrap logs.
 
-### Two-stage deployment
+### One-command deployment
 
-1. Run the one-time root bootstrap with the exact guarded profile and region:
-   `python3 scripts/bootstrap_fresh_synapse_account.py --profile
-   zenith-hypha-free --region us-east-1`. This creates only the retained,
-   private, encrypted, versioned state bucket and the bounded
-   `HyphaSynapseDeploymentRole`. The prompt also wires a `$30` monthly AWS
-   Budget to the primary account email without echoing or committing it, plus
-   SNS-backed Free Plan expiry alerts at 60, 30, 14, and 7 days. Confirm the
-   SNS subscription email, then require
-   `python3 scripts/verify_fresh_synapse_alerts.py --profile
-   zenith-hypha-synapse --region us-east-1` to pass before runtime activation.
-   The verifier checks the budget, confirmed subscription, and four schedules
-   without printing the email endpoint. Configure the local
-   `zenith-hypha-synapse` profile to assume that role from
-   `zenith-hypha-free`; all subsequent commands use the assumed role.
-2. Initialize the isolated backend with `terraform init -backend-config=
-   backend.hcl` after copying `backend.hcl.example` to an ignored
-   `backend.hcl`.
-3. Copy `terraform.tfvars.example` to an ignored `terraform.tfvars`. Replace the
-   example hostname and AMI identifier, leaving `enable_runtime = false`.
-4. Run `terraform plan` and `terraform apply`. This creates
-   the network, IAM role, and an empty Secrets Manager secret, but no EC2
-   runtime.
-5. Run `python3 scripts/populate_fresh_synapse_secret.py --profile
-   zenith-hypha-synapse --region us-east-1`. The script requires the assumed
-   deployment role, generates all four values locally, writes them through a
-   mode-0600 temporary file, creates `AWSCURRENT`, deletes the temporary file,
-   and prints only safe version metadata.
-6. Set `enable_runtime = true`, then plan and apply again. Bootstrap waits
-   for the `AWSCURRENT` version, fetches it directly from Secrets Manager, and
-   validates its exact key set before Docker starts. The provider's
-   `aws_secretsmanager_secret_version` declaration is intentionally disabled:
-   enabling that data source would copy `SecretString` into Terraform state.
-7. Point the hostname A record at `terraform output -raw elastic_ip`. Caddy
-   obtains and renews TLS automatically; the public endpoint is the HTTPS-only
-   `matrix_url` output.
+Requirements are Python 3, AWS CLI, Terraform, and a configured
+`zenith-hypha-free` profile for the target account. Supply only the reviewed
+AMI and public hostname:
+
+```bash
+python3 scripts/deploy_fresh_synapse.py \
+  --profile zenith-hypha-free \
+  --region us-east-1 \
+  --hostname synapse.zenith-research.ca \
+  --ami-id ami-0332d564d76dbd8d6
+```
+
+On the first run, the launcher invokes the guarded bootstrap and privately
+prompts for the budget/expiry-alert email. CloudFormation creates the retained
+state bucket, the credential-only `HyphaSynapseTerraformSource` user, and the
+exact-trust `HyphaSynapseDeploymentRole`. The bootstrap creates at most one
+access key, writes it directly to the mode-0600 local AWS credentials file,
+configures the source and assumed-role profiles, and verifies both identities.
+No manual IAM user, access-key, profile, backend, or variable-file setup is
+required.
+
+The launcher then initializes isolated state, validates each saved Terraform
+plan against exact resource/action allowlists, creates the base resources,
+populates the runtime secret directly into Secrets Manager, and launches one
+EC2 instance plus one Elastic IP. It never reads `SecretString` into Terraform
+state and never provisions a Matrix administrator. Reruns are idempotent and
+skip the base stage once its state exists. Its final JSON contains only the
+instance identifier, public URL, and exact DNS A record.
+
+The bootstrap also creates a `$30` monthly budget and SNS-backed Free Plan
+expiry alerts at 60, 30, 14, and 7 days. Email confirmation is recommended but
+does not block the runtime. Verify it without disclosing the endpoint:
+
+```bash
+python3 scripts/verify_fresh_synapse_alerts.py \
+  --profile zenith-hypha-synapse --region us-east-1
+```
+
+After setting the emitted A record, Caddy obtains and renews TLS automatically;
+the public endpoint is the HTTPS-only `matrix_url` output.
 
 The EC2 role has the AWS-managed `AmazonSSMManagedInstanceCore` policy. Its
 inline policy permits `secretsmanager:GetSecretValue` only on the exact
@@ -110,19 +115,10 @@ bootstrap to its tagged attached data volume. It has no wildcard secret access.
 
 ### Administration
 
-There is no SSH configuration. After public TLS is valid, create the sole
-native-password administrator through the exact assumed-role wrapper:
-
-```bash
-python3 scripts/provision_fresh_synapse_admin.py \
-  --profile zenith-hypha-synapse --region us-east-1
-```
-
-The wrapper permits only `@beaver:synapse.zenith-research.ca`, reads only the
-registration authority from the exact runtime secret in memory, creates the
-account with Synapse's shared-secret native registration API and `admin=true`,
-and stores the generated password in macOS Keychain without printing it. Use
-the `instance_id` output for subsequent Session Manager administration.
+There is no SSH configuration and the launcher creates no Matrix users or
+administrators. Account provisioning is a separate, explicit native-Synapse
+operation after public TLS is valid. Use the `instance_id` output for Session
+Manager administration.
 
 ### Destruction and persistence
 

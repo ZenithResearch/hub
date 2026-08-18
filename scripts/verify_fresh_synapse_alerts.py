@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Sequence
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 EXPECTED_PROFILE = "zenith-hypha-synapse"
@@ -117,7 +118,11 @@ def _verify_budget() -> None:
     if not isinstance(budget, dict) or budget.get("BudgetName") != EXPECTED_BUDGET:
         raise VerificationError("monthly budget identity mismatch")
     limit = budget.get("BudgetLimit")
-    if not isinstance(limit, dict) or limit.get("Amount") != "30" or limit.get("Unit") != "USD":
+    try:
+        amount = Decimal(limit.get("Amount", "")) if isinstance(limit, dict) else None
+    except (InvalidOperation, TypeError):
+        amount = None
+    if amount != Decimal("30") or not isinstance(limit, dict) or limit.get("Unit") != "USD":
         raise VerificationError("monthly budget limit mismatch")
     if budget.get("BudgetType") != "COST" or budget.get("TimeUnit") != "MONTHLY":
         raise VerificationError("monthly budget policy mismatch")

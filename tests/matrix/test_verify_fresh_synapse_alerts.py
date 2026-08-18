@@ -1,6 +1,16 @@
 from pathlib import Path
+import importlib.util
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_verifier():
+    path = ROOT / "scripts/verify_fresh_synapse_alerts.py"
+    spec = importlib.util.spec_from_file_location("verify_fresh_synapse_alerts", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_alert_verifier_requires_assumed_role_and_exact_budget_subscription_schedules():
@@ -29,3 +39,19 @@ def test_alert_verifier_requires_assumed_role_and_exact_budget_subscription_sche
         assert marker in policy
     for forbidden in ["print(endpoint", 'response.get("Endpoint")', "Subscriptions\"]"]:
         assert forbidden not in script
+
+
+def test_budget_verifier_accepts_equivalent_aws_decimal_serializations(monkeypatch):
+    verifier = load_verifier()
+
+    for amount in ("30", "30.0", "30.00"):
+        monkeypatch.setattr(
+            verifier,
+            "_run_aws",
+            lambda arguments, amount=amount: (
+                '{"Budget":{"BudgetName":"hypha-synapse-monthly",'
+                '"BudgetLimit":{"Amount":"' + amount + '","Unit":"USD"},'
+                '"BudgetType":"COST","TimeUnit":"MONTHLY"}}'
+            ),
+        )
+        verifier._verify_budget()

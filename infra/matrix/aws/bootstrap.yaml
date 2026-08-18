@@ -48,8 +48,22 @@ Resources:
               Bool:
                 aws:SecureTransport: false
 
+  HyphaSynapseTerraformSource:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: HyphaSynapseTerraformSource
+      Policies:
+        - PolicyName: AssumeHyphaSynapseDeploymentRole
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: arn:aws:iam::610992396917:role/HyphaSynapseDeploymentRole
+
   HyphaSynapseDeploymentRole:
     Type: AWS::IAM::Role
+    DependsOn: HyphaSynapseTerraformSource
     Properties:
       RoleName: HyphaSynapseDeploymentRole
       Description: Bounded Terraform deployment authority for the production Hypha Matrix stack.
@@ -57,10 +71,10 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: AccountRootOnly
+          - Sid: ExactTerraformSourceOnly
             Effect: Allow
             Principal:
-              AWS: arn:aws:iam::610992396917:root
+              AWS: arn:aws:iam::610992396917:user/HyphaSynapseTerraformSource
             Action: sts:AssumeRole
       Policies:
         - PolicyName: HyphaSynapseBoundedDeployment
@@ -95,9 +109,11 @@ Resources:
                   - ec2:DeleteVolume
                   - ec2:DeleteVpc
                   - ec2:DescribeAddresses
+                  - ec2:DescribeAddressesAttribute
                   - ec2:DescribeAvailabilityZones
                   - ec2:DescribeIamInstanceProfileAssociations
                   - ec2:DescribeImages
+                  - ec2:DescribeInstanceCreditSpecifications
                   - ec2:DescribeInstanceAttribute
                   - ec2:DescribeInstances
                   - ec2:DescribeInstanceTypes
@@ -121,6 +137,7 @@ Resources:
                   - ec2:ModifyVpcAttribute
                   - ec2:ReleaseAddress
                   - ec2:ReplaceIamInstanceProfileAssociation
+                  - ec2:RebootInstances
                   - ec2:RevokeSecurityGroupEgress
                   - ec2:RevokeSecurityGroupIngress
                   - ec2:RunInstances
@@ -341,8 +358,11 @@ Outputs:
     Description: Private versioned S3 bucket for the isolated Terraform backend.
     Value: !Ref TerraformStateBucket
   DeploymentRoleArn:
-    Description: Root-trusted bounded deployment role for subsequent Terraform operations.
+    Description: Bounded deployment role trusted only by the CloudFormation-managed Terraform source user.
     Value: !GetAtt HyphaSynapseDeploymentRole.Arn
+  DeploymentSourceUserName:
+    Description: Credential-only IAM user used locally to assume the bounded deployment role.
+    Value: !Ref HyphaSynapseTerraformSource
   ExpiryAlertTopicArn:
     Description: SNS topic whose email subscription must be confirmed for dated expiry alerts.
     Value: !Ref ExpiryAlertTopic
