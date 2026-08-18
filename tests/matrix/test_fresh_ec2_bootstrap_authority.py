@@ -84,6 +84,13 @@ def test_deployment_policy_is_service_bounded_and_cannot_touch_castalia_bucket()
     assert "ec2:ModifyVolume" not in template
     assert "ec2:ReplaceIamInstanceProfileAssociation" not in template
     assert "iam:DeleteRolePermissionsBoundary" not in template
+    assert "iam:UpdateAssumeRolePolicy" not in template
+    assert "secretsmanager:PutResourcePolicy" not in template
+    assert "ssm:ListCommandInvocations" not in template
+    secret_start = template.index("- Sid: ProductionMatrixSecrets")
+    secret_end = template.index("- Sid: SsmManagedInstanceMetadata")
+    deployment_secret_statement = template[secret_start:secret_end]
+    assert "secretsmanager:GetSecretValue" not in deployment_secret_statement
     assert "arn:aws:iam::610992396917:role/hypha-fresh-synapse" in template
     assert "arn:aws:iam::610992396917:instance-profile/hypha-fresh-synapse" in template
     assert "ssm:StartSession" in template

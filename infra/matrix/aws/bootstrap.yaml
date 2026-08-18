@@ -276,9 +276,6 @@ Resources:
                 Action:
                   - iam:AddRoleToInstanceProfile
                   - iam:CreateInstanceProfile
-                  - iam:DeleteInstanceProfile
-                  - iam:DeleteRole
-                  - iam:DeleteRolePolicy
                   - iam:GetInstanceProfile
                   - iam:GetRole
                   - iam:GetRolePolicy
@@ -286,13 +283,8 @@ Resources:
                   - iam:ListInstanceProfilesForRole
                   - iam:ListRolePolicies
                   - iam:PutRolePolicy
-                  - iam:RemoveRoleFromInstanceProfile
                   - iam:TagInstanceProfile
                   - iam:TagRole
-                  - iam:UntagInstanceProfile
-                  - iam:UntagRole
-                  - iam:UpdateAssumeRolePolicy
-                  - iam:UpdateRoleDescription
                 Resource:
                   - arn:aws:iam::610992396917:role/hypha-fresh-synapse
                   - arn:aws:iam::610992396917:instance-profile/hypha-fresh-synapse
@@ -306,24 +298,16 @@ Resources:
                 Effect: Allow
                 Action:
                   - secretsmanager:CreateSecret
-                  - secretsmanager:DeleteSecret
                   - secretsmanager:DescribeSecret
-                  - secretsmanager:GetSecretValue
                   - secretsmanager:GetResourcePolicy
                   - secretsmanager:PutSecretValue
-                  - secretsmanager:PutResourcePolicy
-                  - secretsmanager:RemoveRegionsFromReplication
-                  - secretsmanager:ReplicateSecretToRegions
-                  - secretsmanager:RestoreSecret
                   - secretsmanager:TagResource
-                  - secretsmanager:UntagResource
                   - secretsmanager:UpdateSecret
                 Resource: arn:aws:secretsmanager:us-east-1:610992396917:secret:hypha/fresh-synapse/runtime-*
               - Sid: SsmManagedInstanceMetadata
                 Effect: Allow
                 Action:
                   - ssm:DescribeInstanceInformation
-                  - ssm:ListCommandInvocations
                   - ssm:ListCommands
                 Resource: "*"
                 Condition:
