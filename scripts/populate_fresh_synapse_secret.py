@@ -2,6 +2,7 @@
 """Populate the fresh Synapse runtime secret without exposing secret values."""
 
 import argparse
+import getpass
 import json
 import os
 import secrets
@@ -9,6 +10,8 @@ import subprocess
 import sys
 from tempfile import NamedTemporaryFile
 from typing import Any, Dict, Mapping, Optional, Sequence
+
+from services.hypha_admin_broker.auth import encode_scrypt_verifier
 
 EXPECTED_PROFILE = "zenith-hypha-synapse"
 EXPECTED_ACCOUNT = "610992396917"
@@ -20,6 +23,8 @@ REQUIRED_KEYS = (
     "REGISTRATION_SHARED_SECRET",
     "MACAROON_SECRET_KEY",
     "FORM_SECRET",
+    "HYPHA_ADMIN_BROKER_SECRET_VERIFIER",
+    "HYPHA_ADMIN_BROKER_SERVICE_PASSWORD",
 )
 
 
@@ -108,17 +113,36 @@ def _verify_secret() -> str:
     return arn
 
 
-def _fresh_values() -> Dict[str, str]:
-    return {key: secrets.token_urlsafe(48) for key in REQUIRED_KEYS}
+def _fresh_values(operator_secret: str) -> Dict[str, str]:
+    values = {
+        key: secrets.token_urlsafe(48)
+        for key in REQUIRED_KEYS
+        if key not in {"HYPHA_ADMIN_BROKER_SECRET_VERIFIER", "HYPHA_ADMIN_BROKER_SERVICE_PASSWORD"}
+    }
+    values["HYPHA_ADMIN_BROKER_SECRET_VERIFIER"] = encode_scrypt_verifier(operator_secret)
+    values["HYPHA_ADMIN_BROKER_SERVICE_PASSWORD"] = secrets.token_urlsafe(48)
+    return values
 
 
-def _populate(secret_arn: str) -> Mapping[str, Any]:
+def _read_operator_secret() -> str:
+    first = getpass.getpass("New Hypha administration secret: ")
+    confirmed = getpass.getpass("Confirm Hypha administration secret: ")
+    if first != confirmed:
+        raise PopulationError("administration secret confirmation did not match")
+    try:
+        encode_scrypt_verifier(first)
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise PopulationError("administration secret did not satisfy the required policy") from exc
+    return first
+
+
+def _populate(secret_arn: str, operator_secret: str) -> Mapping[str, Any]:
     path: Optional[str] = None
     try:
         with NamedTemporaryFile(mode="w", encoding="utf-8", prefix="hypha-synapse-secret-", delete=False) as handle:
             path = handle.name
             os.chmod(path, 0o600)
-            json.dump(_fresh_values(), handle, separators=(",", ":"), sort_keys=True)
+            json.dump(_fresh_values(operator_secret), handle, separators=(",", ":"), sort_keys=True)
             handle.write("\n")
         response = _json_object(
             _run_aws(
@@ -170,7 +194,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         _verify_role()
         secret_arn = _verify_secret()
-        safe_metadata = _populate(secret_arn)
+        operator_secret = _read_operator_secret()
+        safe_metadata = _populate(secret_arn, operator_secret)
     except PopulationError as exc:
         print(str(exc), file=sys.stderr)
         return 1

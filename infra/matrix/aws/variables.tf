@@ -75,3 +75,13 @@ variable "caddy_image" {
   type        = string
   default     = "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"
 }
+
+variable "admin_broker_image" {
+  description = "Immutable reviewed Hypha administration broker container image."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^[:space:]]+@sha256:[0-9a-f]{64}$", var.admin_broker_image))
+    error_message = "admin_broker_image must be an immutable image reference containing @sha256:<64 lowercase hex>."
+  }
+}

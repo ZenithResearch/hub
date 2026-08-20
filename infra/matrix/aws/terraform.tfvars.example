@@ -10,3 +10,6 @@ data_volume_size_gb = 30
 # First apply with false to create the empty secret. Set true only after an
 # AWSCURRENT version with the exact documented JSON keys has been added.
 enable_runtime = false
+
+# Required only after the reviewed broker image workflow emits its exact digest.
+admin_broker_image = "610992396917.dkr.ecr.us-east-1.amazonaws.com/zenith-hub-prod-runtime-grpc@sha256:REPLACE_WITH_64_LOWERCASE_HEX"

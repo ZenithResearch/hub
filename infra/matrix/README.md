@@ -59,7 +59,7 @@ Security boundaries:
   resource tags;
 - Synapse uses native password authentication with public registration off;
   MAS, delegated authentication, and MSC4108 are not installed or configured;
-- all three container defaults are immutable digest references;
+- all four container inputs are immutable digest references;
 - PostgreSQL and Synapse data live on an encrypted, delete-on-termination EBS
   block device. Bootstrap requires exactly one volume attached to the instance
   with the `hypha-fresh-synapse-data` tag, resolves that exact volume's Nitro
@@ -76,15 +76,16 @@ Security boundaries:
 ### One-command deployment
 
 Requirements are Python 3, AWS CLI, Terraform, and a configured
-`zenith-hypha-free` profile for the target account. Supply only the reviewed
-AMI and public hostname:
+`zenith-hypha-free` profile for the target account. Supply the reviewed AMI,
+public hostname, and exact broker image digest:
 
 ```bash
 python3 scripts/deploy_fresh_synapse.py \
   --profile zenith-hypha-free \
   --region us-east-1 \
   --hostname synapse.zenith-research.ca \
-  --ami-id ami-0332d564d76dbd8d6
+  --ami-id ami-0332d564d76dbd8d6 \
+  --admin-broker-image 610992396917.dkr.ecr.us-east-1.amazonaws.com/zenith-hub-prod-runtime-grpc@sha256:<reviewed-64-hex-digest>
 ```
 
 On the first run, the launcher invokes the guarded bootstrap and privately
@@ -94,7 +95,9 @@ exact-trust `HyphaSynapseDeploymentRole`. The bootstrap creates at most one
 access key, writes it directly to the mode-0600 local AWS credentials file,
 configures the source and assumed-role profiles, and verifies both identities.
 No manual IAM user, access-key, profile, backend, or variable-file setup is
-required. Once those exact profiles are installed, routine launcher reruns do
+required. The first launch also prompts twice without echo for the dedicated
+Hypha administration secret and stores only its scrypt verifier. Once those
+exact profiles are installed, routine launcher reruns do
 not invoke root bootstrap; run the bootstrap script directly only to create or
 repair that authority chain.
 
@@ -102,7 +105,8 @@ The launcher then initializes isolated state, validates each saved Terraform
 plan against exact resource/action allowlists, creates the base resources,
 populates the runtime secret directly into Secrets Manager, and launches one
 EC2 instance plus one Elastic IP. It never reads `SecretString` into Terraform
-state and never provisions a Matrix administrator. Reruns are idempotent and
+state. On-host bootstrap provisions or verifies only the hidden
+`_hypha_admin_broker` service administrator. Reruns are idempotent and
 complete partial base applies before runtime activation. Before reporting
 success it requires SSM/cloud-init readiness, the exact XFS mount, Docker,
 healthy PostgreSQL and Synapse containers, and an internal Matrix HTTP 200.
