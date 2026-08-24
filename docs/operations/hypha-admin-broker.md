@@ -19,9 +19,14 @@ The hidden authority is exactly `@_hypha_admin_broker:<matrix-server-name>`. Boo
 Prerequisites:
 
 1. The backend exact head has passed review and hosted CI.
-2. The image workflow has published that exact head and emitted an ECR `@sha256:<64 hex>` reference.
-3. The operator has the bounded `zenith-hypha-synapse` profile and the explicit production EC2 instance ID.
-4. `verify_fresh_synapse_backup.py` reports `backup_and_restore_verified` for
+2. The root-authorized `hypha-synapse-bootstrap` stack is current. It owns the
+   retained, immutable `hypha-admin-broker` ECR repository and a dedicated
+   GitHub OIDC publisher role trusted only by
+   `repo:ZenithResearch/hub:environment:production`.
+3. The image workflow has published that exact head and emitted an ECR
+   `@sha256:<64 hex>` reference in account `610992396917`.
+4. The operator has the bounded `zenith-hypha-synapse` profile and the explicit production EC2 instance ID.
+5. `verify_fresh_synapse_backup.py` reports `backup_and_restore_verified` for
    the explicit instance, and ordinary Matrix health checks are green. See
    `fresh-synapse-backup-restore.md`; snapshot presence alone is insufficient.
 
@@ -41,7 +46,7 @@ python3 scripts/deploy_hypha_admin_broker.py \
   --region us-east-1 \
   --instance-id i-REVIEWED \
   --hostname synapse.zenith-research.ca \
-  --admin-broker-image 610992396917.dkr.ecr.us-east-1.amazonaws.com/zenith-hub-prod-runtime-grpc@sha256:REVIEWED_DIGEST \
+  --admin-broker-image 610992396917.dkr.ecr.us-east-1.amazonaws.com/hypha-admin-broker@sha256:REVIEWED_DIGEST \
   --dry-run
 ```
 
@@ -49,7 +54,9 @@ Remove `--dry-run` only after matching the exact image and instance. Before it
 sends `AWS-RunShellScript`, the deployer requires fresh application-consistent
 root/data snapshots and recent isolated-restore evidence. The rollout command
 contains configuration and image identifiers but no secret values. On-host
-logic fetches `AWSCURRENT`, writes mode-0600 runtime files, verifies the digest,
+logic authenticates to the exact private ECR registry through the instance
+role and an ephemeral Docker configuration, fetches `AWSCURRENT`, writes
+mode-0600 runtime files, verifies the digest,
 bootstraps or verifies the service authority, validates Compose, starts only
 the broker and Caddy, and checks broker liveness, hidden-service authority
 readiness, and ordinary Matrix health from both the container and public route

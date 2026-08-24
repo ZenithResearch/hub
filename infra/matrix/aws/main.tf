@@ -148,6 +148,20 @@ resource "aws_iam_role_policy" "matrix_secret" {
         Action   = ["ec2:DescribeVolumes"]
         Resource = "*"
       },
+      {
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+        ]
+        Resource = "arn:aws:ecr:us-east-1:610992396917:repository/hypha-admin-broker"
+      },
     ]
   })
 }

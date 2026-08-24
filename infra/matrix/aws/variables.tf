@@ -81,7 +81,10 @@ variable "admin_broker_image" {
   type        = string
 
   validation {
-    condition     = can(regex("^[^[:space:]]+@sha256:[0-9a-f]{64}$", var.admin_broker_image))
-    error_message = "admin_broker_image must be an immutable image reference containing @sha256:<64 lowercase hex>."
+    condition = can(regex(
+      "^610992396917\\.dkr\\.ecr\\.us-east-1\\.amazonaws\\.com/hypha-admin-broker@sha256:[0-9a-f]{64}$",
+      var.admin_broker_image,
+    ))
+    error_message = "admin_broker_image must be a digest-pinned image in the dedicated Hypha broker repository."
   }
 }

@@ -89,12 +89,13 @@ python3 scripts/deploy_fresh_synapse.py \
   --region us-east-1 \
   --hostname synapse.zenith-research.ca \
   --ami-id ami-0332d564d76dbd8d6 \
-  --admin-broker-image 610992396917.dkr.ecr.us-east-1.amazonaws.com/zenith-hub-prod-runtime-grpc@sha256:<reviewed-64-hex-digest>
+  --admin-broker-image 610992396917.dkr.ecr.us-east-1.amazonaws.com/hypha-admin-broker@sha256:<reviewed-64-hex-digest>
 ```
 
 On the first run, the launcher invokes the guarded bootstrap and privately
 prompts for the budget/expiry-alert email. CloudFormation creates the retained
-state bucket, the credential-only `HyphaSynapseTerraformSource` user, and the
+state bucket and broker ECR repository, the exact-environment GitHub OIDC image
+publisher, the credential-only `HyphaSynapseTerraformSource` user, and the
 exact-trust `HyphaSynapseDeploymentRole`. The bootstrap creates at most one
 access key, writes it directly to the mode-0600 local AWS credentials file,
 configures the source and assumed-role profiles, and verifies both identities.

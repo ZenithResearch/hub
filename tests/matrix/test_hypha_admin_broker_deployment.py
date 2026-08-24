@@ -75,6 +75,45 @@ def test_broker_image_refreshes_its_base_and_keeps_unfixed_findings_visible():
     assert workflow.count('exit-code: "1"') == 2
 
 
+def test_broker_image_publication_is_bound_to_the_exact_hypha_account_and_repository():
+    workflow = read(".github/workflows/hypha-admin-broker-image.yml")
+    bootstrap = read("infra/matrix/aws/bootstrap.yaml")
+
+    for marker in [
+        'AWS_ACCOUNT_ID: "610992396917"',
+        "AWS_ROLE_ARN: arn:aws:iam::610992396917:role/HyphaAdminBrokerImagePublisherRole",
+        "ECR_REPOSITORY: hypha-admin-broker",
+        '[[ "$ACTUAL_ACCOUNT_ID" = "$AWS_ACCOUNT_ID" ]]',
+        "RepositoryName: hypha-admin-broker",
+        "ImageTagMutability: IMMUTABLE",
+        "Type: AWS::IAM::OIDCProvider",
+        "repo:ZenithResearch/hub:environment:production",
+        "ecr:PutImage",
+    ]:
+        assert marker in workflow or marker in bootstrap
+    assert "AWS_PROD_DEPLOY_ROLE_ARN" not in workflow
+    assert "zenith-hub-prod-runtime-grpc" not in workflow
+
+
+def test_broker_private_ecr_pull_uses_ephemeral_auth_and_exact_host_permissions():
+    bootstrap = read("infra/matrix/aws/bootstrap.yaml")
+    runtime = read("infra/matrix/aws/main.tf")
+    user_data = read("infra/matrix/aws/user_data.sh.tpl")
+    deployer = read("scripts/deploy_hypha_admin_broker.py")
+
+    for policy in [bootstrap, runtime]:
+        assert "ecr:GetAuthorizationToken" in policy
+        assert "ecr:BatchGetImage" in policy
+        assert "ecr:GetDownloadUrlForLayer" in policy
+    for script in [user_data, deployer]:
+        assert "aws ecr get-login-password" in script
+        assert "hypha-admin-broker-docker." in script
+        assert 'export DOCKER_CONFIG="$' in script
+        assert script.index("aws ecr get-login-password") < script.index("docker pull")
+    assert 'EXPECTED_REGISTRY = "610992396917.dkr.ecr.us-east-1.amazonaws.com"' in deployer
+    assert 'EXPECTED_REPOSITORY = "hypha-admin-broker"' in deployer
+
+
 def test_existing_instance_is_updated_by_reviewed_ssm_deployer_with_rollback():
     main = read("infra/matrix/aws/main.tf")
     deployer = read("scripts/deploy_hypha_admin_broker.py")

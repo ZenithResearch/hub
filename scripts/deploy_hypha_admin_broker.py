@@ -25,7 +25,11 @@ EXPECTED_ACCOUNT = "610992396917"
 EXPECTED_REGION = "us-east-1"
 EXPECTED_ROLE_ARN_FRAGMENT = "assumed-role/HyphaSynapseDeploymentRole/"
 SECRET_NAME = "hypha/fresh-synapse/runtime"
-IMAGE_PATTERN = re.compile(r"[^\s]+@sha256:[0-9a-f]{64}")
+EXPECTED_REGISTRY = "610992396917.dkr.ecr.us-east-1.amazonaws.com"
+EXPECTED_REPOSITORY = "hypha-admin-broker"
+IMAGE_PATTERN = re.compile(
+    rf"{re.escape(EXPECTED_REGISTRY)}/{EXPECTED_REPOSITORY}@sha256:[0-9a-f]{{64}}"
+)
 INSTANCE_PATTERN = re.compile(r"i-[0-9a-f]{8,17}")
 HOSTNAME_PATTERN = re.compile(
     r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+"
@@ -255,8 +259,11 @@ def deployment_commands(*, hostname: str, image: str) -> tuple[str, ...]:
         "trap rollback ERR",
         "secret_json=$(mktemp /run/hypha-admin-broker-secret.XXXXXX)",
         "bootstrap_env=$(mktemp /run/hypha-admin-broker-bootstrap.XXXXXX)",
-        'trap \'rm -f "$secret_json" "$bootstrap_env"\' EXIT',
+        "docker_config=$(mktemp -d /run/hypha-admin-broker-docker.XXXXXX)",
+        'export DOCKER_CONFIG="$docker_config"',
+        'trap \'rm -f "$secret_json" "$bootstrap_env"; rm -rf "$docker_config"\' EXIT',
         f"printf '%s' '{rewrite}' | base64 -d | python3 -",
+        f"aws ecr get-login-password --region '{EXPECTED_REGION}' | docker login --username AWS --password-stdin '{EXPECTED_REGISTRY}' >/dev/null",
         f"docker pull '{image}' >/dev/null",
         f"docker image inspect '{image}' --format '{{{{json .RepoDigests}}}}' | grep -F 'sha256:{expected_digest}' >/dev/null",
         f"aws secretsmanager get-secret-value --region '{EXPECTED_REGION}' --secret-id '{SECRET_NAME}' --version-stage AWSCURRENT --query SecretString --output text > \"$secret_json\"",
