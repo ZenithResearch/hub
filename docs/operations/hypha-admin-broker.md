@@ -6,7 +6,7 @@ This document describes the reviewed deployment path. It does not claim that the
 
 ## Security boundary
 
-- Caddy exposes only `/_hypha/admin/v1/**` to the broker. Matrix client and federation traffic continues to Synapse.
+- Caddy exposes only `/_hypha/admin/v1/**` to the broker, enforcing the broker's 64 KiB request limit before proxying. Matrix client and federation traffic continues to Synapse.
 - The broker container is non-root, read-only, capability-free, internal-network-only, and has no database, data-volume, Docker-socket, or host-port access.
 - The runtime secret contains exactly the four existing Synapse values, the operator-secret scrypt verifier, and the broker service password.
 - The raw operator secret is entered through a protected terminal prompt. It is never accepted on argv, printed, written to Terraform, stored by Hypha, or sent to Synapse.
@@ -43,7 +43,7 @@ python3 scripts/deploy_hypha_admin_broker.py \
   --dry-run
 ```
 
-Remove `--dry-run` only after matching the exact image and instance. The deployer uses `AWS-RunShellScript`; the command contains configuration and image identifiers but no secret values. On-host logic fetches `AWSCURRENT`, writes mode-0600 runtime files, verifies the digest, bootstraps or verifies the service authority, validates Compose, starts only the broker and Caddy, and checks the internal and public health surfaces.
+Remove `--dry-run` only after matching the exact image and instance. The deployer uses `AWS-RunShellScript`; the command contains configuration and image identifiers but no secret values. On-host logic fetches `AWSCURRENT`, writes mode-0600 runtime files, verifies the digest, bootstraps or verifies the service authority, validates Compose, starts only the broker and Caddy, and checks broker liveness, hidden-service authority readiness, and ordinary Matrix health from both the container and public route before committing the rollout.
 
 ## Rotation
 
@@ -60,6 +60,9 @@ curl --fail --silent --show-error \
   https://synapse.zenith-research.ca/_hypha/admin/v1/health
 
 curl --fail --silent --show-error \
+  https://synapse.zenith-research.ca/_hypha/admin/v1/ready
+
+curl --fail --silent --show-error \
   https://synapse.zenith-research.ca/_matrix/client/versions >/dev/null
 ```
 
@@ -69,6 +72,6 @@ Do not capture the secret request body, bearer token, service account password, 
 
 ## Rollback
 
-Before mutation, the deployer creates a timestamped backup under `/opt/matrix/backups/`. Any rollout error stops the broker, restores the prior `compose.yaml`, `Caddyfile`, and broker environment state, and reconciles the prior Compose stack with `--remove-orphans`. PostgreSQL, Synapse configuration/data, the EBS volume, and Terraform-managed EC2 resources are not replaced or modified.
+Before mutation, the deployer creates a timestamped backup under `/opt/matrix/backups/`. Any rollout error through the on-host public readiness and Matrix checks stops the broker, restores the prior `compose.yaml`, `Caddyfile`, and broker environment state, and reconciles the prior Compose stack with `--remove-orphans`. The hidden service account may remain after a first bootstrap, but it is not publicly discoverable through broker snapshots and has no route or stored token outside the server. PostgreSQL, Synapse configuration/data, the EBS volume, and Terraform-managed EC2 resources are not replaced or modified.
 
 If post-deployment monitoring finds a problem, restore the exact backup through a reviewed SSM command, stop/remove only `hypha-admin-broker`, and run the restored Compose stack. Reverify Matrix client/federation health before declaring rollback complete.

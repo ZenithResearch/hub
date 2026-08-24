@@ -17,6 +17,8 @@ def test_broker_image_is_digest_pinned_and_routed_only_by_caddy():
     assert "admin_broker_image      = var.admin_broker_image" in main
     assert "hypha-admin-broker:8080" in user_data
     assert "handle /_hypha/admin/v1/*" in user_data
+    assert "request_body {" in user_data
+    assert "max_size 64KB" in user_data
     assert "reverse_proxy hypha-admin-broker:8080" in user_data
     assert '"8080:8080"' not in user_data
     assert '"8008:8008"' not in user_data
@@ -72,8 +74,11 @@ def test_existing_instance_is_updated_by_reviewed_ssm_deployer_with_rollback():
         "rollback",
         "backup",
         "hypha-admin-broker",
+        "/_hypha/admin/v1/ready",
+        "trap - ERR",
     ]:
         assert marker in deployer
+    assert deployer.index("/_hypha/admin/v1/ready") < deployer.index('"trap - ERR"')
     for forbidden in [
         "--secret-value",
         "HYPHA_ADMIN_BROKER_SECRET=",

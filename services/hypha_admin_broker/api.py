@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Literal, Protocol
 
 from fastapi import FastAPI, Request
@@ -23,6 +24,7 @@ _MAX_RESPONSE_BYTES = 1024 * 1024
 
 
 class SynapseAdminAdapter(Protocol):
+    async def ready(self) -> None: ...
     async def snapshot(self) -> dict[str, object]: ...
     async def create_account(self, **payload: object) -> dict[str, object]: ...
     async def set_administrator(self, **payload: object) -> dict[str, object]: ...
@@ -183,11 +185,19 @@ def create_app(
     session_store: BrokerSessionStore,
     synapse: SynapseAdminAdapter,
 ) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):  # type: ignore[no-untyped-def]
+        yield
+        close = getattr(synapse, "aclose", None)
+        if close is not None:
+            await close()
+
     app = FastAPI(
         title="Hypha administration broker",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
 
     @app.middleware("http")
@@ -226,6 +236,18 @@ def create_app(
     @app.get(_API_PREFIX + "/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get(_API_PREFIX + "/ready")
+    async def ready() -> JSONResponse:
+        try:
+            await synapse.ready()
+        except Exception:
+            return _error(503, "homeserver administration is unavailable")
+        return _bounded_json(
+            status_code=200,
+            content={"status": "ready"},
+            too_large_message="homeserver administration response was too large",
+        )
 
     @app.post(_API_PREFIX + "/session", status_code=201)
     async def authenticate(request: Request, payload: SessionRequest) -> JSONResponse:

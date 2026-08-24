@@ -201,6 +201,9 @@ cat > "$MATRIX_DIR/Caddyfile" <<'EOF_CADDY'
 ${matrix_server_name} {
   encode zstd gzip
   handle /_hypha/admin/v1/* {
+    request_body {
+      max_size 64KB
+    }
     reverse_proxy hypha-admin-broker:8080
   }
   handle {
@@ -310,3 +313,10 @@ docker run --rm \
   /app/scripts/bootstrap_hypha_admin_broker_authority.py >/dev/null
 rm -f "$BROKER_BOOTSTRAP_ENV"
 docker compose --project-directory "$MATRIX_DIR" -f "$MATRIX_DIR/compose.yaml" up -d
+for _attempt in $(seq 1 60); do
+  if docker exec hypha-admin-broker python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8080/_hypha/admin/v1/ready', timeout=15); assert r.status == 200" >/dev/null 2>&1; then
+    break
+  fi
+  [ "$_attempt" -lt 60 ] || { echo "Hypha administration broker did not become ready" >&2; exit 1; }
+  sleep 5
+done

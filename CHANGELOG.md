@@ -78,6 +78,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 
 ### Changed
+- Hardened the Hypha administration broker rollout with authority-aware readiness, single-flight service login, graceful HTTP transport shutdown, proxy body limits, transactional public smoke checks, and publish-only OIDC permission — prevents concurrent authority-token churn and keeps an unhealthy broker from being committed to the host.
+- Added scope-checked private-artifact annotations for reviewed Python variable flows and test fixtures — preserves literal-secret detection while allowing the broker's credential plumbing to pass the same hosted CI gate as the rest of Hub.
 - Synced ISS-P14-007 PR evidence back into the repo-local issue spec — makes the task-per-commit boundary and remaining operator-auth gate visible from the spec itself.
 - Linked ISS-P14-007 from the Matrix issue index and P15 production homeserver spec — keeps downstream work blocked on accepted production evidence instead of older DNS/TLS shorthand.
 - Upgraded the manual Gateway image workflow actions to Node 24-compatible releases — keeps the build-only image rail current without changing operator-controlled Terraform deployment ownership.

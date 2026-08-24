@@ -9,8 +9,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "bootstrap_hypha_admin_broker_authority.py"
 REGISTRATION_SECRET = "registration-shared-secret-value-123456"
-SERVICE_PASSWORD = "server-only-service-password-value-1234"
-ACCESS_TOKEN = "server-only-access-token-value-12345678"
+SERVICE_PASSWORD = "server-only-service-password-value-1234"  # private-artifact-scan: allow-test-fixture
+ACCESS_TOKEN = "server-only-access-token-value-12345678"  # private-artifact-scan: allow-test-fixture
 USER_ID = "@_hypha_admin_broker:example.org"
 
 

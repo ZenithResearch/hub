@@ -10,7 +10,7 @@ from services.hypha_admin_broker.synapse import SynapseAuthorityRejected
 
 SECRET = "correct-administration-secret-value-1234"
 TOKEN = bytes(range(32))
-EXPECTED_SESSION_TOKEN = base64.urlsafe_b64encode(TOKEN).rstrip(b"=").decode("ascii")
+EXPECTED_SESSION_TOKEN = base64.urlsafe_b64encode(TOKEN).rstrip(b"=").decode("ascii")  # private-artifact-scan: allow-test-fixture
 
 
 class Clock:
@@ -23,7 +23,11 @@ class Clock:
 
 class FakeSynapseAdmin:
     def __init__(self):
+        self.ready_calls = 0
         self.snapshot_calls = 0
+
+    async def ready(self) -> None:
+        self.ready_calls += 1
 
     async def snapshot(self) -> dict[str, object]:
         self.snapshot_calls += 1
@@ -151,16 +155,36 @@ def test_logout_revokes_session_and_is_not_replayable():
     assert synapse.snapshot_calls == 0
 
 
-def test_health_is_the_only_unauthenticated_endpoint_and_exposes_no_configuration():
-    client, _ = make_client()
+def test_liveness_and_authority_readiness_are_unauthenticated_and_expose_no_configuration():
+    client, synapse = make_client()
 
-    response = client.get("/_hypha/admin/v1/health")
+    health = client.get("/_hypha/admin/v1/health")
+    ready = client.get("/_hypha/admin/v1/ready")
 
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
-    assert_security_headers(response)
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+    assert ready.status_code == 200
+    assert ready.json() == {"status": "ready"}
+    assert synapse.ready_calls == 1
+    assert_security_headers(health)
+    assert_security_headers(ready)
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404
+
+
+def test_readiness_fails_generically_when_service_authority_is_unavailable():
+    client, synapse = make_client()
+
+    async def unavailable() -> None:
+        raise OSError("sensitive upstream detail")
+
+    synapse.ready = unavailable  # type: ignore[method-assign]
+    response = client.get("/_hypha/admin/v1/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"error": "homeserver administration is unavailable"}
+    assert "sensitive" not in response.text
+    assert_security_headers(response)
 
 
 def test_browser_preflight_content_type_and_request_size_fail_closed():

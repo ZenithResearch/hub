@@ -18,7 +18,7 @@ def create_runtime_app(environment: Mapping[str, str]) -> FastAPI:
     synapse = SynapseAdminAdapterClient(
         homeserver=configuration.synapse_origin,
         service_user_id=configuration.service_user_id,
-        service_password=configuration.service_password,
+        service_password=configuration.service_password,  # private-artifact-scan: allow-variable-flow
     )
     return create_app(session_store=sessions, synapse=synapse)
 

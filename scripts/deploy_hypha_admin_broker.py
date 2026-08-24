@@ -132,9 +132,22 @@ def _configuration_rewriter(*, hostname: str, image: str) -> str:
   reverse_proxy matrix-synapse:8008
 }}
 '''
+    previous_caddy = f'''{hostname} {{
+  encode zstd gzip
+  handle /_hypha/admin/v1/* {{
+    reverse_proxy hypha-admin-broker:8080
+  }}
+  handle {{
+    reverse_proxy matrix-synapse:8008
+  }}
+}}
+'''
     new_caddy = f'''{hostname} {{
   encode zstd gzip
   handle /_hypha/admin/v1/* {{
+    request_body {{
+      max_size 64KB
+    }}
     reverse_proxy hypha-admin-broker:8080
   }}
   handle {{
@@ -163,8 +176,9 @@ else:
         raise SystemExit("unmanaged broker compose configuration detected")
     compose = compose.replace("  caddy:\\n", broker_block + "  caddy:\\n")
 old_caddy = {old_caddy!r}
+previous_caddy = {previous_caddy!r}
 new_caddy = {new_caddy!r}
-if caddy not in {{old_caddy, new_caddy}}:
+if caddy not in {{old_caddy, previous_caddy, new_caddy}}:
     raise SystemExit("unmanaged Caddy configuration detected")
 for path, content in ((compose_path, compose), (caddy_path, new_caddy)):
     temporary = path.with_suffix(path.suffix + ".hypha-new")
@@ -253,6 +267,9 @@ def deployment_commands(*, hostname: str, image: str) -> tuple[str, ...]:
         'test "$(docker inspect --format=\'{{.Config.User}}\' hypha-admin-broker)" = "65532:65532"',
         'test "$(docker inspect --format=\'{{json .HostConfig.PortBindings}}\' hypha-admin-broker)" = "null"',
         'docker exec hypha-admin-broker python -c "import urllib.request; r=urllib.request.urlopen(\'http://127.0.0.1:8080/_hypha/admin/v1/health\', timeout=5); assert r.status == 200"',
+        'docker exec hypha-admin-broker python -c "import urllib.request; r=urllib.request.urlopen(\'http://127.0.0.1:8080/_hypha/admin/v1/ready\', timeout=15); assert r.status == 200"',
+        f'test "$(curl --silent --show-error --max-time 15 --output /dev/null --write-out \'%{{http_code}}\' \'https://{hostname}/_hypha/admin/v1/ready\')" = "200"',
+        f'test "$(curl --silent --show-error --max-time 15 --output /dev/null --write-out \'%{{http_code}}\' \'https://{hostname}/_matrix/client/versions\')" = "200"',
         "trap - ERR",
         'printf "%s\\n" "Hypha administration broker deployment verified"',
     )
@@ -360,6 +377,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _wait_for_command(command_id)
         origin = "https://" + args.hostname
         _verify_public_endpoint(origin + "/_hypha/admin/v1/health", 200)
+        _verify_public_endpoint(origin + "/_hypha/admin/v1/ready", 200)
         _verify_public_endpoint(origin + "/_matrix/client/versions", 200)
     except BrokerDeploymentError as exc:
         print(str(exc), file=sys.stderr)

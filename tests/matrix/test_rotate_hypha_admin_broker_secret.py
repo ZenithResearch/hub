@@ -42,7 +42,7 @@ def test_later_operator_rotation_preserves_the_live_service_password():
     current = dict(
         BASE,
         HYPHA_ADMIN_BROKER_SECRET_VERIFIER="old-verifier",
-        HYPHA_ADMIN_BROKER_SERVICE_PASSWORD="live-service-password-value-123456",
+        HYPHA_ADMIN_BROKER_SERVICE_PASSWORD="live-service-password-value-123456",  # private-artifact-scan: allow-test-fixture
     )
 
     updated = rotation.rotated_values(current, "replacement-operator-administration-secret")

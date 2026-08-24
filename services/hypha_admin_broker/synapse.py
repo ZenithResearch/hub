@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -56,6 +57,9 @@ class HTTPXTransport:
             headers=dict(response.headers),
         )
 
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
 
 class SynapseAdminAdapterClient:
     """Allowlisted Synapse Admin API operations using server-resident authority."""
@@ -78,12 +82,38 @@ class SynapseAdminAdapterClient:
             raise ValueError("invalid Synapse broker configuration")
         self._homeserver = homeserver
         self._service_user_id = service_user_id
-        self._service_password = service_password
+        self._service_password = service_password  # private-artifact-scan: allow-variable-flow
         self._transport = transport or HTTPXTransport()
         self._access_token: str | None = None
+        self._login_lock = asyncio.Lock()
 
     def __repr__(self) -> str:
         return "SynapseAdminAdapterClient(authority=redacted)"
+
+    async def aclose(self) -> None:
+        close = getattr(self._transport, "aclose", None)
+        if close is not None:
+            await close()
+
+    async def ready(self) -> None:
+        response = await self._admin_request(
+            "GET",
+            f"/_synapse/admin/v2/users/{self._encoded(self._service_user_id)}",
+        )
+        if response.status_code != 200:
+            raise SynapseAdminError()
+        payload = self._json_object(response)
+        parsed = self._parse_user(payload)
+        if (
+            parsed["user_id"] != self._service_user_id
+            or parsed["is_administrator"] is not True
+            or parsed["is_deactivated"] is not False
+            or parsed["is_guest"] is not False
+            or parsed["user_type"] is not None
+            or payload.get("locked", False) is not False
+            or payload.get("approved", True) is not True
+        ):
+            raise SynapseAdminError()
 
     async def snapshot(self) -> dict[str, object]:
         users = await self._list_users()
@@ -423,24 +453,44 @@ class SynapseAdminAdapterClient:
         path: str,
         body: dict[str, object] | None = None,
     ) -> Any:
-        if self._access_token is None:
-            await self._login()
+        access_token = await self._ensure_access_token()
         response = await self._send(
             method=method,
             path=path,
             body=body,
-            access_token=self._access_token,
+            access_token=access_token,  # private-artifact-scan: allow-variable-flow
         )
         if response.status_code != 401:
             return response
-        self._access_token = None
-        await self._login()
-        return await self._send(
+        await self._invalidate_access_token(access_token)
+        replacement_token = await self._ensure_access_token()
+        retry = await self._send(
             method=method,
             path=path,
             body=body,
-            access_token=self._access_token,
+            access_token=replacement_token,
         )
+        if retry.status_code == 401:
+            await self._invalidate_access_token(replacement_token)
+            raise SynapseAuthorityRejected()
+        return retry
+
+    async def _ensure_access_token(self) -> str:
+        if self._access_token is not None:
+            return self._access_token
+        async with self._login_lock:
+            if self._access_token is None:
+                await self._login()
+            if self._access_token is None:  # pragma: no cover - defensive invariant
+                raise SynapseAdminError()
+            return self._access_token
+
+    async def _invalidate_access_token(self, rejected_token: str | None) -> None:
+        if rejected_token is None:
+            return
+        async with self._login_lock:
+            if self._access_token == rejected_token:
+                self._access_token = None
 
     async def _send(
         self,
@@ -469,7 +519,7 @@ class SynapseAdminAdapterClient:
             raise SynapseAdminError() from exc
         response_url = self._response_url(response)
         if not self._same_origin(request.url, response_url):
-            self._access_token = None
+            await self._invalidate_access_token(access_token)
             raise SynapseAdminError()
         return response
 

@@ -19,7 +19,6 @@ import argparse
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +62,7 @@ TEXT_SUFFIXES = {
 CONTENT_ALLOWLIST = {
     ".gitignore",
     "scripts/private_artifact_scan.py",
+    "tests/test_private_artifact_scan.py",
 }
 
 BENIGN_CONTENT_MARKERS = (
@@ -79,6 +79,21 @@ BENIGN_CONTENT_MARKERS = (
     b"os.environ",
     b"payload.session_id",
 )
+
+REVIEWED_VARIABLE_FLOW_MARKER = b"# private-artifact-scan: allow-variable-flow"
+REVIEWED_FIXTURE_MARKER = b"# private-artifact-scan: allow-test-fixture"
+
+
+def benign_content_line(rel: str, line: bytes) -> bool:
+    if any(marker in line for marker in BENIGN_CONTENT_MARKERS):
+        return True
+    if REVIEWED_VARIABLE_FLOW_MARKER in line:
+        is_python_source = rel.endswith(".py") and not rel.startswith("tests/")
+        assignment = line.split(REVIEWED_VARIABLE_FLOW_MARKER, 1)[0]
+        return is_python_source and b"'" not in assignment and b'"' not in assignment
+    if REVIEWED_FIXTURE_MARKER in line:
+        return rel.startswith("tests/") and rel.endswith(".py")
+    return False
 
 
 def git(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -145,7 +160,7 @@ def scan(paths: list[str], *, source: str, content: bool) -> list[str]:
                 if line_end == -1:
                     line_end = len(data)
                 line = data[line_start:line_end]
-                if any(marker in line for marker in BENIGN_CONTENT_MARKERS):
+                if benign_content_line(rel, line):
                     continue
                 line_no = data[: match.start()].count(b"\n") + 1
                 findings.append(f"TEXT  {rel}:{line_no}\n      {reason}")

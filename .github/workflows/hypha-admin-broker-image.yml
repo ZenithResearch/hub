@@ -16,7 +16,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: hypha-admin-broker-image-${{ github.ref }}
@@ -65,6 +64,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
       - name: Configure AWS credentials by OIDC

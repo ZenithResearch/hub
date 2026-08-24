@@ -153,7 +153,11 @@ def bootstrap_authority(
     if not _valid_secret(registration_secret) or not _valid_secret(service_password):
         raise AuthorityBootstrapError("broker service authority configuration is invalid")
     user_id = service_user_id(server_name)
-    status, access_token = _login(user_id=user_id, password=service_password, http=http)
+    status, access_token = _login(
+        user_id=user_id,
+        password=service_password,  # private-artifact-scan: allow-variable-flow
+        http=http,
+    )
     result = "verified"
     if status != 200:
         _register(
@@ -166,7 +170,11 @@ def bootstrap_authority(
         result = "created"
     if status != 200 or access_token is None:
         raise AuthorityBootstrapError("broker service authority login failed")
-    _verify_account(user_id=user_id, access_token=access_token, http=http)
+    _verify_account(
+        user_id=user_id,
+        access_token=access_token,  # private-artifact-scan: allow-variable-flow
+        http=http,
+    )
     return {"service_user_id": user_id, "status": result}
 
 

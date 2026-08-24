@@ -8,8 +8,8 @@ import pytest
 from services.hypha_admin_broker.synapse import SynapseAdminAdapterClient, SynapseAdminError
 
 SERVICE_USER = "@_hypha_admin_broker:example.org"
-SERVICE_PASSWORD = "server-only-service-password-value"
-ACCESS_TOKEN = "server-only-synapse-access-token-value"
+SERVICE_PASSWORD = "server-only-service-password-value"  # private-artifact-scan: allow-test-fixture
+ACCESS_TOKEN = "server-only-synapse-access-token-value"  # private-artifact-scan: allow-test-fixture
 
 
 class Response:
@@ -36,6 +36,71 @@ class Transport:
         if not self.responses:
             raise OSError("offline")
         return self.responses.pop(0)
+
+
+class ConcurrentAuthorityTransport:
+    def __init__(self):
+        self.requests = []
+        self.login_calls = 0
+
+    async def send(self, request):
+        self.requests.append(request)
+        if request.url.path == "/_matrix/client/v3/login":
+            self.login_calls += 1
+            await asyncio.sleep(0.01)
+            return Response(
+                200,
+                {"user_id": SERVICE_USER, "access_token": ACCESS_TOKEN},
+                url=str(request.url),
+            )
+        return Response(
+            200,
+            {
+                "name": SERVICE_USER,
+                "admin": True,
+                "deactivated": False,
+                "is_guest": False,
+                "user_type": None,
+                "locked": False,
+                "approved": True,
+            },
+            url=str(request.url),
+        )
+
+
+class ConcurrentReauthenticationTransport(ConcurrentAuthorityTransport):
+    def __init__(self):
+        super().__init__()
+        self.old_token_requests = 0
+        self.both_old_token_requests_started = asyncio.Event()
+
+    async def send(self, request):
+        self.requests.append(request)
+        if request.url.path == "/_matrix/client/v3/login":
+            self.login_calls += 1
+            token = ACCESS_TOKEN if self.login_calls == 1 else "replacement-access-token-value-123456"
+            return Response(
+                200,
+                {"user_id": SERVICE_USER, "access_token": token},
+                url=str(request.url),
+            )
+        if request.headers.get("authorization") == f"Bearer {ACCESS_TOKEN}":
+            self.old_token_requests += 1
+            if self.old_token_requests == 2:
+                self.both_old_token_requests_started.set()
+            await self.both_old_token_requests_started.wait()
+            return Response(401, {}, url=str(request.url))
+        return Response(
+            200,
+            {
+                "name": SERVICE_USER,
+                "admin": True,
+                "deactivated": False,
+                "is_guest": False,
+                "user_type": None,
+            },
+            url=str(request.url),
+        )
 
 
 def make_client(transport: Transport) -> SynapseAdminAdapterClient:
@@ -131,6 +196,63 @@ def test_snapshot_logs_in_server_side_then_uses_typed_admin_paths_and_hides_serv
     assert transport.requests[2].headers["authorization"] == f"Bearer {ACCESS_TOKEN}"
     assert SERVICE_PASSWORD not in repr(client)
     assert ACCESS_TOKEN not in repr(client)
+
+
+def test_readiness_proves_exact_service_authority_and_concurrent_probes_share_one_login():
+    transport = ConcurrentAuthorityTransport()
+    client = make_client(transport)  # type: ignore[arg-type]
+
+    async def probe_twice() -> None:
+        await asyncio.gather(client.ready(), client.ready())
+
+    asyncio.run(probe_twice())
+
+    assert transport.login_calls == 1
+    assert [request.method for request in transport.requests].count("POST") == 1
+    authority_requests = [
+        request for request in transport.requests if request.url.path.startswith("/_synapse/admin/v2/users/")
+    ]
+    assert len(authority_requests) == 2
+    assert all(request.headers["authorization"] == f"Bearer {ACCESS_TOKEN}" for request in authority_requests)
+
+
+def test_concurrent_unauthorized_calls_share_one_reauthentication_without_token_clobbering():
+    transport = ConcurrentReauthenticationTransport()
+    client = make_client(transport)  # type: ignore[arg-type]
+
+    async def establish_then_probe_twice() -> None:
+        await client._ensure_access_token()  # type: ignore[attr-defined]
+        await asyncio.gather(client.ready(), client.ready())
+
+    asyncio.run(establish_then_probe_twice())
+
+    assert transport.old_token_requests == 2
+    assert transport.login_calls == 2
+    replacement = "Bearer replacement-access-token-value-123456"
+    assert [request.headers.get("authorization") for request in transport.requests].count(replacement) == 2
+
+
+def test_readiness_rejects_authority_without_exact_active_admin_postconditions():
+    invalid_authority = {
+        "name": SERVICE_USER,
+        "admin": False,
+        "deactivated": False,
+        "is_guest": False,
+        "user_type": None,
+    }
+    transport = Transport(
+        [
+            Response(200, {"user_id": SERVICE_USER, "access_token": ACCESS_TOKEN}),
+            Response(
+                200,
+                invalid_authority,
+                url="http://matrix-synapse:8008/_synapse/admin/v2/users/%40_hypha_admin_broker%3Aexample.org",
+            ),
+        ]
+    )
+
+    with pytest.raises(SynapseAdminError, match="homeserver administration is unavailable"):
+        asyncio.run(make_client(transport).ready())
 
 
 def test_adapter_accepts_only_exact_internal_synapse_origin_and_service_identity():
