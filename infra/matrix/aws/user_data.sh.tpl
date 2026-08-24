@@ -8,7 +8,8 @@ set +x
 DATA_MOUNT=/opt/matrix-data
 MATRIX_DIR=/opt/matrix
 SECRET_JSON=$(mktemp /run/matrix-secret.XXXXXX)
-trap 'rm -f "$SECRET_JSON"' EXIT
+BROKER_BOOTSTRAP_ENV=$(mktemp /run/hypha-admin-broker-bootstrap.XXXXXX)
+trap 'rm -f "$SECRET_JSON" "$BROKER_BOOTSTRAP_ENV"' EXIT
 
 dnf install -y awscli docker jq xfsprogs
 
@@ -91,25 +92,33 @@ done
 [ "$SECRET_READY" = true ] || { echo "AWSCURRENT Matrix secret version unavailable" >&2; exit 1; }
 chmod 600 "$SECRET_JSON"
 
-python3 - "$SECRET_JSON" "$MATRIX_DIR" <<'PY'
+python3 - "$SECRET_JSON" "$MATRIX_DIR" "$BROKER_BOOTSTRAP_ENV" <<'PY'
 import json
 import os
 import re
 import sys
 
-secret_path, matrix_dir = sys.argv[1:]
+secret_path, matrix_dir, bootstrap_env_path = sys.argv[1:]
 required = {
     "POSTGRES_PASSWORD",
     "REGISTRATION_SHARED_SECRET",
     "MACAROON_SECRET_KEY",
     "FORM_SECRET",
+    "HYPHA_ADMIN_BROKER_SECRET_VERIFIER",
+    "HYPHA_ADMIN_BROKER_SERVICE_PASSWORD",
 }
 with open(secret_path, encoding="utf-8") as handle:
     values = json.load(handle)
 if not isinstance(values, dict) or set(values) != required:
     raise SystemExit("Secret JSON must contain exactly the documented keys")
-if any(not isinstance(values[key], str) or not re.fullmatch(r"[A-Za-z0-9._~!@#%^*+=:-]{32,}", values[key]) for key in required):
-    raise SystemExit("Every secret value must be a nonempty, shell-safe string of at least 32 characters")
+ordinary_keys = required - {"HYPHA_ADMIN_BROKER_SECRET_VERIFIER"}
+if any(not isinstance(values[key], str) or not re.fullmatch(r"[A-Za-z0-9._~!@#%^*+=:-]{32,512}", values[key]) for key in ordinary_keys):
+    raise SystemExit("Every secret value must satisfy the documented bounded format")
+if not isinstance(values["HYPHA_ADMIN_BROKER_SECRET_VERIFIER"], str) or not re.fullmatch(
+    r"scrypt\$[0-9]+\$[0-9]+\$[0-9]+\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+",
+    values["HYPHA_ADMIN_BROKER_SECRET_VERIFIER"],
+):
+    raise SystemExit("The administration verifier must use the documented scrypt format")
 
 def quoted(value):
     return json.dumps(value)
@@ -118,6 +127,18 @@ env_path = os.path.join(matrix_dir, ".env")
 with open(env_path, "w", encoding="utf-8") as handle:
     handle.write("POSTGRES_PASSWORD=" + values["POSTGRES_PASSWORD"] + "\n")
 os.chmod(env_path, 0o600)
+
+broker_env_path = os.path.join(matrix_dir, "broker.env")
+with open(broker_env_path, "w", encoding="utf-8") as handle:
+    handle.write("HYPHA_ADMIN_BROKER_SECRET_VERIFIER='" + values["HYPHA_ADMIN_BROKER_SECRET_VERIFIER"] + "'\n")
+    handle.write("HYPHA_ADMIN_BROKER_SERVICE_PASSWORD='" + values["HYPHA_ADMIN_BROKER_SERVICE_PASSWORD"] + "'\n")
+os.chmod(broker_env_path, 0o600)
+
+with open(bootstrap_env_path, "w", encoding="utf-8") as handle:
+    handle.write("REGISTRATION_SHARED_SECRET='" + values["REGISTRATION_SHARED_SECRET"] + "'\n")
+    handle.write("HYPHA_ADMIN_BROKER_SERVICE_PASSWORD='" + values["HYPHA_ADMIN_BROKER_SERVICE_PASSWORD"] + "'\n")
+    handle.write("MATRIX_SERVER_NAME='" + ${matrix_server_name_json} + "'\n")
+os.chmod(bootstrap_env_path, 0o600)
 
 config_path = os.path.join(matrix_dir, "homeserver.yaml")
 with open(config_path, "w", encoding="utf-8") as handle:
@@ -157,6 +178,7 @@ os.chown(config_path, 0, 991)
 os.chmod(config_path, 0o640)
 PY
 chmod 600 /opt/matrix/.env
+chmod 600 /opt/matrix/broker.env
 
 cat > "$MATRIX_DIR/log.config" <<'EOF_LOG'
 version: 1
@@ -178,7 +200,15 @@ chmod 640 "$MATRIX_DIR/log.config"
 cat > "$MATRIX_DIR/Caddyfile" <<'EOF_CADDY'
 ${matrix_server_name} {
   encode zstd gzip
-  reverse_proxy matrix-synapse:8008
+  handle /_hypha/admin/v1/* {
+    request_body {
+      max_size 64KB
+    }
+    reverse_proxy hypha-admin-broker:8080
+  }
+  handle {
+    reverse_proxy matrix-synapse:8008
+  }
 }
 EOF_CADDY
 
@@ -218,6 +248,26 @@ services:
       - /opt/matrix/log.config:/config/log.config:ro
     networks: [matrix-internal]
 
+  # BEGIN HYPHA ADMIN BROKER
+  hypha-admin-broker:
+    image: ${admin_broker_image}
+    container_name: hypha-admin-broker
+    restart: unless-stopped
+    depends_on: [matrix-synapse]
+    user: "65532:65532"
+    read_only: true
+    env_file: /opt/matrix/broker.env
+    environment:
+      HYPHA_ADMIN_BROKER_SERVICE_USER_ID: '@_hypha_admin_broker:${matrix_server_name}'
+    tmpfs:
+      - /tmp:noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks: [matrix-internal]
+  # END HYPHA ADMIN BROKER
+
   caddy:
     image: ${caddy_image}
     container_name: matrix-caddy
@@ -247,4 +297,26 @@ docker run --rm \
 rm -f "$DATA_MOUNT/synapse/homeserver.yaml" "$DATA_MOUNT/synapse"/*.log.config
 
 docker compose --project-directory "$MATRIX_DIR" -f "$MATRIX_DIR/compose.yaml" config --quiet
+docker compose --project-directory "$MATRIX_DIR" -f "$MATRIX_DIR/compose.yaml" up -d matrix-db matrix-synapse
+for _attempt in $(seq 1 120); do
+  if docker exec matrix-synapse python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8008/_matrix/client/versions', timeout=5); assert r.status == 200" >/dev/null 2>&1; then
+    break
+  fi
+  [ "$_attempt" -lt 120 ] || { echo "Synapse did not become ready for broker authority bootstrap" >&2; exit 1; }
+  sleep 5
+done
+docker run --rm \
+  --network matrix_matrix-internal \
+  --env-file "$BROKER_BOOTSTRAP_ENV" \
+  --entrypoint python \
+  '${admin_broker_image}' \
+  /app/scripts/bootstrap_hypha_admin_broker_authority.py >/dev/null
+rm -f "$BROKER_BOOTSTRAP_ENV"
 docker compose --project-directory "$MATRIX_DIR" -f "$MATRIX_DIR/compose.yaml" up -d
+for _attempt in $(seq 1 60); do
+  if docker exec hypha-admin-broker python -c "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8080/_hypha/admin/v1/ready', timeout=15); assert r.status == 200" >/dev/null 2>&1; then
+    break
+  fi
+  [ "$_attempt" -lt 60 ] || { echo "Hypha administration broker did not become ready" >&2; exit 1; }
+  sleep 5
+done

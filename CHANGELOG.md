@@ -6,6 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added a fail-closed fresh Synapse backup and isolated-restore gate — creates
+  hourly and daily application-consistent multi-volume DLM snapshots with
+  PostgreSQL checkpoint/XFS freeze hooks, auto-thaw safety, bounded restore
+  rehearsal cleanup, and mandatory recent recovery evidence before broker
+  deployment.
+- Added a scoped Hypha administration-session broker, hidden Synapse service-authority bootstrap, protected secret rotation, hardened image workflow, and rollback-capable SSM deployment path — lets the native client request short-lived typed administration authority without receiving registration credentials or a persistent Synapse administrator token.
 - Added a fail-closed Matrix Authentication Service rollout contract — enables MSC4108 QR login without silently breaking existing users, sessions, devices, tokens, or E2EE state during the required `syn2mas` migration.
 - Documented the digest-pinned Synapse landing rollout and issue boundary — keeps publication, Synapse-only deployment, API/federation smoke, browser QA, and rollback evidence explicit without claiming deployment.
 - Added dynamic Synapse static-path installation and image-byte verification — avoids Python site-packages assumptions and proves the hardened image contains the reviewed landing-page bytes.
@@ -77,6 +83,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Split cases/Frank/STT image tag overrides so production plans do not regress service-specific hotfix images back to the gateway image tag.
 
 ### Changed
+- Hardened the Hypha administration broker rollout with authority-aware readiness, single-flight service login, graceful HTTP transport shutdown, proxy body limits, transactional public smoke checks, and publish-only OIDC permission — prevents concurrent authority-token churn and keeps an unhealthy broker from being committed to the host.
+- Added scope-checked private-artifact annotations for reviewed Python variable flows and test fixtures — preserves literal-secret detection while allowing the broker's credential plumbing to pass the same hosted CI gate as the rest of Hub.
 - Synced ISS-P14-007 PR evidence back into the repo-local issue spec — makes the task-per-commit boundary and remaining operator-auth gate visible from the spec itself.
 - Linked ISS-P14-007 from the Matrix issue index and P15 production homeserver spec — keeps downstream work blocked on accepted production evidence instead of older DNS/TLS shorthand.
 - Upgraded the manual Gateway image workflow actions to Node 24-compatible releases — keeps the build-only image rail current without changing operator-controlled Terraform deployment ownership.
@@ -85,6 +93,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Refreshed the Hypha administration broker to the digest-pinned Python 3.12.14 Bookworm base and split vulnerability reporting from the fixable-vulnerability gate — applies available Debian security updates while retaining visibility into upstream-unfixed findings.
 - Added an exact service-start Terraform plan phase — permits only the reviewed MAS task-definition image replacements, MAS service update, and corresponding runtime alarm updates before authentication cutover.
 - Preserved the signing-key secret bytes exactly when materializing the runtime PEM — avoids appending a second trailing newline to Secrets Manager values, which MAS rejects as an unsupported multi-document key format.
 - Added migration-only Synapse PostgreSQL ingress from the MAS task security group — allows `syn2mas check` and migration rehearsals to reach the existing Synapse database without broadening steady-state access.

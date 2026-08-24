@@ -75,7 +75,8 @@ def test_deployment_policy_is_service_bounded_and_cannot_touch_castalia_bucket()
     assert "arn:aws:ssm:us-east-1::document/AWS-RunShellScript" in template
     assert "arn:aws:ssm:us-east-1:610992396917:document/SSM-SessionManagerRunShell" in template
     assert "arn:aws:ssm:us-east-1:610992396917:session/hypha-synapse-deploy-*" in template
-    assert "ssm:GetCommandInvocation" not in template
+    deployment_role = template[template.index("  HyphaSynapseDeploymentRole:") :]
+    assert "ssm:GetCommandInvocation" not in deployment_role
     assert "ssm:CancelCommand" not in template
     assert "ec2:TerminateInstances" not in template
     assert "ec2:StopInstances" not in template
@@ -107,7 +108,7 @@ def test_bootstrap_script_fails_closed_on_profile_account_region_and_principal()
         'EXPECTED_PROFILE = "zenith-hypha-free"',
         'EXPECTED_ACCOUNT = "610992396917"',
         'EXPECTED_REGION = "us-east-1"',
-        'arn:aws:iam::610992396917:root',
+        "arn:aws:iam::610992396917:root",
         "get-caller-identity",
         "deploy",
         "hypha-synapse-bootstrap",
@@ -128,7 +129,7 @@ def test_bootstrap_script_fails_closed_on_profile_account_region_and_principal()
         '"sts", "get-caller-identity"',
         'config.set(deployment_section, "role_arn", EXPECTED_ROLE_ARN)',
         'config.set(deployment_section, "role_session_name", DEPLOYMENT_ROLE_SESSION_NAME)',
-        'os.chmod(path, 0o600)',
+        "os.chmod(path, 0o600)",
     ]:
         assert marker in script
     assert "SessionToken" not in script
@@ -146,8 +147,12 @@ def test_bootstrap_deploy_uses_alert_parameter_only_for_first_creation(monkeypat
     def fake_run(arguments):
         calls.append(tuple(arguments))
         if "--parameter-overrides" in arguments:
-            parameter_path = Path(arguments[arguments.index("--parameter-overrides") + 1].removeprefix("file://"))
-            assert json.loads(parameter_path.read_text(encoding="utf-8")) == ["AlertEmail=operator@example.com"]
+            parameter_path = Path(
+                arguments[arguments.index("--parameter-overrides") + 1].removeprefix("file://")
+            )
+            assert json.loads(parameter_path.read_text(encoding="utf-8")) == [
+                "AlertEmail=operator@example.com"
+            ]
         return ""
 
     monkeypatch.setattr(bootstrap, "_run_aws", fake_run)
@@ -171,14 +176,22 @@ def test_bootstrap_rotates_one_orphaned_remote_key_before_local_install(monkeypa
             return ""
         if arguments[:2] == ("iam", "create-access-key"):
             return json.dumps(
-                {"AccessKey": {"AccessKeyId": "REPLACEMENT", "SecretAccessKey": "replacement-secret"}}
+                {
+                    "AccessKey": {
+                        "AccessKeyId": "REPLACEMENT",
+                        "SecretAccessKey": "replacement-secret",
+                    }
+                }
             )
         raise AssertionError(arguments)
 
     def fake_profile_aws(profile, arguments):
         if profile == bootstrap.SOURCE_PROFILE:
             return json.dumps(
-                {"Account": bootstrap.EXPECTED_ACCOUNT, "Arn": "arn:aws:iam::610992396917:user/HyphaSynapseTerraformSource"}
+                {
+                    "Account": bootstrap.EXPECTED_ACCOUNT,
+                    "Arn": "arn:aws:iam::610992396917:user/HyphaSynapseTerraformSource",
+                }
             )
         return json.dumps(
             {

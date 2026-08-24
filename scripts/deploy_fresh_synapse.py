@@ -7,12 +7,12 @@ import argparse
 import configparser
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
-from tempfile import TemporaryDirectory
 import time
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Sequence
 
 EXPECTED_PROFILE = "zenith-hypha-free"
@@ -81,7 +81,15 @@ def _run(
     return process.stdout if capture else ""
 
 
-def _write_configuration(aws_dir: Path, hostname: str, ami_id: str, instance_type: str, volume_size: int, runtime: bool) -> None:
+def _write_configuration(
+    aws_dir: Path,
+    hostname: str,
+    ami_id: str,
+    instance_type: str,
+    volume_size: int,
+    runtime: bool,
+    admin_broker_image: str,
+) -> None:
     backend = (
         'bucket       = "hypha-synapse-terraform-state-610992396917-us-east-1"\n'
         'key          = "fresh-synapse/prod/terraform.tfstate"\n'
@@ -99,6 +107,7 @@ def _write_configuration(aws_dir: Path, hostname: str, ami_id: str, instance_typ
         f'matrix_server_name = "{hostname}"\n\n'
         f'instance_type       = "{instance_type}"\n'
         f"data_volume_size_gb = {volume_size}\n"
+        f'admin_broker_image  = "{admin_broker_image}"\n'
         f"enable_runtime      = {'true' if runtime else 'false'}\n"
     )
     (aws_dir / "backend.hcl").write_text(backend, encoding="utf-8")
@@ -163,13 +172,17 @@ def runtime_verification_commands(hostname: str) -> tuple[str, ...]:
             "for attempt in $(seq 1 120); do "
             "db_health=$(docker inspect --format='{{.State.Health.Status}}' matrix-db 2>/dev/null || true); "
             "synapse_health=$(docker inspect --format='{{.State.Health.Status}}' matrix-synapse 2>/dev/null || true); "
+            "broker_health=$(docker inspect --format='{{.State.Health.Status}}' hypha-admin-broker 2>/dev/null || true); "
             "caddy_status=$(docker inspect --format='{{.State.Status}}' matrix-caddy 2>/dev/null || true); "
             "edge_status=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: " + hostname + "' "
             "http://127.0.0.1/_matrix/client/versions 2>/dev/null || true); "
-            "if [ \"$db_health\" = healthy ] && [ \"$synapse_health\" = healthy ] && "
+            "if [ \"$db_health\" = healthy ] && [ \"$synapse_health\" = healthy ] && [ \"$broker_health\" = healthy ] && "
             "[ \"$caddy_status\" = running ] && { [ \"$edge_status\" = 200 ] || [ \"$edge_status\" = 308 ]; } && "
             "docker exec matrix-synapse python -c \"import urllib.request; "
             "r=urllib.request.urlopen('http://127.0.0.1:8008/_matrix/client/versions', timeout=10); "
+            "assert r.status == 200\" >/dev/null 2>&1 && "
+            "docker exec hypha-admin-broker python -c \"import urllib.request; "
+            "r=urllib.request.urlopen('http://127.0.0.1:8080/_hypha/admin/v1/health', timeout=10); "
             "assert r.status == 200\" >/dev/null 2>&1; then exit 0; fi; "
             "sleep 5; done; echo 'runtime did not become healthy' >&2; exit 1"
         ),
@@ -350,6 +363,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--region", required=True)
     parser.add_argument("--hostname", required=True)
     parser.add_argument("--ami-id", required=True)
+    parser.add_argument("--admin-broker-image", required=True)
     parser.add_argument("--instance-type", default="t3.small")
     parser.add_argument("--data-volume-size-gb", type=int, default=30)
     return parser
@@ -365,6 +379,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if not re.fullmatch(r"ami-[0-9a-f]+", args.ami_id) or args.data_volume_size_gb < 20:
         print("refusing deployment: explicit AMI and at least 20 GiB are required", file=sys.stderr)
+        return 2
+    if not re.fullmatch(r"[^\s]+@sha256:[0-9a-f]{64}", args.admin_broker_image):
+        print("refusing deployment: an immutable broker image digest is required", file=sys.stderr)
         return 2
 
     root = Path(__file__).resolve().parents[1]
@@ -392,7 +409,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if identity.get("Account") != EXPECTED_ACCOUNT or ":assumed-role/HyphaSynapseDeploymentRole/" not in identity.get("Arn", ""):
             raise DeploymentError("bounded deployment identity was not established")
 
-        _write_configuration(aws_dir, args.hostname, args.ami_id, args.instance_type, args.data_volume_size_gb, True)
+        _write_configuration(
+            aws_dir,
+            args.hostname,
+            args.ami_id,
+            args.instance_type,
+            args.data_volume_size_gb,
+            True,
+            args.admin_broker_image,
+        )
         _run(
             ("terraform", "init", "-reconfigure", "-backend-config=backend.hcl"),
             cwd=aws_dir,
@@ -414,6 +439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.instance_type,
                     args.data_volume_size_gb,
                     False,
+                    args.admin_broker_image,
                 )
                 _plan_and_apply(aws_dir, temporary, "base", BASE_CREATES)
             if not _secret_has_current(root):
@@ -429,7 +455,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     cwd=root,
                     profile=EXPECTED_DEPLOYMENT_PROFILE,
                 )
-            _write_configuration(aws_dir, args.hostname, args.ami_id, args.instance_type, args.data_volume_size_gb, True)
+            _write_configuration(
+                aws_dir,
+                args.hostname,
+                args.ami_id,
+                args.instance_type,
+                args.data_volume_size_gb,
+                True,
+                args.admin_broker_image,
+            )
             _plan_and_apply(aws_dir, temporary, "runtime", RUNTIME_CREATES)
         outputs = _safe_outputs(aws_dir)
         _verify_runtime(root, outputs["instance_id"], args.hostname)

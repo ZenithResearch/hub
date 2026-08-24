@@ -179,6 +179,7 @@ resource "aws_instance" "matrix" {
     synapse_image           = var.synapse_image
     postgres_image          = var.postgres_image
     caddy_image             = var.caddy_image
+    admin_broker_image      = var.admin_broker_image
   })
 
   # User data is first-boot input. Automatic replacement is unsafe while the

@@ -1,10 +1,22 @@
+import importlib.util
 from pathlib import Path
 
+from services.hypha_admin_broker.auth import BrokerSessionStore
+
 ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "scripts" / "populate_fresh_synapse_secret.py"
+
+
+def load_population():
+    spec = importlib.util.spec_from_file_location("populate_fresh_synapse_secret", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_secret_population_is_role_scoped_fresh_and_non_printing():
-    script = (ROOT / "scripts/populate_fresh_synapse_secret.py").read_text(encoding="utf-8")
+    script = SCRIPT.read_text(encoding="utf-8")
 
     for marker in [
         'EXPECTED_PROFILE = "zenith-hypha-synapse"',
@@ -17,6 +29,10 @@ def test_secret_population_is_role_scoped_fresh_and_non_printing():
         '"REGISTRATION_SHARED_SECRET"',
         '"MACAROON_SECRET_KEY"',
         '"FORM_SECRET"',
+        '"HYPHA_ADMIN_BROKER_SECRET_VERIFIER"',
+        '"HYPHA_ADMIN_BROKER_SERVICE_PASSWORD"',
+        "encode_scrypt_verifier",
+        "getpass.getpass",
         "put-secret-value",
         "AWSCURRENT",
         "NamedTemporaryFile",
@@ -34,8 +50,22 @@ def test_secret_population_is_role_scoped_fresh_and_non_printing():
         "print(values",
         "print(payload",
         "capture_output=False",
+        "--operator-secret",
     ]:
         assert forbidden not in script
+
+
+def test_fresh_secret_contains_exact_runtime_schema_and_only_a_broker_verifier():
+    population = load_population()
+    operator_secret = "operator-administration-secret-value-1234"
+
+    values = population._fresh_values(operator_secret)
+
+    assert set(values) == set(population.REQUIRED_KEYS)
+    assert operator_secret not in values.values()
+    store = BrokerSessionStore(verifier=values["HYPHA_ADMIN_BROKER_SECRET_VERIFIER"])
+    assert store.authenticate(operator_secret, source="test").session_token
+    assert len(values["HYPHA_ADMIN_BROKER_SERVICE_PASSWORD"]) >= 32
 
 
 def test_bootstrap_policy_allows_only_exact_secret_population_target():
