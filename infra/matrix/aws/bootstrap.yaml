@@ -9,6 +9,86 @@ Parameters:
     AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
 
 Resources:
+  HyphaAdminBrokerRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: hypha-admin-broker
+      ImageTagMutability: IMMUTABLE
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged broker candidates after seven days",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+  GitHubActionsOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      Tags:
+        - Key: Project
+          Value: hypha
+        - Key: Component
+          Value: admin-broker-image-publication
+
+  HyphaAdminBrokerImagePublisherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: HyphaAdminBrokerImagePublisherRole
+      Description: GitHub OIDC role restricted to publishing reviewed Hypha broker images.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ExactHubProductionEnvironmentOnly
+            Effect: Allow
+            Principal:
+              Federated: !GetAtt GitHubActionsOidcProvider.Arn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: repo:ZenithResearch/hub:environment:production
+      Policies:
+        - PolicyName: PublishExactHyphaAdminBrokerRepository
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AuthenticateToEcr
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: PushAndVerifyExactRepository
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeRepositories
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !GetAtt HyphaAdminBrokerRepository.Arn
+
   TerraformStateBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -106,6 +186,17 @@ Resources:
             Effect: Allow
             Action: ec2:DescribeVolumes
             Resource: "*"
+          - Sid: AuthenticateToEcr
+            Effect: Allow
+            Action: ecr:GetAuthorizationToken
+            Resource: "*"
+          - Sid: PullExactBrokerRepository
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+            Resource: !GetAtt HyphaAdminBrokerRepository.Arn
 
   HyphaSynapseSnapshotDocument:
     Type: AWS::SSM::Document

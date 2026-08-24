@@ -9,7 +9,9 @@ DATA_MOUNT=/opt/matrix-data
 MATRIX_DIR=/opt/matrix
 SECRET_JSON=$(mktemp /run/matrix-secret.XXXXXX)
 BROKER_BOOTSTRAP_ENV=$(mktemp /run/hypha-admin-broker-bootstrap.XXXXXX)
-trap 'rm -f "$SECRET_JSON" "$BROKER_BOOTSTRAP_ENV"' EXIT
+BROKER_DOCKER_CONFIG=$(mktemp -d /run/hypha-admin-broker-docker.XXXXXX)
+export DOCKER_CONFIG="$BROKER_DOCKER_CONFIG"
+trap 'rm -f "$SECRET_JSON" "$BROKER_BOOTSTRAP_ENV"; rm -rf "$BROKER_DOCKER_CONFIG"' EXIT
 
 dnf install -y awscli docker jq xfsprogs
 
@@ -305,6 +307,10 @@ for _attempt in $(seq 1 120); do
   [ "$_attempt" -lt 120 ] || { echo "Synapse did not become ready for broker authority bootstrap" >&2; exit 1; }
   sleep 5
 done
+aws ecr get-login-password --region '${aws_region}' |
+  docker login --username AWS --password-stdin \
+    '610992396917.dkr.ecr.us-east-1.amazonaws.com' >/dev/null
+docker pull '${admin_broker_image}' >/dev/null
 docker run --rm \
   --network matrix_matrix-internal \
   --env-file "$BROKER_BOOTSTRAP_ENV" \

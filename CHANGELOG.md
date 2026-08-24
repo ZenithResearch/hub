@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Fixed
+- Bound Hypha broker publication and pulls to a dedicated immutable ECR
+  repository in account `610992396917`, with exact GitHub production-environment
+  OIDC trust, least-privilege publisher/instance permissions, fail-closed
+  account validation, and ephemeral on-host Docker authentication.
+
 ### Added
 - Added a fail-closed fresh Synapse backup and isolated-restore gate — creates
   hourly and daily application-consistent multi-volume DLM snapshots with

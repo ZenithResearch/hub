@@ -22,8 +22,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  AWS_ACCOUNT_ID: "610992396917"
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-  ECR_REPOSITORY: zenith-hub-prod-runtime-grpc
+  AWS_ROLE_ARN: arn:aws:iam::610992396917:role/HyphaAdminBrokerImagePublisherRole
+  ECR_REPOSITORY: hypha-admin-broker
 
 jobs:
   verify:
@@ -80,7 +82,7 @@ jobs:
       - name: Configure AWS credentials by OIDC
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ vars.AWS_PROD_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - uses: docker/setup-buildx-action@v4
       - name: Resolve immutable tag and registry
@@ -91,8 +93,10 @@ jobs:
           TAG="${{ inputs.image_tag }}"
           if [[ -z "$TAG" ]]; then TAG="hypha-admin-broker-${GITHUB_SHA::12}"; fi
           [[ "$TAG" =~ ^hypha-admin-broker-[A-Za-z0-9_.-]{1,101}$ ]] || { echo "invalid tag" >&2; exit 2; }
-          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-          REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          ACTUAL_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          [[ "$ACTUAL_ACCOUNT_ID" = "$AWS_ACCOUNT_ID" ]] || { echo "unexpected AWS account" >&2; exit 2; }
+          aws ecr describe-repositories --repository-name "$ECR_REPOSITORY" >/dev/null
+          REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "registry=$REGISTRY" >> "$GITHUB_OUTPUT"
           echo "image=$REGISTRY/$ECR_REPOSITORY:$TAG" >> "$GITHUB_OUTPUT"
