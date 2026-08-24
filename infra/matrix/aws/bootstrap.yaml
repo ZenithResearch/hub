@@ -107,6 +107,248 @@ Resources:
             Action: ec2:DescribeVolumes
             Resource: "*"
 
+  HyphaSynapseSnapshotDocument:
+    Type: AWS::SSM::Document
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: HyphaSynapseApplicationConsistentSnapshot
+      DocumentType: Command
+      DocumentFormat: YAML
+      UpdateMethod: NewVersion
+      Tags:
+        - Key: DLMScriptsAccess
+          Value: "true"
+        - Key: Project
+          Value: hypha
+        - Key: Component
+          Value: fresh-synapse
+      Content:
+        schemaVersion: "2.2"
+        description: Checkpoint PostgreSQL and freeze only the dedicated Synapse XFS data mount.
+        parameters:
+          command:
+            type: String
+            default: dry-run
+            allowedValues:
+              - pre-script
+              - post-script
+              - dry-run
+          executionId:
+            type: String
+            default: None
+            allowedPattern: '^(None|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})$'
+        mainSteps:
+          - action: aws:runShellScript
+            name: runSnapshotHook
+            precondition:
+              StringEquals:
+                - platformType
+                - Linux
+            inputs:
+              timeoutSeconds: "120"
+              runCommand:
+                - |
+                  set -euo pipefail
+                  umask 077
+                  command='{{ command }}'
+                  execution_id='{{ executionId }}'
+                  data_mount=/opt/matrix-data
+                  state_file=/run/hypha-dlm-freeze-state
+                  timer_unit=hypha-dlm-auto-thaw
+
+                  validate_runtime() {
+                    mountpoint -q "$data_mount"
+                    test "$(findmnt -n -o FSTYPE --target "$data_mount")" = xfs
+                    data_device=$(findmnt -n -o SOURCE --target "$data_mount")
+                    test "$(blkid -s LABEL -o value "$data_device")" = hypha-matrix
+                    docker inspect matrix-db | jq -e '.[0].State.Running == true' >/dev/null
+                    docker exec matrix-db pg_isready --username synapse --dbname synapse >/dev/null
+                  }
+
+                  cancel_auto_thaw() {
+                    systemctl stop "$timer_unit.timer" "$timer_unit.service" >/dev/null 2>&1 || true
+                    systemctl reset-failed "$timer_unit.timer" "$timer_unit.service" >/dev/null 2>&1 || true
+                  }
+
+                  case "$command" in
+                    dry-run)
+                      test "$execution_id" = None
+                      validate_runtime
+                      ;;
+                    pre-script)
+                      test "$execution_id" != None
+                      validate_runtime
+                      cancel_auto_thaw
+                      rm -f "$state_file"
+                      docker exec matrix-db psql \
+                        --username synapse \
+                        --dbname synapse \
+                        --no-psqlrc \
+                        --set=ON_ERROR_STOP=1 \
+                        --command='CHECKPOINT;' >/dev/null
+                      sync
+                      printf '%s\n' "$execution_id" > "$state_file"
+                      systemd-run \
+                        --unit="$timer_unit" \
+                        --on-active=110s \
+                        --timer-property=AccuracySec=1s \
+                        /bin/bash -c "/usr/sbin/xfs_freeze -u '$data_mount' >/dev/null 2>&1 || true; rm -f '$state_file'" \
+                        >/dev/null
+                      /usr/sbin/xfs_freeze -f "$data_mount"
+                      ;;
+                    post-script)
+                      test "$execution_id" != None
+                      test -s "$state_file"
+                      test "$(cat "$state_file")" = "$execution_id"
+                      /usr/sbin/xfs_freeze -u "$data_mount"
+                      cancel_auto_thaw
+                      rm -f "$state_file"
+                      validate_runtime
+                      ;;
+                    *)
+                      exit 2
+                      ;;
+                  esac
+
+  HyphaSynapseDlmRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RoleName: HyphaSynapseDlmRole
+      Description: Exact service authority for application-consistent fresh Synapse snapshots.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: dlm.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: "610992396917"
+              ArnLike:
+                aws:SourceArn: arn:aws:dlm:us-east-1:610992396917:policy/*
+      Policies:
+        - PolicyName: HyphaSynapseApplicationConsistentSnapshots
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ManageSnapshotLifecycle
+                Effect: Allow
+                Action:
+                  - ec2:CreateSnapshot
+                  - ec2:CreateSnapshots
+                  - ec2:DeleteSnapshot
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeInstances
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                Resource: "*"
+              - Sid: TagCreatedSnapshots
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource: arn:aws:ec2:us-east-1::snapshot/*
+              - Sid: ManageOnlyDlmEventRules
+                Effect: Allow
+                Action:
+                  - events:DeleteRule
+                  - events:DescribeRule
+                  - events:DisableRule
+                  - events:EnableRule
+                  - events:ListTargetsByRule
+                  - events:PutRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                Resource: arn:aws:events:us-east-1:610992396917:rule/AwsDataLifecycleRule.managed-cwe.*
+              - Sid: ReadSnapshotScriptExecutions
+                Effect: Allow
+                Action:
+                  - ssm:DescribeInstanceInformation
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommands
+                Resource: "*"
+              - Sid: RunExactSnapshotDocument
+                Effect: Allow
+                Action:
+                  - ssm:DescribeDocument
+                  - ssm:GetDocument
+                  - ssm:SendCommand
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:document/${HyphaSynapseSnapshotDocument}
+              - Sid: RunSnapshotDocumentOnlyOnSynapse
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource: arn:aws:ec2:us-east-1:610992396917:instance/*
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/Name: hypha-fresh-synapse
+                    ssm:resourceTag/Project: hypha
+                    ssm:resourceTag/Component: fresh-synapse
+
+  HyphaSynapseBackupPolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Hypha fresh Synapse application-consistent EBS snapshots
+      ExecutionRoleArn: !GetAtt HyphaSynapseDlmRole.Arn
+      State: ENABLED
+      PolicyDetails:
+        PolicyType: EBS_SNAPSHOT_MANAGEMENT
+        ResourceTypes:
+          - INSTANCE
+        TargetTags:
+          - Key: Name
+            Value: hypha-fresh-synapse
+          - Key: Project
+            Value: hypha
+          - Key: Component
+            Value: fresh-synapse
+        Parameters:
+          ExcludeBootVolume: false
+        Schedules:
+          - Name: Hourly application-consistent snapshots
+            CopyTags: true
+            Tags:
+              - Key: HyphaBackupClass
+                Value: hourly
+            CreateRule:
+              Interval: 1
+              IntervalUnit: HOURS
+              Scripts:
+                - ExecuteOperationOnScriptFailure: false
+                  ExecutionHandler: !Ref HyphaSynapseSnapshotDocument
+                  ExecutionHandlerService: AWS_SYSTEMS_MANAGER
+                  ExecutionTimeout: 120
+                  MaximumRetryCount: 3
+                  Stages:
+                    - PRE
+                    - POST
+            RetainRule:
+              Count: 72
+          - Name: Daily restore-rehearsal snapshots
+            CopyTags: true
+            Tags:
+              - Key: HyphaBackupClass
+                Value: daily
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+              Times:
+                - "08:00"
+              Scripts:
+                - ExecuteOperationOnScriptFailure: false
+                  ExecutionHandler: !Ref HyphaSynapseSnapshotDocument
+                  ExecutionHandlerService: AWS_SYSTEMS_MANAGER
+                  ExecutionTimeout: 120
+                  MaximumRetryCount: 3
+                  Stages:
+                    - PRE
+                    - POST
+            RetainRule:
+              Count: 35
+
   HyphaSynapseDeploymentRole:
     Type: AWS::IAM::Role
     DependsOn: HyphaSynapseTerraformSource
@@ -143,11 +385,21 @@ Resources:
                   - ec2:DescribeNetworkInterfaces
                   - ec2:DescribeRouteTables
                   - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSnapshots
                   - ec2:DescribeSubnets
                   - ec2:DescribeTags
                   - ec2:DescribeVolumes
                   - ec2:DescribeVpcAttribute
                   - ec2:DescribeVpcs
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: us-east-1
+              - Sid: ReadExactSynapseBackupPolicy
+                Effect: Allow
+                Action:
+                  - dlm:GetLifecyclePolicies
+                  - dlm:GetLifecyclePolicy
                 Resource: "*"
                 Condition:
                   StringEquals:
@@ -365,6 +617,62 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                 Resource: arn:aws:s3:::hypha-synapse-terraform-state-610992396917-us-east-1/*
+        - PolicyName: HyphaSynapseRestoreRehearsal
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: RecordExactSynapseRestoreEvidence
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource: arn:aws:ec2:us-east-1::snapshot/*
+                Condition:
+                  StringEquals:
+                    "ec2:ResourceTag/aws:dlm:lifecycle-policy-id": !Ref HyphaSynapseBackupPolicy
+                    "ec2:ResourceTag/aws:dlm/pre-script": SUCCESS
+                    "ec2:ResourceTag/aws:dlm/post-script": SUCCESS
+                    ec2:ResourceTag/HyphaBackupClass: daily
+                    ec2:ResourceTag/Project: hypha
+                    ec2:ResourceTag/Component: fresh-synapse
+                    aws:RequestTag/HyphaRestoreVerifierVersion: "1"
+                    aws:RequestedRegion: us-east-1
+                  "ForAllValues:StringEquals":
+                    aws:TagKeys:
+                      - HyphaRestoreVerifiedAt
+                      - HyphaRestoreVerifierVersion
+                  "Null":
+                    aws:RequestTag/HyphaRestoreVerifiedAt: "false"
+              - Sid: DetachRestoreRehearsalVolume
+                Effect: Allow
+                Action: ec2:DetachVolume
+                Resource: arn:aws:ec2:us-east-1:610992396917:volume/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: hypha
+                    ec2:ResourceTag/Component: fresh-synapse
+                    ec2:ResourceTag/Purpose: restore-rehearsal
+                    ec2:ResourceTag/ManagedBy: restore-rehearsal
+                    aws:RequestedRegion: us-east-1
+              - Sid: DetachRestoreOnlyFromExactSynapseInstance
+                Effect: Allow
+                Action: ec2:DetachVolume
+                Resource: arn:aws:ec2:us-east-1:610992396917:instance/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Name: hypha-fresh-synapse
+                    ec2:ResourceTag/Project: hypha
+                    ec2:ResourceTag/Component: fresh-synapse
+                    aws:RequestedRegion: us-east-1
+              - Sid: DeleteRestoreRehearsalVolume
+                Effect: Allow
+                Action: ec2:DeleteVolume
+                Resource: arn:aws:ec2:us-east-1:610992396917:volume/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: hypha
+                    ec2:ResourceTag/Component: fresh-synapse
+                    ec2:ResourceTag/Purpose: restore-rehearsal
+                    ec2:ResourceTag/ManagedBy: restore-rehearsal
+                    aws:RequestedRegion: us-east-1
 
   MonthlyBudget:
     Type: AWS::Budgets::Budget

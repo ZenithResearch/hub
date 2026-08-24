@@ -72,6 +72,10 @@ Security boundaries:
 - Terraform creates only the Secrets Manager container. Secret values are
   fetched on the instance at runtime and never enter Terraform variables,
   state, user data, or bootstrap logs.
+- the root bootstrap owns hourly and daily application-consistent multi-volume
+  DLM snapshots. PostgreSQL checkpoint/XFS freeze and successful pre/post tags
+  are mandatory, and broker rollout additionally requires a recent isolated
+  restore. See `docs/operations/fresh-synapse-backup-restore.md`.
 
 ### One-command deployment
 
@@ -145,7 +149,9 @@ Manager administration.
 
 ### Destruction and persistence
 
-This module is for a new disposable homeserver. The root and Matrix data EBS
-volumes are encrypted and deleted with the instance. Export or back up anything
-that must survive before destroying the stack. The Secrets Manager secret uses
-a seven-day recovery window.
+The root and Matrix data EBS volumes are encrypted and deleted with the
+instance. The root bootstrap separately retains application-consistent hourly
+and daily DLM snapshot sets, and the deployment gate requires current backup
+and isolated-restore evidence. Review that evidence and the recovery runbook
+before destroying the runtime; delete-on-termination is still destructive to
+the live volumes. The Secrets Manager secret uses a seven-day recovery window.

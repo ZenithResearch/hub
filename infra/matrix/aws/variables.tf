@@ -48,7 +48,7 @@ variable "vpc_cidr" {
 }
 
 variable "data_volume_size_gb" {
-  description = "Size of the encrypted disposable data volume."
+  description = "Size of the encrypted delete-on-termination data volume protected by the bootstrap DLM policy."
   type        = number
   default     = 30
 

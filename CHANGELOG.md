@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Added
+- Added a fail-closed fresh Synapse backup and isolated-restore gate — creates
+  hourly and daily application-consistent multi-volume DLM snapshots with
+  PostgreSQL checkpoint/XFS freeze hooks, auto-thaw safety, bounded restore
+  rehearsal cleanup, and mandatory recent recovery evidence before broker
+  deployment.
 - Added a scoped Hypha administration-session broker, hidden Synapse service-authority bootstrap, protected secret rotation, hardened image workflow, and rollback-capable SSM deployment path — lets the native client request short-lived typed administration authority without receiving registration credentials or a persistent Synapse administrator token.
 - Added a fail-closed Matrix Authentication Service rollout contract — enables MSC4108 QR login without silently breaking existing users, sessions, devices, tokens, or E2EE state during the required `syn2mas` migration.
 - Documented the digest-pinned Synapse landing rollout and issue boundary — keeps publication, Synapse-only deployment, API/federation smoke, browser QA, and rollback evidence explicit without claiming deployment.

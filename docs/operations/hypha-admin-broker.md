@@ -21,7 +21,9 @@ Prerequisites:
 1. The backend exact head has passed review and hosted CI.
 2. The image workflow has published that exact head and emitted an ECR `@sha256:<64 hex>` reference.
 3. The operator has the bounded `zenith-hypha-synapse` profile and the explicit production EC2 instance ID.
-4. The current Synapse/PostgreSQL backup and ordinary Matrix health checks are green.
+4. `verify_fresh_synapse_backup.py` reports `backup_and_restore_verified` for
+   the explicit instance, and ordinary Matrix health checks are green. See
+   `fresh-synapse-backup-restore.md`; snapshot presence alone is insufficient.
 
 Add the broker fields to the existing runtime secret. The command prompts twice without echo, preserves all existing Synapse values, and prints metadata only:
 
@@ -43,7 +45,15 @@ python3 scripts/deploy_hypha_admin_broker.py \
   --dry-run
 ```
 
-Remove `--dry-run` only after matching the exact image and instance. The deployer uses `AWS-RunShellScript`; the command contains configuration and image identifiers but no secret values. On-host logic fetches `AWSCURRENT`, writes mode-0600 runtime files, verifies the digest, bootstraps or verifies the service authority, validates Compose, starts only the broker and Caddy, and checks broker liveness, hidden-service authority readiness, and ordinary Matrix health from both the container and public route before committing the rollout.
+Remove `--dry-run` only after matching the exact image and instance. Before it
+sends `AWS-RunShellScript`, the deployer requires fresh application-consistent
+root/data snapshots and recent isolated-restore evidence. The rollout command
+contains configuration and image identifiers but no secret values. On-host
+logic fetches `AWSCURRENT`, writes mode-0600 runtime files, verifies the digest,
+bootstraps or verifies the service authority, validates Compose, starts only
+the broker and Caddy, and checks broker liveness, hidden-service authority
+readiness, and ordinary Matrix health from both the container and public route
+before committing the rollout.
 
 ## Rotation
 

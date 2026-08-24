@@ -18,6 +18,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Sequence
 
+import verify_fresh_synapse_backup as backup
+
 EXPECTED_PROFILE = "zenith-hypha-synapse"
 EXPECTED_ACCOUNT = "610992396917"
 EXPECTED_REGION = "us-east-1"
@@ -106,7 +108,7 @@ def _encode_script(source: str) -> str:
 
 
 def _configuration_rewriter(*, hostname: str, image: str) -> str:
-    broker_block = f'''  # BEGIN HYPHA ADMIN BROKER
+    broker_block = f"""  # BEGIN HYPHA ADMIN BROKER
   hypha-admin-broker:
     image: {image}
     container_name: hypha-admin-broker
@@ -126,13 +128,13 @@ def _configuration_rewriter(*, hostname: str, image: str) -> str:
     networks: [matrix-internal]
   # END HYPHA ADMIN BROKER
 
-'''
-    old_caddy = f'''{hostname} {{
+"""
+    old_caddy = f"""{hostname} {{
   encode zstd gzip
   reverse_proxy matrix-synapse:8008
 }}
-'''
-    previous_caddy = f'''{hostname} {{
+"""
+    previous_caddy = f"""{hostname} {{
   encode zstd gzip
   handle /_hypha/admin/v1/* {{
     reverse_proxy hypha-admin-broker:8080
@@ -141,8 +143,8 @@ def _configuration_rewriter(*, hostname: str, image: str) -> str:
     reverse_proxy matrix-synapse:8008
   }}
 }}
-'''
-    new_caddy = f'''{hostname} {{
+"""
+    new_caddy = f"""{hostname} {{
   encode zstd gzip
   handle /_hypha/admin/v1/* {{
     request_body {{
@@ -154,8 +156,8 @@ def _configuration_rewriter(*, hostname: str, image: str) -> str:
     reverse_proxy matrix-synapse:8008
   }}
 }}
-'''
-    return f'''import os
+"""
+    return f"""import os
 from pathlib import Path
 
 compose_path = Path("/opt/matrix/compose.yaml")
@@ -185,11 +187,11 @@ for path, content in ((compose_path, compose), (caddy_path, new_caddy)):
     temporary.write_text(content, encoding="utf-8")
     os.chmod(temporary, 0o600 if path.name == "compose.yaml" else 0o644)
     os.replace(temporary, path)
-'''
+"""
 
 
 def _secret_renderer() -> str:
-    return r'''import json
+    return r"""import json
 import os
 from pathlib import Path
 import re
@@ -233,7 +235,7 @@ bootstrap.write_text(
 )
 os.chmod(broker, 0o600)
 os.chmod(bootstrap, 0o600)
-'''
+"""
 
 
 def deployment_commands(*, hostname: str, image: str) -> tuple[str, ...]:
@@ -251,8 +253,8 @@ def deployment_commands(*, hostname: str, image: str) -> tuple[str, ...]:
         'if [ -f "$MATRIX_DIR/broker.env" ]; then cp --preserve=mode,ownership "$MATRIX_DIR/broker.env" "$backup/broker.env"; fi',
         'rollback() { set +e; docker compose --project-directory "$MATRIX_DIR" -f "$MATRIX_DIR/compose.yaml" stop hypha-admin-broker; cp "$backup/compose.yaml" "$MATRIX_DIR/compose.yaml"; cp "$backup/Caddyfile" "$MATRIX_DIR/Caddyfile"; if [ -f "$backup/broker.env" ]; then cp "$backup/broker.env" "$MATRIX_DIR/broker.env"; else rm -f "$MATRIX_DIR/broker.env"; fi; docker compose --project-directory "$MATRIX_DIR" -f "$MATRIX_DIR/compose.yaml" up -d --remove-orphans; }',
         "trap rollback ERR",
-        'secret_json=$(mktemp /run/hypha-admin-broker-secret.XXXXXX)',
-        'bootstrap_env=$(mktemp /run/hypha-admin-broker-bootstrap.XXXXXX)',
+        "secret_json=$(mktemp /run/hypha-admin-broker-secret.XXXXXX)",
+        "bootstrap_env=$(mktemp /run/hypha-admin-broker-bootstrap.XXXXXX)",
         'trap \'rm -f "$secret_json" "$bootstrap_env"\' EXIT',
         f"printf '%s' '{rewrite}' | base64 -d | python3 -",
         f"docker pull '{image}' >/dev/null",
@@ -266,10 +268,10 @@ def deployment_commands(*, hostname: str, image: str) -> tuple[str, ...]:
         'for attempt in $(seq 1 60); do status=$(docker inspect --format=\'{{.State.Health.Status}}\' hypha-admin-broker 2>/dev/null || true); [ "$status" = healthy ] && break; [ "$attempt" -lt 60 ] || { echo "broker did not become healthy" >&2; exit 1; }; sleep 5; done',
         'test "$(docker inspect --format=\'{{.Config.User}}\' hypha-admin-broker)" = "65532:65532"',
         'test "$(docker inspect --format=\'{{json .HostConfig.PortBindings}}\' hypha-admin-broker)" = "null"',
-        'docker exec hypha-admin-broker python -c "import urllib.request; r=urllib.request.urlopen(\'http://127.0.0.1:8080/_hypha/admin/v1/health\', timeout=5); assert r.status == 200"',
-        'docker exec hypha-admin-broker python -c "import urllib.request; r=urllib.request.urlopen(\'http://127.0.0.1:8080/_hypha/admin/v1/ready\', timeout=15); assert r.status == 200"',
-        f'test "$(curl --silent --show-error --max-time 15 --output /dev/null --write-out \'%{{http_code}}\' \'https://{hostname}/_hypha/admin/v1/ready\')" = "200"',
-        f'test "$(curl --silent --show-error --max-time 15 --output /dev/null --write-out \'%{{http_code}}\' \'https://{hostname}/_matrix/client/versions\')" = "200"',
+        "docker exec hypha-admin-broker python -c \"import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8080/_hypha/admin/v1/health', timeout=5); assert r.status == 200\"",
+        "docker exec hypha-admin-broker python -c \"import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8080/_hypha/admin/v1/ready', timeout=15); assert r.status == 200\"",
+        f"test \"$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{{http_code}}' 'https://{hostname}/_hypha/admin/v1/ready')\" = \"200\"",
+        f"test \"$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{{http_code}}' 'https://{hostname}/_matrix/client/versions')\" = \"200\"",
         "trap - ERR",
         'printf "%s\\n" "Hypha administration broker deployment verified"',
     )
@@ -369,17 +371,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = deployment_commands(hostname=args.hostname, image=args.admin_broker_image)
     if args.dry_run:
         digest = hashlib.sha256(json.dumps(commands).encode()).hexdigest()
-        print(json.dumps({"command_bundle_sha256": digest, "instance_id": args.instance_id}, sort_keys=True))
+        print(
+            json.dumps(
+                {"command_bundle_sha256": digest, "instance_id": args.instance_id}, sort_keys=True
+            )
+        )
         return 0
     try:
         _verify_role()
+        backup.verify_backup(args.instance_id, run_aws=_run_aws)
         command_id = _send_command(args.instance_id, commands)
         _wait_for_command(command_id)
         origin = "https://" + args.hostname
         _verify_public_endpoint(origin + "/_hypha/admin/v1/health", 200)
         _verify_public_endpoint(origin + "/_hypha/admin/v1/ready", 200)
         _verify_public_endpoint(origin + "/_matrix/client/versions", 200)
-    except BrokerDeploymentError as exc:
+    except (backup.BackupVerificationError, BrokerDeploymentError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     print(
