@@ -59,6 +59,22 @@ def test_broker_runtime_secret_schema_uses_verifier_and_server_only_service_cred
     assert "HYPHA_ADMIN_BROKER_ACCESS_TOKEN" not in user_data
 
 
+def test_broker_image_refreshes_its_base_and_keeps_unfixed_findings_visible():
+    dockerfile = read("services/hypha_admin_broker/Dockerfile")
+    workflow = read(".github/workflows/hypha-admin-broker-image.yml")
+
+    base = (
+        "python:3.12.14-slim-bookworm@sha256:"
+        "a116514e19457bcb7af7efe9c3dd0b9b71e85b317694e7882a1c52aa15a78134"
+    )
+    assert dockerfile.count(base) == 2
+    assert workflow.count("Report all high or critical vulnerabilities") == 1
+    assert workflow.count("ignore-unfixed: false") == 2
+    assert workflow.count("ignore-unfixed: true") == 2
+    assert workflow.count('exit-code: "0"') == 2
+    assert workflow.count('exit-code: "1"') == 2
+
+
 def test_existing_instance_is_updated_by_reviewed_ssm_deployer_with_rollback():
     main = read("infra/matrix/aws/main.tf")
     deployer = read("scripts/deploy_hypha_admin_broker.py")

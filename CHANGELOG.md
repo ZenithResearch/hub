@@ -88,6 +88,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Documented local Review SDK CORS origins in Gateway/Terraform operator docs — prevents production CORS allowlists from dropping localhost review/admin asset-upload origins during cleanup or Terraform refactors.
 
 ### Fixed
+- Refreshed the Hypha administration broker to the digest-pinned Python 3.12.14 Bookworm base and split vulnerability reporting from the fixable-vulnerability gate — applies available Debian security updates while retaining visibility into upstream-unfixed findings.
 - Added an exact service-start Terraform plan phase — permits only the reviewed MAS task-definition image replacements, MAS service update, and corresponding runtime alarm updates before authentication cutover.
 - Preserved the signing-key secret bytes exactly when materializing the runtime PEM — avoids appending a second trailing newline to Secrets Manager values, which MAS rejects as an unsupported multi-document key format.
 - Added migration-only Synapse PostgreSQL ingress from the MAS task security group — allows `syn2mas check` and migration rehearsals to reach the existing Synapse database without broadening steady-state access.

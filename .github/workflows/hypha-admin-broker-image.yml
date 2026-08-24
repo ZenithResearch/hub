@@ -48,13 +48,21 @@ jobs:
           test "$(docker image inspect hypha-admin-broker:verify --format '{{.Config.User}}')" = "65532:65532"
           test "$(docker image inspect hypha-admin-broker:verify --format '{{json .Config.Healthcheck.Test}}')" != "null"
           docker run --rm --entrypoint python hypha-admin-broker:verify -c 'import fastapi,httpx,pydantic,uvicorn; print("runtime_dependencies_ok")'
-      - name: Fail on fixable high or critical vulnerabilities
+      - name: Report all high or critical vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: hypha-admin-broker:verify
           scanners: vuln
           severity: HIGH,CRITICAL
           ignore-unfixed: false
+          exit-code: "0"
+      - name: Fail on fixable high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: hypha-admin-broker:verify
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
 
   publish:
@@ -101,13 +109,21 @@ jobs:
           tags: ${{ steps.image.outputs.image }}
           provenance: true
           sbom: true
-      - name: Scan the exact pushed digest
+      - name: Report all vulnerabilities in the exact pushed digest
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}
           scanners: vuln
           severity: HIGH,CRITICAL
           ignore-unfixed: false
+          exit-code: "0"
+      - name: Fail on fixable vulnerabilities in the exact pushed digest
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
       - name: Emit digest-pinned deployment reference
         run: echo "${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}"
