@@ -80,6 +80,7 @@ def test_broker_image_publication_is_bound_to_the_exact_hypha_account_and_reposi
     bootstrap = read("infra/matrix/aws/bootstrap.yaml")
 
     for marker in [
+        "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'",
         'AWS_ACCOUNT_ID: "610992396917"',
         "AWS_ROLE_ARN: arn:aws:iam::610992396917:role/HyphaAdminBrokerImagePublisherRole",
         "ECR_REPOSITORY: hypha-admin-broker",

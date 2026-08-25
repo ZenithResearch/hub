@@ -28,6 +28,8 @@ Prerequisites:
    `hypha-admin-broker-<12 hex>` tag is accepted only when that revision is in
    the publishing lineage and every Docker input is byte-identical to the
    workflow revision; the image records both revisions as OCI metadata.
+   Publication runs only from the repository's `main` ref, even if the GitHub
+   production environment has no independently configured branch policy.
 4. The operator has the bounded `zenith-hypha-synapse` profile and the explicit production EC2 instance ID.
 5. `verify_fresh_synapse_backup.py` reports `backup_and_restore_verified` for
    the explicit instance, and ordinary Matrix health checks are green. See
