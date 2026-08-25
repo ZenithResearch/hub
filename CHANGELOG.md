@@ -6,6 +6,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Fixed
+- Bound custom Hypha broker image tags to a resolvable source commit with
+  byte-identical Docker inputs, while recording both source and workflow
+  revisions in OCI metadata.
 - Bound Hypha broker publication and pulls to a dedicated immutable ECR
   repository in account `610992396917`, with exact GitHub production-environment
   OIDC trust, least-privilege publisher/instance permissions, fail-closed

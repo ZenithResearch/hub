@@ -79,6 +79,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Configure AWS credentials by OIDC
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -92,12 +94,26 @@ jobs:
           set -euo pipefail
           TAG="${{ inputs.image_tag }}"
           if [[ -z "$TAG" ]]; then TAG="hypha-admin-broker-${GITHUB_SHA::12}"; fi
-          [[ "$TAG" =~ ^hypha-admin-broker-[A-Za-z0-9_.-]{1,101}$ ]] || { echo "invalid tag" >&2; exit 2; }
+          [[ "$TAG" =~ ^hypha-admin-broker-([0-9a-f]{12})$ ]] || { echo "tag must name an exact 12-character source revision" >&2; exit 2; }
+          SOURCE_REVISION="${BASH_REMATCH[1]}"
+          SOURCE_COMMIT="$(git rev-parse --verify "$SOURCE_REVISION^{commit}")" ||
+            { echo "tag source revision is unavailable" >&2; exit 2; }
+          git merge-base --is-ancestor "$SOURCE_COMMIT" "$GITHUB_SHA" ||
+            { echo "tag source revision is not in the publishing lineage" >&2; exit 2; }
+          IMAGE_INPUTS=(
+            .dockerignore
+            services/hypha_admin_broker
+            scripts/provision_matrix_admins.py
+            scripts/bootstrap_hypha_admin_broker_authority.py
+          )
+          git diff --quiet "$SOURCE_COMMIT" "$GITHUB_SHA" -- "${IMAGE_INPUTS[@]}" ||
+            { echo "tag source and workflow revision have different broker image inputs" >&2; exit 2; }
           ACTUAL_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
           [[ "$ACTUAL_ACCOUNT_ID" = "$AWS_ACCOUNT_ID" ]] || { echo "unexpected AWS account" >&2; exit 2; }
           aws ecr describe-repositories --repository-name "$ECR_REPOSITORY" >/dev/null
           REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
           echo "registry=$REGISTRY" >> "$GITHUB_OUTPUT"
           echo "image=$REGISTRY/$ECR_REPOSITORY:$TAG" >> "$GITHUB_OUTPUT"
       - name: Authenticate to ECR
@@ -111,6 +127,9 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: ${{ steps.image.outputs.image }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.image.outputs.source_commit }}
+            io.zenith.hub.workflow-revision=${{ github.sha }}
           provenance: true
           sbom: true
       - name: Report all vulnerabilities in the exact pushed digest
@@ -130,4 +149,7 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
       - name: Emit digest-pinned deployment reference
-        run: echo "${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}"
+        run: |
+          echo "source_revision=${{ steps.image.outputs.source_commit }}"
+          echo "workflow_revision=${GITHUB_SHA}"
+          echo "${{ steps.image.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.push.outputs.digest }}"
