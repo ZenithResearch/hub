@@ -6,6 +6,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Fixed
+- Restricted Hypha broker publication to workflow dispatches from `main`, so
+  an unprotected production-environment configuration cannot publish a branch.
 - Bound custom Hypha broker image tags to a resolvable source commit with
   byte-identical Docker inputs, while recording both source and workflow
   revisions in OCI metadata.
