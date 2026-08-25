@@ -95,6 +95,26 @@ def test_broker_image_publication_is_bound_to_the_exact_hypha_account_and_reposi
     assert "zenith-hub-prod-runtime-grpc" not in workflow
 
 
+def test_broker_image_tag_is_bound_to_source_equivalent_build_inputs():
+    workflow = read(".github/workflows/hypha-admin-broker-image.yml")
+
+    for marker in [
+        "fetch-depth: 0",
+        "^hypha-admin-broker-([0-9a-f]{12})$",
+        'git rev-parse --verify "$SOURCE_REVISION^{commit}"',
+        'git merge-base --is-ancestor "$SOURCE_COMMIT" "$GITHUB_SHA"',
+        ".dockerignore",
+        "services/hypha_admin_broker",
+        "scripts/provision_matrix_admins.py",
+        "scripts/bootstrap_hypha_admin_broker_authority.py",
+        'git diff --quiet "$SOURCE_COMMIT" "$GITHUB_SHA"',
+        "org.opencontainers.image.revision=${{ steps.image.outputs.source_commit }}",
+        "io.zenith.hub.workflow-revision=${{ github.sha }}",
+    ]:
+        assert marker in workflow
+    assert "tag source and workflow revision have different broker image inputs" in workflow
+
+
 def test_broker_private_ecr_pull_uses_ephemeral_auth_and_exact_host_permissions():
     bootstrap = read("infra/matrix/aws/bootstrap.yaml")
     runtime = read("infra/matrix/aws/main.tf")

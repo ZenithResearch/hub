@@ -23,8 +23,11 @@ Prerequisites:
    retained, immutable `hypha-admin-broker` ECR repository and a dedicated
    GitHub OIDC publisher role trusted only by
    `repo:ZenithResearch/hub:environment:production`.
-3. The image workflow has published that exact head and emitted an ECR
-   `@sha256:<64 hex>` reference in account `610992396917`.
+3. The image workflow has published the reviewed broker source and emitted an
+   ECR `@sha256:<64 hex>` reference in account `610992396917`. A custom
+   `hypha-admin-broker-<12 hex>` tag is accepted only when that revision is in
+   the publishing lineage and every Docker input is byte-identical to the
+   workflow revision; the image records both revisions as OCI metadata.
 4. The operator has the bounded `zenith-hypha-synapse` profile and the explicit production EC2 instance ID.
 5. `verify_fresh_synapse_backup.py` reports `backup_and_restore_verified` for
    the explicit instance, and ordinary Matrix health checks are green. See
