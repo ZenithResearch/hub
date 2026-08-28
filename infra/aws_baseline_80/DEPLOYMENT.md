@@ -3,6 +3,12 @@
 
 This document is the operator runbook for production readiness checks, deployment access paths, and drift-safe Hub operations.
 
+It describes the current AWS substrate, not the approved private Hub target. The
+public Hub URL, public smoke, Gateway operator path, and profile-specific Matrix
+routes bypass secS-magik. They remain useful for current operations but do not
+establish target capability maturity. The migration contract is
+[`../../docs/architecture/private-exposure-boundary.md`](../../docs/architecture/private-exposure-boundary.md).
+
 Current production target:
 
 - AWS profile: `zenith-hermes`
@@ -105,9 +111,10 @@ Known current production contracts:
 
 Before treating local Docker volumes as disposable, verify and document these paths:
 
-1. Public Hub health
+1. Current legacy public Hub health
    - command: `python3 scripts/prod_smoke.py --target prod --mode public`
-   - proves: public gateway is reachable.
+   - proves: the current public Gateway is reachable; it does not prove secS-only
+     admission or private-boundary conformance.
 
 2. Gateway admin/cases/queue reachability
    - command: `python3 scripts/prod_smoke.py --target prod --mode operator`

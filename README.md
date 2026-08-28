@@ -1,6 +1,9 @@
 # Zenith Hub
 
-Zenith Hub is a local-first orchestration runtime for Zenith experiments: queues, durable case state, Matrix/Synapse messaging, Frank dispatch, Hermes worker profiles, review processing, and operator-facing APIs used by ZenithOS.
+Zenith Hub is a local-first private runtime substrate. Its intentionally small
+product surface is DevGraph, Matrix, durable Queue, private inference, object
+storage, private deployment, and operability. Cases, Frank, Runtime, workers,
+tools, review processing, and Gateway are internal implementation components.
 
 This README is an orientation map. It should help you find the right subsystem before you open the deeper service and operations docs.
 
@@ -17,7 +20,14 @@ Expect breaking changes in:
 - config shape
 - production rollout conventions
 
-Do not treat this repo as a stable SDK or production platform yet. Treat the docs as layered: root README for navigation, service READMEs for ownership and ports, operations docs for deploy/runbooks, and `docs/plans/` for historical planning context that may be obsolete.
+Do not treat this repo as a stable SDK or production platform yet. The target
+architecture is virtually private and exposes operations only after secS-magik
+admission. That boundary is not implemented today: current Gateway and Matrix
+profiles still contain direct public paths. See
+[`docs/architecture/private-exposure-boundary.md`](docs/architecture/private-exposure-boundary.md)
+for the contract and gap inventory. Treat the docs as layered: root README for
+navigation, service READMEs for implementation details, operations docs for
+deploy/runbooks, and `docs/plans/` for historical planning context.
 
 ## Current center of gravity
 
@@ -34,25 +44,29 @@ If you are trying to understand the working system, start with those pieces. Tre
 ## Architecture sketch
 
 ```text
-Browser / SDK / ZenithOS / Matrix
+external caller / agent / app
              |
              v
-        Gateway HTTP  <---->  Review auth + HubFS + admin APIs
+  secS-magik verifier + permissioned RPC
              |
-             +----> Queue <---- Eventbus wakeups
-             |        |
-             |        v
-             |      Frank ---- creates / updates ----> Cases
-             |        |                                  |
-             |        |                                  v
-             |        |                            durable case state
-             |        v                         cases / steps / slots / runs
-             |  STT HTTP + tools + Hermes workers
+             | verified operation context only
+             v
+       private Hub receiver
              |
-             +----> Runtime gRPC ----> Tool sandbox / KB search
+             +--> DevGraph
+             +--> Matrix
+             +--> Queue
+             +--> inference server
+             +--> object storage
+
+  Gateway, Cases, Frank, Runtime, tools, workers, databases, and admin APIs
+  remain private implementation components behind this boundary.
 ```
 
-Queue and Cases are the orchestration source of truth. Frank and Hermes workers are execution/control surfaces around that durable core. Matrix is a local messaging layer backed by Synapse.
+secS-magik owns the final external allow/deny decision. Hub owns private handlers,
+domain behavior, and state mutations after admission. Wallets, browser login, and
+other identity systems may provide evidence to secS; Hub does not accept them as a
+parallel authorization path.
 
 ## Repository map
 
@@ -203,13 +217,21 @@ Please include:
 
 License pending / to be finalized before broader release.
 
-## Integration with secS-magik + Castalia Wallet (2026-05-29)
+## secS-magik exposure target
 
-The Hub implements and consumes the secS-magik RPC layer in its server components.
+secS-magik is the intended sole external admission gate for every Hub operation.
+The Hub repository does **not** yet contain a secS receiver adapter, verified-call
+context decoder, receiver manifest, or end-to-end integration tests. Current
+Gateway, Matrix, AWS, and on-premises exposure paths therefore do not conform.
 
-- The Hub uses the secS-magik RPC layer (sourced from the secS-magik repository) for machine-to-machine capability communication.
-- Implementation of this RPC layer goes through **Dregg** as the underlying generic capability layer.
-- The **Castalia Wallet** (credential/ownership bridge) is used for proving ownership when the Hub needs authenticated capability presentation (via secZ or direct wallet API calls).
-- secC acts as the generic client pattern that the Hub can interact with.
+The target preserves ownership boundaries:
 
-See the current architecture direction in the internal architecture capture for the Castalia Wallet / secZ layer for secS-magik.
+- secS verifies evidence, operation authority, audience, expiry, and replay state;
+- Hub receives only verified context on a private interface and owns the resulting
+  operation and domain state;
+- identity or wallet systems may supply evidence to secS but do not authorize Hub
+  directly.
+
+No global opcode is allocated here and no `ZenithPacket` v0 contract is changed.
+See the [private exposure boundary](docs/architecture/private-exposure-boundary.md)
+and [seven controlled claims](docs/architecture/capability-claims.md).

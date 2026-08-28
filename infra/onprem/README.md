@@ -1,11 +1,18 @@
-# On‑Prem (Self‑Hosted) — Gateway + Runtime + Tool Sandbox
+# On‑Prem (Self‑Hosted) — Current Three-Service Prototype
 
-This repo’s runtime split maps cleanly to on‑prem deployments:
+The checked-in manifest is a prototype and does not conform to the target private
+Hub boundary. It currently maps the runtime split as follows:
 
-- **Edge/WAF/Ingress** → `gateway-http` (public)
+- **Edge/WAF/Ingress** → `gateway-http` (currently public; legacy)
 - `runtime-grpc` + `tool-sandbox` stay **internal-only**
 - Service discovery via **cluster DNS**
 - Strict east/west controls via **NetworkPolicies** (Kubernetes) or firewall rules (VMs)
+
+The target replaces direct Gateway ingress with a secS-magik receiver, keeps
+Gateway and all other Hub services on `ClusterIP` or an equivalent private
+network, and admits only verified semantic operations. The secS adapter and
+target manifest are not implemented. See
+[`../../docs/architecture/private-exposure-boundary.md`](../../docs/architecture/private-exposure-boundary.md).
 
 ---
 
@@ -51,7 +58,8 @@ For NGINX Ingress, the manifest sets:
 Equivalent pattern:
 
 ```text
-WAF/ReverseProxy (nginx/HAProxy) -> gateway-http (public)
+WAF/ReverseProxy (nginx/HAProxy) -> secS receiver (target external gate)
+secS receiver                       -> gateway-http (private)
 runtime-grpc + tool-sandbox      -> private network only
 qdrant                           -> private or managed
 ```
@@ -60,7 +68,7 @@ Key configuration points:
 - Raise proxy/LB idle timeouts for long-lived connections
 - Use WebSocket ping/pong or SSE heartbeats
 - Restrict firewall rules:
-  - public -> gateway only
+  - public -> secS receiver only (target; not implemented in current manifest)
+  - secS receiver -> gateway only
   - gateway -> runtime only
   - runtime -> tool-sandbox only
-

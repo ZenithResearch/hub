@@ -8,7 +8,8 @@ This directory contains current architecture/operations docs and older planning 
 |---|---|
 | Understand the repository shape | `../README.md` |
 | Understand capability, component, composition, evidence, and claim terminology | `architecture/capability-ontology.md` |
-| Read the complete bounded claim for each current capability | `architecture/capability-claims.md` |
+| Understand the secS-only private boundary and current implementation gaps | `architecture/private-exposure-boundary.md` |
+| Read the seven complete bounded target claims | `architecture/capability-claims.md` |
 | Find a functional component, its interfaces/state, deployment membership, lifecycle, or claim boundary | `architecture/functional-components.md` |
 | Find a service owner, port, or protocol | `../services/README.md` |
 | Understand Gateway HTTP routes and review auth | `gateway-http.md` and `../services/gateway_http/README.md` |
@@ -21,8 +22,9 @@ This directory contains current architecture/operations docs and older planning 
 
 ## Current docs
 
-- `architecture/capability-ontology.md` — canonical capability ontology, domain/component taxonomy, relationship vocabulary, maturity model, claim contract, and current capability registry.
-- `architecture/capability-claims.md` — full claim records for every current `CAP-*` capability, including actors, data flow, side effects, components, interfaces, state, dependencies, compositions, maturity, constraints, exclusions, and evidence.
+- `architecture/private-exposure-boundary.md` — target secS ownership, private topology, mandatory invariants, minimal claim surface, current gaps, and implementation sequence.
+- `architecture/capability-ontology.md` — canonical seven-capability ontology, component taxonomy, secS relationships, maturity model, and claim contract.
+- `architecture/capability-claims.md` — full target records for DevGraph, Matrix, Queue, inference, object storage, private exposure, and operability, with current substrate evidence kept separate from target maturity.
 - `architecture/functional-components.md` — complete human-readable FRU registry with responsibilities, interfaces, state authorities, dependencies, deployment membership, lifecycle, evidence, and claim boundaries.
 - `gateway-http.md` — Gateway route map, review auth/session flow, middleware, and source layout.
 - `frank-native-case-pipeline.md` — Frank native case-pipeline runtime and Cases observability contract.
@@ -47,6 +49,7 @@ This directory contains current architecture/operations docs and older planning 
 
 - Root README stays broad and path-oriented.
 - Capability claims use stable `CAP-*` IDs; functional components use stable `FRU-*` IDs.
+- secS-magik owns final external admission; Hub services and state authorities remain virtually private.
 - A component's existence does not imply integration, deployability, operational evidence, or availability in every composition.
 - Service READMEs own service-specific ports, env vars, dependencies, and tests.
 - Operations docs own deploy/runbook procedures.

@@ -6,6 +6,12 @@ Canonical machine-readable contract:
 
 - `infra/deployment-profiles.yaml`
 
+These profiles document the current machine contract and predate the approved
+secS-only private boundary. They do not establish target conformance. Future
+profile changes must add a secS receiver, private service networking, fail-closed
+exposure controls, and proof that rejected calls cause no Hub side effect without
+breaking existing readers.
+
 Validation:
 
 ```bash
@@ -52,7 +58,8 @@ Source of truth:
 
 Rules:
 
-- Public ingress terminates only to `gateway-http`.
+- Current legacy ingress terminates to `gateway-http`; the target terminates at a
+  secS-owned receiver and keeps Gateway private.
 - Internal services remain private to the host/network.
 - Backups and restore drills are required before the node is called durable.
 - Matrix can be enabled, but `DEPLOYMENT_PARITY.md` applies.
@@ -112,6 +119,7 @@ Rules:
 Smoke:
 
 ```bash
+# Current legacy public smoke; retained until the secS-gated replacement exists.
 python3 scripts/prod_smoke.py --target prod --mode public
 python3 scripts/prod_smoke.py --target prod --mode operator
 python3 scripts/prod_smoke.py --target prod --mode internal --run-internal-probes

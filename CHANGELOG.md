@@ -6,11 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Changed
-- Reframed runtime documentation around a capability ontology, full claim
-  catalogue, and complete functional-component registry — makes outcomes,
-  actors, data flow, domains, component kinds, interfaces, state authorities,
-  deployment composition, evidence, constraints, lifecycle, and unsupported
-  claims explicit without requiring a billing-driven SLA model.
+- Reduced the Hub product claim surface to DevGraph, Matrix, Queue, inference,
+  object storage, private exposure, and operability — keeps the detailed service
+  graph as internal functional components instead of overstating each subsystem
+  as a separate product capability.
+- Defined secS-magik as the sole target external admission gate and made the Hub
+  virtually private in local, cloud, and on-premises compositions — records that
+  current public Gateway and Matrix paths are non-conformant migration substrates
+  until a receiver adapter, verified-context handoff, and fail-closed deployment
+  controls exist.
 
 ### Removed
 - Removed superseded Frank alternate-runtime documents, unused Hermes Kanban

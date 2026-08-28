@@ -1,12 +1,19 @@
-# AWS (ECS/Fargate) — Gateway + Runtime + Tool Sandbox
+# AWS (ECS/Fargate) — Legacy Gateway Edge Substrate
 
-This guide sets up a production-style baseline for **many external chat users**:
+This guide documents the existing three-service edge substrate:
 
-- **CloudFront + WAF + ALB** → `gateway-http` (public)
+- **CloudFront + WAF + ALB** → `gateway-http` (currently public)
 - `runtime-grpc` and `tool-sandbox` are **private** (no public listeners / no public IPs)
 - All services run on **ECS Fargate**
 - **Service discovery** via **AWS Cloud Map**
 - **Strict security groups** (ALB → gateway only; gateway → runtime only; runtime → tool-sandbox only)
+
+This topology predates and does not conform to the approved target architecture.
+The target exposes only a secS-magik receiver and keeps Gateway, Runtime, Sandbox,
+and every other Hub component private. Use this module only as current
+implementation evidence until its edge is replaced or constrained by the secS
+operation boundary. See
+[`../../docs/architecture/private-exposure-boundary.md`](../../docs/architecture/private-exposure-boundary.md).
 
 > CloudFront can work with WebSockets/SSE, but configuration and testing matter for long-lived connections. Keep idle timeouts aligned and use app-level heartbeats/pings.
 

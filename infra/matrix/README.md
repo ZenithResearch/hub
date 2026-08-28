@@ -4,6 +4,13 @@ Matrix (Synapse) deployment for hub-to-hub communication across the Zenith netwo
 
 Two deployment paths — local Docker and AWS EC2. See `DEPLOYMENT_PARITY.md` for the source-of-truth, backup/restore, appservice, and cloud/self-hosted parity contract.
 
+Both paths predate the approved secS-only private boundary. They document a
+working/deployable Matrix substrate, not the target Matrix claim. In the target,
+Matrix client, federation, administration, bridge, and ingest operations terminate
+or proxy through a secS-owned ingress path while Synapse remains private. The
+required proxy/adapter is not implemented. See
+[`../../docs/architecture/private-exposure-boundary.md`](../../docs/architecture/private-exposure-boundary.md).
+
 ---
 
 ## Local (Docker Compose)
@@ -39,10 +46,14 @@ curl http://localhost:8008/health
 
 ## AWS: fresh standalone Synapse
 
-`infra/matrix/aws` is intentionally a fresh, single-instance deployment for AWS
+`infra/matrix/aws` is intentionally a fresh, single-instance legacy deployment for AWS
 account `610992396917` in `us-east-1`. It does not import or refer to any old
 Matrix state. It creates a dedicated VPC, public subnet, Elastic IP, Caddy TLS
 edge, Synapse, and PostgreSQL on one EC2 instance.
+
+Its Elastic IP and direct HTTPS endpoint are incompatible with the target boundary
+until the exposed path becomes a secS-owned operation proxy and Synapse moves to a
+private network interface.
 
 Security boundaries:
 

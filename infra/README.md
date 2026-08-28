@@ -1,6 +1,10 @@
 # Infrastructure — Start Here
 
-This repo supports multiple deployment “shapes” without application code changes (configuration only via environment variables and secrets).
+This repo contains multiple current deployment shapes. The approved target for all
+of them is a virtually private Hub whose only external admission path is
+secS-magik. Existing public Gateway and Matrix routes predate that contract and are
+non-conformant migration surfaces, not target architecture. See
+[`../docs/architecture/private-exposure-boundary.md`](../docs/architecture/private-exposure-boundary.md).
 
 Canonical deployment profile contract:
 
@@ -21,12 +25,12 @@ New to the repo? Follow [`doc/setup.md`](../doc/setup.md) first for GitHub SSH +
 
 ## Choose a path
 
-| Path | Best for | Public edge | Notes |
+| Path | Best for | Current edge | Target status |
 | --- | --- | --- | --- |
-| Local (Compose) | Dev/demos | `gateway-http` on localhost | Fastest; includes local Qdrant container |
-| AWS Edge | Many external users | CloudFront + WAF + ALB | More moving parts; best external posture |
-| AWS production baseline | Current codified Hub service topology | ALB plus profile-specific Matrix edge | Existing production inventory and operator-controlled rollout |
-| On‑prem | Self-hosted | Your ingress/WAF | Kubernetes example included |
+| Local (Compose) | Dev/demos | `gateway-http` on localhost | Must become loopback/private-network plus secS receiver |
+| AWS Edge | Current external web path | CloudFront + WAF + ALB to Gateway | Non-conformant until edge admits only secS operations and Hub services are private |
+| AWS production baseline | Current codified Hub topology | ALB plus profile-specific Matrix edge | Deployable substrate; public paths do not prove the target |
+| On‑prem | Self-hosted prototype | Operator ingress/WAF | Prototype must replace direct Gateway ingress with secS-only admission |
 
 ### Local (fastest)
 
@@ -40,10 +44,11 @@ cp .env.example .env
 make up
 ```
 
-### AWS Edge (CloudFront + WAF + ALB → gateway)
+### AWS Edge (current CloudFront + WAF + ALB → Gateway)
 
 - Use when: many external users, global edge caching/acceleration, DDoS/WAF at the edge.
-- Public exposure: **only** `gateway-http` (via CloudFront/ALB).
+- Current public exposure: `gateway-http` through CloudFront/ALB. This is a
+  documented legacy path, not the target security boundary.
 - Private services: `runtime-grpc`, `tool-sandbox` (internal-only, via service discovery).
 - Docs: [`infra/aws/README.md`](aws/README.md)
 - Terraform: [`infra/aws/terraform/`](aws/terraform/)
@@ -51,7 +56,8 @@ make up
 ### AWS production baseline
 
 - Use when: operating or reviewing the current AWS ECS production topology.
-- Public exposure: Gateway through the ALB, plus profile-specific Matrix routes.
+- Current public exposure: Gateway through the ALB, plus profile-specific Matrix
+  routes. Both must move behind secS-owned admission for target conformance.
 - Private services: runtime, sandbox, queue, Cases, Eventbus, STT, Frank, and the internal model plane through service discovery and scoped security groups.
 - Docs: [`infra/aws_baseline_80/DEPLOYMENT.md`](aws_baseline_80/DEPLOYMENT.md)
 - Terraform: [`infra/aws_baseline_80/`](aws_baseline_80/)

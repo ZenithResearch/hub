@@ -1,6 +1,14 @@
 # Gateway HTTP Service
 
-Gateway HTTP is the public/API edge for Hub. It owns browser-facing Review SDK auth and asset routes, admin/operator routes, HubFS reads, public health/openapi, and proxy routes into runtime, queue, eventbus, and cases.
+Gateway HTTP is Hub's current HTTP aggregation and compatibility service. It
+contains Review SDK session/asset routes, operator routes, HubFS reads, health and
+OpenAPI, and proxies into Runtime, Queue, Eventbus, and Cases.
+
+The target architecture makes Gateway private. secS-magik owns final external
+admission and dispatches only verified operation context to private Hub handlers.
+Current profiles still expose Gateway and let Review Auth act as an edge gate, so
+they are migration substrates rather than evidence of the target boundary. See
+[`../../docs/architecture/private-exposure-boundary.md`](../../docs/architecture/private-exposure-boundary.md).
 
 ## Runtime entrypoint
 
@@ -22,7 +30,8 @@ Gateway HTTP is the public/API edge for Hub. It owns browser-facing Review SDK a
 
 - `app.py` — FastAPI app factory and route definitions.
 - `middleware.py` — body-size and request-context middleware.
-- `review_auth.py` — clients registry, access-code hashing, deploy hooks, session tokens.
+- `review_auth.py` — legacy/current Review workflow registry, access-code hashing,
+  deploy hooks, and session tokens; not the target external admission authority.
 - `static/dashboard.html` — lightweight dashboard/static surface.
 
 ## Current docs

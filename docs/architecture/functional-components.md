@@ -1,14 +1,31 @@
 # Hub Functional Component Registry
 
-This is the human-readable inventory of Hub functional repository units (FRUs).
-It is grounded in repository `main` at
-`a6235b6c764f14fa9d97c262ba19ae1fc9df0264`, plus the documentation-only and
-retired-runtime cleanup on branch `codex/frank-runtime-cleanup`. The cleanup does
-not become `main` truth until merged.
+This is the human-readable inventory of Hub functional repository units (FRUs),
+assessed on branch `codex/frank-runtime-cleanup` on `2026-08-27`. It intentionally
+remains more detailed than the product claim surface: a component can be real,
+tested, and deployed without becoming a separately marketed or externally exposed
+Hub capability.
 
 Read [`capability-ontology.md`](capability-ontology.md) first. That document owns
 the definitions of capabilities, domains, component kinds, relationships,
 compositions, maturity, and claims. This file defines the concrete components.
+
+Only seven top-level claims exist. Every other FRU is an internal implementation
+unit beneath one or more of them:
+
+| Top-level claim | Primary present or planned FRUs | Treatment of other units |
+|---|---|---|
+| `CAP-GRAPH-001` DevGraph | future `FRU-DEVGRAPH-ADAPTER-001` plus the separate DevGraph substrate | indexers, processes, repositories, and graph clients support the graph outcome |
+| `CAP-MATRIX-001` Matrix | Synapse profiles, bridge, ingest, Hypha, and future secS adapter | feeds, bots, agents, and admin controls are internal |
+| `CAP-QUEUE-001` Queue | `FRU-QUEUE-001`, `FRU-PROTO-001`, future secS adapter | Cases, Eventbus, Frank, workers, processes, and tools coordinate work internally |
+| `CAP-INFER-001` Inference | `FRU-LLM-001`, model profiles, Runtime/Sandbox/provider adapters | STT, tools, and knowledge retrieval are internal consumers or supporting paths |
+| `CAP-OBJECT-001` Object storage | future `FRU-OBJECT-001` | HubFS, S3 model artifacts, EFS, and local files are migration inputs, not the authority |
+| `CAP-PRIVATE-001` Private exposure | future `FRU-SECS-ADAPTER-001`, private Gateway, network/IaC controls | Review Auth and current public routes are legacy migration surfaces |
+| `CAP-OPERATE-001` Operability | profiles, release/update/recovery/observation/evidence controls | every composition must be deployable and recoverable as a named private whole |
+
+Older `DOM-*` labels retained in the detailed rows are component concern tags from
+the broader inventory. They do not create additional capability claims. New claim
+records use only the seven domains in the capability ontology.
 
 ## Registry rules
 
@@ -34,8 +51,8 @@ capability maturity.
 
 | FRU · kind · domains | Responsibility and source | Interfaces, state, dependencies | Composition and status | Claim boundary |
 |---|---|---|---|---|
-| `FRU-EDGE-001` Gateway HTTP · `FC-SVC`/`FC-API` · `DOM-CTL` | HTTP control plane for runtime messages/events, search, tools, configuration, Review, Cases, Queue, HubFS, Hermes, processes, and Matrix transactions. `services/gateway_http/` | HTTP routes; clients Runtime/Queue/Cases/Eventbus/STT/Matrix; Review registry and mounted file roots | Local Compose; AWS baseline/edge · implemented, active · E2/E3 | Routes and profile wiring exist. No complete public-API stability or universal tenant-isolation claim |
-| `FRU-AUTH-001` Review Auth · `FC-LIB`/`FC-STA` · `DOM-IDN`, `DOM-CTL` | Client, project, deployment, access-code policy, session, deploy-hook, capability, and repair-plan state. `services/gateway_http/review_auth.py` | Gateway admin/session routes; SQLite/Postgres abstraction; clients Postgres optional | Gateway local; AWS baseline RDS option · implemented, active · E2/E3 | Review-scoped authorization and sessions, not universal Hub identity or completed security assurance |
+| `FRU-EDGE-001` Gateway HTTP · `FC-SVC`/`FC-API` · `DOM-CTL` | HTTP aggregation plane for runtime messages/events, search, tools, configuration, Review, Cases, Queue, HubFS, Hermes, processes, and Matrix transactions. `services/gateway_http/` | HTTP routes; clients Runtime/Queue/Cases/Eventbus/STT/Matrix; Review registry and mounted file roots | Current local/AWS profiles expose it; target makes it private · implemented, active · E2/E3 | Routes and profile wiring exist. Current public exposure is incompatible with the target secS-only boundary; Gateway becomes private compatibility/aggregation infrastructure |
+| `FRU-AUTH-001` Review Auth · `FC-LIB`/`FC-STA` · `DOM-IDN`, `DOM-CTL` | Client, project, deployment, access-code policy, session, deploy-hook, capability, and repair-plan state. `services/gateway_http/review_auth.py` | Gateway admin/session routes; SQLite/Postgres abstraction; clients Postgres optional | Gateway local; AWS baseline RDS option · implemented, legacy migration surface · E2/E3 | Review-scoped workflow/session data only. It is not the target external gate and must not bypass final secS admission |
 | `FRU-FS-001` HubFS and Review artifacts · `FC-API` · `DOM-CTL`, `DOM-DAT` | Allowlisted stat, content, directory, manifest, mirror, and artifact access. Gateway HubFS/Review routes | HTTP; configured filesystem roots; Review files and registered artifacts | Mounted Gateway profiles · implemented, active · E2/E3 | Bounded file access, not object-store durability, retention, malware scanning, or legal hold |
 | `FRU-MODEL-001` Model profiles · `FC-CON` · `DOM-EXE`, `DOM-IDN` | Provider, endpoint, model, purpose, secret-handle, override, binding, and connectivity configuration. `infra/model-profiles.yaml`, resolver and Gateway admin routes | YAML contract; runtime resolution; audit JSONL; secret handles | Local and AWS bindings · implemented, active · E2/E3 | Validated binding structure, not proof that each provider/model is live, accurate, fast, or available |
 | `FRU-COMMON-001` Common runtime library · `FC-LIB` · cross-domain | Configuration, errors, IDs, logging, model resolution, schemas, vault writes, and generated protocol bindings. `libs/common/` | Python imports; generated Agent/Queue bindings; no standalone state | Imported by current services · implemented, active · E2 | Internal primitives, not a stable customer SDK |
@@ -74,11 +91,11 @@ capability maturity.
 | `FRU-MATRIX-BRIDGE-001` Matrix bridge · `FC-SVC`/`FC-ADP` · `DOM-MSG` | Accepts Matrix transactions and bridges work/events. `services/matrix_bridge/` | HTTP 8084 transaction/health; Queue and Eventbus; Synapse appservice tokens | Local Compose · implemented, active · E2 | Adapter behavior, not active production registration or end-to-end delivery |
 | `FRU-MATRIX-INGEST-001` Matrix ingest · `FC-SVC`/`FC-ADP` · `DOM-MSG` | Optional Sophia/appservice ingestion into Hub work and events. `services/ingest/` | Matrix Client/Appservice; Queue/Eventbus; gated room/user configuration | Local Matrix profile · implemented, gated/active · E2 | Optional ingest path, not enabled production operation |
 | `FRU-FEEDS-001` Feeds · `FC-SVC`/`FC-ADP` · `DOM-MSG` | Fetches configured feed sources and emits events or work. `services/feeds/` | Feed configuration; Eventbus; optional Queue; local persisted feed data | Local Compose · implemented, active · E2 | Local feed processing, not complete source coverage or AWS parity |
-| `FRU-MATRIX-LOCAL-001` Local Synapse · `FC-DEP` · `DOM-MSG`, `DOM-DEP` | Development Synapse/Postgres composition, rendered configuration, bots/appservices, and optional Sophia receiver. `infra/matrix/` | Matrix client/federation/appservice APIs; local Postgres/media/signing state | Separate local Compose · partial development profile · E3 | Development integration, not a supported full-product production composition |
-| `FRU-MATRIX-ECS-001` Matrix on AWS baseline · `FC-INF`/`FC-DEP` · `DOM-MSG`, `DOM-DEP` | Synapse on ECS with RDS/EFS, DNS/TLS/federation, alarms, secrets, backup, and optional related services. `infra/aws_baseline_80/` | Matrix APIs; RDS, EFS, Secrets Manager, ALB/Route53/ACM, CloudWatch/SNS | AWS baseline · partial with historical E4 evidence | Substantial deployable profile; current release/live conformance and every DR credential rotation remain unproven |
+| `FRU-MATRIX-LOCAL-001` Local Synapse · `FC-DEP` · `DOM-MSG`, `DOM-DEP` | Development Synapse/Postgres composition, rendered configuration, bots/appservices, and optional Sophia receiver. `infra/matrix/` | Matrix client/federation/appservice APIs; local Postgres/media/signing state | Separate local Compose · partial development profile · E3 | Development integration exists; direct Matrix exposure does not conform to the target secS-only boundary |
+| `FRU-MATRIX-ECS-001` Matrix on AWS baseline · `FC-INF`/`FC-DEP` · `DOM-MSG`, `DOM-DEP` | Synapse on ECS with RDS/EFS, DNS/TLS/federation, alarms, secrets, backup, and optional related services. `infra/aws_baseline_80/` | Matrix APIs; RDS, EFS, Secrets Manager, ALB/Route53/ACM, CloudWatch/SNS | AWS baseline · partial with historical E4 evidence | Substantial deployable substrate; its public routes bypass secS and therefore do not establish the target Matrix claim |
 | `FRU-MAS-001` Matrix Authentication Service · `FC-SVC`/`FC-INF` · `DOM-IDN`, `DOM-MSG` | Conditional MAS RDS/ECS/migration tasks, secrets, routes, alarms, and guarded MSC4108 migration. AWS baseline Terraform and runbook | OIDC/MSC4108; Synapse migration; Postgres and secrets | Conditional AWS baseline · partial/experimental · E3 | Implementation and rollout safeguards, not completed production authority cutover or QR-login operation |
 | `FRU-HYPHA-001` Hypha admin broker · `FC-API`/`FC-ADP` · `DOM-MSG`, `DOM-IDN` | Typed, short-lived facade for bounded Synapse administration. `services/hypha_admin_broker/`, image/deploy/operations controls | HTTP session/snapshot/user/room/password/purge operations; memory-only sessions; Synapse Admin API | Separate AWS deployment path; not root Compose · implemented subsystem, experimental deployment · E2/E3 | Typed administration without client-held persistent admin credentials; publication/live deployment is not claimed |
-| `FRU-MATRIX-EC2-001` Fresh standalone Matrix · `FC-INF`/`FC-DEP` · `DOM-MSG`, `DOM-DEP` | Dedicated VPC/EC2/EIP/Caddy/Synapse/Postgres/EBS with SSM-only access, secret injection, DLM, deploy, verify, and restore. `infra/matrix/aws/` | Matrix APIs; EC2/EBS/Postgres/Caddy; Secrets Manager/SSM/DLM | Standalone Matrix AWS profile · implemented deployable profile, active · E3 | Fresh deployment path exists; no claim a production instance is currently running |
+| `FRU-MATRIX-EC2-001` Fresh standalone Matrix · `FC-INF`/`FC-DEP` · `DOM-MSG`, `DOM-DEP` | Dedicated VPC/EC2/EIP/Caddy/Synapse/Postgres/EBS with SSM-only access, secret injection, DLM, deploy, verify, and restore. `infra/matrix/aws/` | Matrix APIs; EC2/EBS/Postgres/Caddy; Secrets Manager/SSM/DLM | Standalone Matrix AWS profile · implemented deployable profile, active · E3 | Fresh deployment path exists; its EIP/public Matrix path is not target-conformant and no running production instance is claimed |
 
 ## Agents, processes, and repository content
 
@@ -115,7 +132,7 @@ capability maturity.
 | Frank alternate runtimes | Current code accepts only `native_case_pipeline`; cleanup commit `847de04` removes obsolete runtime docs and Kanban fixtures | Deprecated. Old persisted values may remain readable but current producers do not schedule them |
 | Superseded Frank/Sophia transition document | Described earlier layers and absent paths | Removed on cleanup branch at `847de04`; changelog retains provenance |
 | AWS cost/service-count narrative | Historical documentation understated the current Terraform graph | Removed on cleanup branch at `26a99a0`; `infra/aws_baseline_80/` remains only as a compatibility-sensitive path |
-| secS-magik, Dregg, Castalia integration claim | README text existed without runtime implementation; Matrix issue material rejects it for v0 | Unsupported/deprecation candidate. Do not claim as current capability |
+| secS-magik integration target | secS provides a separate verifier/permissioned-RPC substrate, but Hub has no adapter, verified-context decoder, receiver manifest, or integration tests | Approved target, not implemented. secS must become the only external admission path before any gated Hub capability is claimed above C0 |
 | Older Matrix parity/adoption prose | Older EC2 and non-adopted assumptions conflict with newer profiles/evidence | Historical or stale-contract candidate; update additively before removing machine fields |
 | `docs/plans/` | Dated design and work notes | Historical by default; never evidence of current implementation |
 | `test-agent` | Exists under test/fixture-oriented rolodex content | Test fixture; excluded from product agent capability claims |
@@ -160,6 +177,8 @@ These are functional specification units, not current capabilities.
 
 | Proposed FRU · kind | Defined outcome | Missing implementation/evidence |
 |---|---|---|
+| `FRU-SECS-ADAPTER-001` secS receiver adapter · `FC-ADP` | Accept only verified secS call context, map receiver-local semantic operations to private Hub handlers, fail closed, and emit correlated receipts | Hub receiver manifest, context decoder, private dispatch, replay/expiry/audience tests, rejection-before-side-effect tests, deployment wiring |
+| `FRU-DEVGRAPH-ADAPTER-001` DevGraph adapter · `FC-ADP` | Expose policy-filtered DevGraph query/mutation/event operations inside the private Hub boundary | Hub client/adapter, semantic operation mapping, state/event contract, failure behavior, deployment membership, secS integration tests |
 | `FRU-TIER-001` H1–H5 standard · `FC-SPC` | Machine-readable workload/deployment requirement tiers | Additive schema, per-tier component/data/security/recovery rules, provider overlays, validators, evidence |
 | `FRU-ONPREM-PROD-001` production on-premises Hub · `FC-SPC` | Full or explicitly tier-scoped product composition on private infrastructure | Queue/Cases/Frank/data/Matrix/operations parity, install, upgrade, rollback, monitoring, recovery, hardware profiles |
 | `FRU-STATE-HA-001` HA Queue/Cases · `FC-SPC` | Replicated production orchestration state | Managed/replicated design, migrations, failover/consistency tests, backup, restore, measured recovery |

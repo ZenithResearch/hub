@@ -5,7 +5,9 @@ This directory contains Hub-owned runtime service packages. Each package README 
 ## Runtime topology
 
 ```text
-Gateway HTTP
+secS-magik target external gate
+  |
+  +-- verified context --> private Gateway / capability handlers
   |-- Runtime gRPC --> Tool Sandbox
   |-- Queue ---------> Frank / Hermes Worker Queue
   |-- Eventbus ------> wakeups for Frank/workers/bridges
@@ -13,6 +15,11 @@ Gateway HTTP
   |-- STT HTTP ------> local Whisper fallback for review audio
   |-- Matrix Bridge / Ingest / Feeds as intake and notification surfaces
 ```
+
+The secS receiver/adapter is not implemented yet. This diagram states the target
+boundary; current Gateway and Matrix ports remain directly exposed in some
+profiles. All listed packages are internal functional components beneath the seven
+claims in [`../docs/architecture/capability-claims.md`](../docs/architecture/capability-claims.md).
 
 ## Hub-owned service packages
 
