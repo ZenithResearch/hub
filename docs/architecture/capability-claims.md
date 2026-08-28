@@ -1,10 +1,10 @@
 # Hub Capability Claims
 
 This catalogue contains the complete top-level Hub claim surface. It is intentionally
-limited to seven outcomes: DevGraph, Matrix, Queue, inference, object storage,
-private exposure, and operability. The many services, workers, tools, policies, and
-data stores below these outcomes are functional components, not separate product
-claims.
+limited to eight outcomes: DevGraph, Matrix, Queue, inference, object storage,
+Hub Monitor, private exposure, and operability. The many services, workers, tools,
+policies, and data stores below these outcomes are functional components, not
+separate product claims.
 
 The target architecture and current gaps are defined in
 [`private-exposure-boundary.md`](private-exposure-boundary.md). Claim vocabulary
@@ -82,6 +82,18 @@ the deployment. Both modes must preserve the same fail-closed admission contract
 - **Constraints / negative claims:** no present claim of general object APIs, versioning, retention, legal hold, malware scanning, cross-profile portability, replication, or recovery. Provider choice must preserve the semantic contract.
 - **Evidence:** current S3/EFS/filesystem inventory, `FRU-OBJECT-001` specification frontier, and absence of a general object authority or operation tests.
 
+## Monitoring
+
+### `CAP-MONITOR-001` — Observe Hub deployments
+
+- **Domains / actors / outcome:** `DOM-OBS`; admitted owners, CEOs, and operators can see which deployments are included in monitoring, where each is expected and observed to run, its health, release, observation freshness, and any drift in plain language.
+- **Inputs → outputs / side effects:** secS-verified read requests, monitoring-scope choices, expected-machine associations, and read-only observations → portfolio, topology, status, release, freshness, drift, and safe evidence views; writes are limited to Monitor configuration, display preferences, and derived observation cache, with no infrastructure side effect.
+- **Components / interfaces:** future `FRU-MONITOR-001`, `FRU-MONITOR-CONTRACT-001`, `FRU-MONITOR-COLLECTOR-001`, and `FRU-SECS-ADAPTER-001`; private Monitor UI/API reads profiles, operator state, service health, telemetry, platform inventory, and evidence through bounded read-only adapters.
+- **State / external dependencies:** Monitor configuration owns observation inclusion and expected placement; deployment platforms, IaC/operator state, services, and evidence systems remain authoritative for actual infrastructure; cached observations are derived, source-attributed, timestamped, and expiry-aware.
+- **Compositions / maturity:** target private local, cloud, and on-premises compositions are C0. Current profile, operator-state, health/smoke, Frank dashboard, and selected alarm fragments do not provide a unified private infrastructure Monitor.
+- **Constraints / negative claims:** Hub Monitor cannot provision, deploy, start, stop, restart, move, scale, upgrade, roll back, delete, or repair workloads. Inclusion means “show in Monitor,” expected placement is not scheduling, unavailable or stale evidence is never healthy, and secrets or unauthorized raw infrastructure detail are not displayed.
+- **Evidence:** [`hub-monitor-mvp.md`](hub-monitor-mvp.md), deployment-profile and operator-state contracts, current health/smoke paths, selected Matrix CloudWatch alarms, Frank dashboard audit, and the documented implementation gap.
+
 ## Private deployment
 
 ### `CAP-PRIVATE-001` — Enforce secS-only private exposure
@@ -98,11 +110,11 @@ the deployment. Both modes must preserve the same fail-closed admission contract
 
 ### `CAP-OPERATE-001` — Operate the private Hub
 
-- **Domains / actors / outcome:** `DOM-ASR`; operators can deploy, verify, update, observe, back up, restore, and roll back a named private Hub composition with revision-bound evidence.
+- **Domains / actors / outcome:** `DOM-ASR`; operators can deploy, verify, update, back up, restore, roll back, and preserve revision-bound evidence for a named private Hub composition.
 - **Inputs → outputs / side effects:** approved profile, images, configuration, secrets, target revision, operator action, and evidence policy → deployed or changed composition, health/telemetry, recovery result, and evidence; mutates only the named environment.
 - **Components / interfaces:** private local/cloud/on-premises profiles, IaC, rollout/update controls, observability, backups, restore rehearsal, smoke/contract validators, and private-artifact scans.
 - **State / external dependencies:** IaC state, operator state, logs/metrics/traces, backups, and evidence records have named authorities; target platform, registry, secret store, DNS, and the selected embedded/co-deployed secS packaging are explicit dependencies.
-- **Compositions / maturity:** target complete private compositions are C0. Current deployment, validation, update, Matrix recovery, and evidence components have C2–C5 evidence in parts, but none proves the complete seven-capability secS-gated composition.
+- **Compositions / maturity:** target complete private compositions are C0. Current deployment, validation, update, Matrix recovery, and evidence components have C2–C5 evidence in parts, but none proves the complete eight-capability secS-gated composition.
 - **Constraints / negative claims:** no SLA, billing, service-credit, zero-downtime, unattended fleet, universal rollback, RPO/RTO, or production-readiness claim. Each proof is limited to its profile, revision, time, and declared invariant.
 - **Evidence:** Compose/Terraform/Kubernetes profiles, validators and tests, rollout/update/recovery runbooks, historical Matrix evidence, and the current gap inventory.
 

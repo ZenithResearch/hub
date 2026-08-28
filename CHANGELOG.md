@@ -6,10 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Changed
+- Added Hub Monitor to the controlled product surface as a private, read-only view
+  of monitored deployments, expected and observed machines, health, release,
+  freshness, and drift. Monitoring inclusion and expected placement are explicitly
+  observational; the Monitor cannot deploy, move, restart, scale, update, or repair
+  infrastructure.
 - Reduced the Hub product claim surface to DevGraph, Matrix, Queue, inference,
-  object storage, private exposure, and operability — keeps the detailed service
-  graph as internal functional components instead of overstating each subsystem
-  as a separate product capability.
+  object storage, Hub Monitor, private exposure, and operability — keeps the
+  detailed service graph as internal functional components instead of overstating
+  each subsystem as a separate product capability.
 - Defined secS-magik as the sole target external admission gate and made the Hub
   virtually private in local, cloud, and on-premises compositions — records that
   current public Gateway and Matrix paths are non-conformant migration substrates

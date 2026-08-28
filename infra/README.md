@@ -6,6 +6,13 @@ secS-magik. Existing public Gateway and Matrix routes predate that contract and 
 non-conformant migration surfaces, not target architecture. See
 [`../docs/architecture/private-exposure-boundary.md`](../docs/architecture/private-exposure-boundary.md).
 
+The target composition also ships Hub Monitor: a secS-gated, read-only view of
+included deployments, expected and observed machines, health, release, freshness,
+and drift. It does not invoke deployment, update, restart, scaling, or repair
+controls. The Monitor contract is specified in
+[`../docs/architecture/hub-monitor-mvp.md`](../docs/architecture/hub-monitor-mvp.md)
+and is not implemented by the current profiles.
+
 Canonical deployment profile contract:
 
 - [`DEPLOYMENT_PROFILES.md`](DEPLOYMENT_PROFILES.md)

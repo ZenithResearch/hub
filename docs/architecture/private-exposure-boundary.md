@@ -56,6 +56,7 @@ external caller / agent / app
              +--> Queue
              +--> Inference server
              +--> Object storage
+             +--> Hub Monitor (read-only)
 
   All Hub components, databases, files, admin APIs, and service ports remain private.
 ```
@@ -68,7 +69,7 @@ operations to local handlers and required secS evidence/capability policy.
 ## Mandatory invariants
 
 1. No external route reaches Gateway, Synapse, Queue, inference, object storage,
-   DevGraph, databases, or operator endpoints without a secS verification decision.
+   DevGraph, Hub Monitor, databases, or operator endpoints without a secS verification decision.
 2. Hub services accept only private-network calls from named service identities or a
    secS-verified integration boundary, whether embedded or co-deployed.
 3. Hub does not maintain a second public authorization truth. Existing Review Auth
@@ -97,8 +98,9 @@ Only these Hub outcomes are top-level claims:
 | Durable Queue | Hub Queue | Enqueue, claim, settle, retry, and inspect authorized work |
 | Inference server | Private model server | Execute an authorized inference request |
 | Object storage | Private object authority | Put, get, list, version, and lifecycle authorized objects |
+| Hub Monitor | Private Monitor UI/API and read-only collectors | Observe included deployments, expected/observed machines, health, release, freshness, and drift without changing infrastructure |
 | Private deployment boundary | Hub infrastructure plus secS-magik | Make every capability reachable only through verified secS operations |
-| Operability | Hub operator controls | Deploy, verify, back up, restore, update, and observe the private composition |
+| Operability | Hub operator controls | Deploy, verify, back up, restore, update, and roll back the private composition |
 
 Gateway, Cases, Frank, Runtime, Sandbox, STT, indexers, agents, tools, model profiles,
 and other repository units are internal implementation components. Their existence
@@ -115,6 +117,7 @@ does not create separate external product claims.
 | Queue substrate | Durable single-writer Queue HTTP/gRPC and deployment wiring exist | Implemented substrate; secS-gated operation absent |
 | Inference substrate | AWS baseline provides a private llama-compatible server and model preload path | Implemented substrate; secS operation binding and current live evidence absent |
 | General object storage | S3 is used for model artifacts/Terraform state and EFS/files for runtime artifacts | Not a general object authority; product capability not implemented |
+| Hub Monitor | Deployment profiles, one operator-state example, point health/smoke checks, a Frank process dashboard, and selected Matrix alarms exist | No unified private Monitor, stable deployment/machine inventory, read-only collector contract, freshness/drift model, or CEO-facing infrastructure view |
 | Private operability | IaC, validators, rollout, Matrix recovery, and tests exist | Partial; no complete private secS composition, general recovery, or conformance evidence |
 
 ## Required implementation sequence
@@ -125,7 +128,8 @@ does not create separate external product claims.
    global opcodes or changing `ZenithPacket` v0.
 3. Define and verify the secS-to-Hub `VerifiedCallContext` handoff, including audience,
    operation, resource, subject, expiry, replay scope, and receipt correlation.
-4. Add private adapters for DevGraph, Matrix, Queue, inference, and object storage.
+4. Add private adapters for DevGraph, Matrix, Queue, inference, object storage, and
+   the read-only Hub Monitor.
 5. Introduce the general object authority and migrate artifact references without
    breaking existing Cases, Review, HubFS, or stored packet readers.
 6. Convert Gateway into a private aggregation/compatibility component and remove its

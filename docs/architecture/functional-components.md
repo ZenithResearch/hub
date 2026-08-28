@@ -10,7 +10,7 @@ Read [`capability-ontology.md`](capability-ontology.md) first. That document own
 the definitions of capabilities, domains, component kinds, relationships,
 compositions, maturity, and claims. This file defines the concrete components.
 
-Only seven top-level claims exist. Every other FRU is an internal implementation
+Only eight top-level claims exist. Every other FRU is an internal implementation
 unit beneath one or more of them:
 
 | Top-level claim | Primary present or planned FRUs | Treatment of other units |
@@ -20,12 +20,13 @@ unit beneath one or more of them:
 | `CAP-QUEUE-001` Queue | `FRU-QUEUE-001`, `FRU-PROTO-001`, future secS adapter | Cases, Eventbus, Frank, workers, processes, and tools coordinate work internally |
 | `CAP-INFER-001` Inference | `FRU-LLM-001`, model profiles, Runtime/Sandbox/provider adapters | STT, tools, and knowledge retrieval are internal consumers or supporting paths |
 | `CAP-OBJECT-001` Object storage | future `FRU-OBJECT-001` | HubFS, S3 model artifacts, EFS, and local files are migration inputs, not the authority |
+| `CAP-MONITOR-001` Hub Monitor | future `FRU-MONITOR-001`, `FRU-MONITOR-CONTRACT-001`, and `FRU-MONITOR-COLLECTOR-001` | profiles, operator state, health checks, telemetry, evidence, and platform inventory are read-only inputs; current Frank dashboard is not Hub Monitor |
 | `CAP-PRIVATE-001` Private exposure | future `FRU-SECS-ADAPTER-001`, private Gateway, network/IaC controls | secS may be imported or co-deployed; Review Auth and current public routes are legacy migration surfaces |
-| `CAP-OPERATE-001` Operability | profiles, release/update/recovery/observation/evidence controls | every composition must be deployable and recoverable as a named private whole |
+| `CAP-OPERATE-001` Operability | profiles, release/update/recovery/evidence controls | every composition must be deployable and recoverable as a named private whole |
 
 Older `DOM-*` labels retained in the detailed rows are component concern tags from
 the broader inventory. They do not create additional capability claims. New claim
-records use only the seven domains in the capability ontology.
+records use only the eight domains in the capability ontology.
 
 ## Registry rules
 
@@ -183,6 +184,9 @@ These are functional specification units, not current capabilities.
 | `FRU-ONPREM-PROD-001` production on-premises Hub · `FC-SPC` | Full or explicitly tier-scoped product composition on private infrastructure | Queue/Cases/Frank/data/Matrix/operations parity, install, upgrade, rollback, monitoring, recovery, hardware profiles |
 | `FRU-STATE-HA-001` HA Queue/Cases · `FC-SPC` | Replicated production orchestration state | Managed/replicated design, migrations, failover/consistency tests, backup, restore, measured recovery |
 | `FRU-OBJECT-001` durable object plane · `FC-SPC` | Authoritative versioned artifact/media storage | Object authority, retention, deletion/export, malware controls, backup/recovery |
+| `FRU-MONITOR-001` Hub Monitor UI/API · `FC-SPC` | Give admitted owners, CEOs, and operators a private read-only view of monitored deployments, machine topology, health, release, freshness, and drift | UI/API, secS admission, portfolio and drill-down views, plain-language states, redaction, accessibility, acceptance tests proving no mutation path |
+| `FRU-MONITOR-CONTRACT-001` Monitor contract · `FC-SPC` | Version monitoring inclusion, machines, expected placement, observations, freshness, sources, evidence references, and drift without changing deployment intent | Additive schema, stable identities, expiry semantics, source attribution, compatibility fixtures, explicit separation from profiles and orchestrator desired state |
+| `FRU-MONITOR-COLLECTOR-001` read-only Monitor collectors · `FC-SPC` | Normalize profile, node, health, service, platform, metric, and evidence observations using least-privilege read access | Collector adapters, credential policy, signing/attestation, failure isolation, redaction, freshness tests, and proof that write permissions are absent |
 | `FRU-OBS-001` observability/incident operations · `FC-SPC` | Metrics, traces, synthetics, dashboards, alarms, ownership, and runbooks | Cross-profile implementation, routing, exercises, retention, evidence |
 | `FRU-STAGING-001` isolated staging · `FC-SPC` | Production-like release rehearsal and promotion | Isolated data/secrets/domain, representative load, migration rehearsal, rollback proof |
 | `FRU-TENANT-001` Hub tenant identity · `FC-SPC` | Hub-wide users/staff/services, roles/policies, audit, lifecycle, and isolation | Identity contract, enforcement, offboarding, privileged access, isolation tests |

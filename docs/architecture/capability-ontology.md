@@ -2,9 +2,9 @@
 
 Hub has a deliberately small product claim surface. It is a virtually private
 substrate whose externally reachable operations are admitted by secS-magik. The
-seven top-level claims are DevGraph, Matrix, Queue, inference, object storage,
-private exposure, and operability. Gateway, Cases, Frank, Runtime, workers,
-indexers, and tools remain functional components beneath those claims.
+eight top-level claims are DevGraph, Matrix, Queue, inference, object storage,
+Hub Monitor, private exposure, and operability. Gateway, Cases, Frank, Runtime,
+workers, indexers, and tools remain functional components beneath those claims.
 
 This is the approved target contract, not a statement that the current repository
 already meets it. The exposure rules and present gaps are defined in
@@ -48,8 +48,9 @@ admission decision. Hub therefore has no top-level authentication capability.
 | `DOM-WRK` Work | Durable work intake, leases, retries, settlement, and workflow coordination | Queue |
 | `DOM-INF` Inference | Private model loading and inference execution | Inference server |
 | `DOM-OBJ` Objects | Durable binary and document object lifecycle | Object storage |
+| `DOM-OBS` Monitoring | Read-only deployment inventory, expected and observed topology, health, release, freshness, and drift | Hub Monitor |
 | `DOM-DEP` Private deployment | Private composition, network isolation, and secS-only exposure | Private Hub boundary |
-| `DOM-ASR` Operability | Deploy, verify, update, observe, back up, restore, and preserve evidence | Operability |
+| `DOM-ASR` Operability | Deploy, verify, update, back up, restore, roll back, and preserve evidence | Operability |
 
 Authentication and external admission are owned logically by secS-magik,
 represented as required security substrate `SEC-SECS-001`, rather than as a Hub
@@ -137,6 +138,7 @@ A complete controlled claim contains:
 | `CAP-QUEUE-001` Provide durable Queue | `DOM-WRK` | Queue is integrated and deployable in current compositions; no secS operation boundary exists | `C0` |
 | `CAP-INFER-001` Provide private inference | `DOM-INF` | Private inference/model-loading substrate exists in named profiles; no secS operation boundary exists | `C0` |
 | `CAP-OBJECT-001` Provide object storage | `DOM-OBJ` | Narrow S3, EFS, and file uses exist; no general object authority or operation contract exists | `C0` |
+| `CAP-MONITOR-001` Observe Hub deployments | `DOM-OBS` | Profiles, operator state, point health checks, a Frank process dashboard, and selected alarms exist; no unified read-only Hub Monitor exists | `C0` |
 | `CAP-PRIVATE-001` Enforce secS-only private exposure | `DOM-DEP` | Current public Gateway, Matrix, AWS, and on-premises paths bypass secS | `C0` |
 | `CAP-OPERATE-001` Operate the private Hub | `DOM-ASR` | Deployment, validation, update, observation, and recovery controls exist in parts; no complete private composition exists | `C0` |
 

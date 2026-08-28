@@ -2,8 +2,8 @@
 
 Zenith Hub is a local-first private runtime substrate. Its intentionally small
 product surface is DevGraph, Matrix, durable Queue, private inference, object
-storage, private deployment, and operability. Cases, Frank, Runtime, workers,
-tools, review processing, and Gateway are internal implementation components.
+storage, Hub Monitor, private deployment, and operability. Cases, Frank, Runtime,
+workers, tools, review processing, and Gateway are internal implementation components.
 
 This README is an orientation map. It should help you find the right subsystem before you open the deeper service and operations docs.
 
@@ -58,6 +58,7 @@ external caller / agent / app
              +--> Queue
              +--> inference server
              +--> object storage
+             +--> Hub Monitor (read-only)
 
   Gateway, Cases, Frank, Runtime, tools, workers, databases, and admin APIs
   remain private implementation components behind this boundary.
@@ -238,5 +239,6 @@ The target preserves ownership boundaries:
   directly.
 
 No global opcode is allocated here and no `ZenithPacket` v0 contract is changed.
-See the [private exposure boundary](docs/architecture/private-exposure-boundary.md)
-and [seven controlled claims](docs/architecture/capability-claims.md).
+See the [private exposure boundary](docs/architecture/private-exposure-boundary.md),
+the [Hub Monitor MVP](docs/architecture/hub-monitor-mvp.md), and the
+[eight controlled claims](docs/architecture/capability-claims.md).

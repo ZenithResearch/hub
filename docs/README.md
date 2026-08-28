@@ -9,7 +9,8 @@ This directory contains current architecture/operations docs and older planning 
 | Understand the repository shape | `../README.md` |
 | Understand capability, component, composition, evidence, and claim terminology | `architecture/capability-ontology.md` |
 | Understand the secS-only private boundary and current implementation gaps | `architecture/private-exposure-boundary.md` |
-| Read the seven complete bounded target claims | `architecture/capability-claims.md` |
+| Read the eight complete bounded target claims | `architecture/capability-claims.md` |
+| Understand the read-only CEO-facing infrastructure Monitor | `architecture/hub-monitor-mvp.md` |
 | Find a functional component, its interfaces/state, deployment membership, lifecycle, or claim boundary | `architecture/functional-components.md` |
 | Find a service owner, port, or protocol | `../services/README.md` |
 | Understand Gateway HTTP routes and review auth | `gateway-http.md` and `../services/gateway_http/README.md` |
@@ -23,8 +24,9 @@ This directory contains current architecture/operations docs and older planning 
 ## Current docs
 
 - `architecture/private-exposure-boundary.md` — target secS ownership, private topology, mandatory invariants, minimal claim surface, current gaps, and implementation sequence.
-- `architecture/capability-ontology.md` — canonical seven-capability ontology, component taxonomy, secS relationships, maturity model, and claim contract.
-- `architecture/capability-claims.md` — full target records for DevGraph, Matrix, Queue, inference, object storage, private exposure, and operability, with current substrate evidence kept separate from target maturity.
+- `architecture/capability-ontology.md` — canonical eight-capability ontology, component taxonomy, secS relationships, maturity model, and claim contract.
+- `architecture/capability-claims.md` — full target records for DevGraph, Matrix, Queue, inference, object storage, Hub Monitor, private exposure, and operability, with current substrate evidence kept separate from target maturity.
+- `architecture/hub-monitor-mvp.md` — target read-only infrastructure Monitor, monitoring-scope editor, expected-versus-observed topology, security boundary, acceptance scenarios, and present gaps.
 - `architecture/functional-components.md` — complete human-readable FRU registry with responsibilities, interfaces, state authorities, dependencies, deployment membership, lifecycle, evidence, and claim boundaries.
 - `gateway-http.md` — Gateway route map, review auth/session flow, middleware, and source layout.
 - `frank-native-case-pipeline.md` — Frank native case-pipeline runtime and Cases observability contract.
