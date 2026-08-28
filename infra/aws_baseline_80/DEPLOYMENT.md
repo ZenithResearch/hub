@@ -180,18 +180,14 @@ The preload task mounts Frank EFS writable at `/models`, downloads `s3://<bucket
 
 ---
 
-# Agent Platform — AWS Baseline (~$80/mo)
+# Additional AWS baseline setup reference
 
-Baseline targets ~100 DAU with a simple always-on footprint:
+This section contains shared backend, secret, and Terraform setup details. The
+production service inventory earlier in this document is authoritative; do not
+infer service count, capacity, cost, or readiness from the directory name.
 
-- 1× `gateway-http` task (0.25 vCPU / 0.5 GB) **public** behind ALB
-- 1× `runtime-grpc` task (0.25 vCPU / 0.5 GB) **private only**
-- 1× `tool-sandbox` task (0.25 vCPU / 0.5 GB) **private only**
-- 1× Application Load Balancer (HTTP :80)
-- 1× NAT Gateway (single) for private task egress
-- External vector store: **Qdrant Cloud** (not provisioned here)
-
-This folder contains the Terraform for the baseline plus a deployment workflow that requires **no application code changes** (config-only via env vars and a secret).
+The `aws_baseline_80` path is retained for Terraform state, scripts, tests, and
+operator compatibility. It is not a current product-sizing or pricing label.
 
 If you need a full edge setup (CloudFront + WAF + ALB), use the AWS edge path in `infra/aws/terraform` instead.
 
@@ -277,56 +273,21 @@ If you *do* set `qdrant_api_key` in `terraform.tfvars`, Terraform will manage th
 
 ---
 
-## 4) Build & push images to ECR (one per service)
+## 4) Build and publish immutable service images
 
-This baseline creates 3 ECR repos. You can build the image once and push it to all three repos using the same tag.
-
-```bash
-AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-
-aws ecr get-login-password --region "$AWS_REGION" \
-  | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
-
-GW_REPO="$(terraform output -raw ecr_gateway_repo_url)"
-RT_REPO="$(terraform output -raw ecr_runtime_repo_url)"
-SB_REPO="$(terraform output -raw ecr_sandbox_repo_url)"
-
-IMAGE_TAG="$(grep -E '^image_tag' terraform.tfvars | awk -F'\"' '{print $2}')"
-test -n "$IMAGE_TAG" || IMAGE_TAG="latest"
-
-docker build -t agent-platform:"$IMAGE_TAG" ../..
-
-docker tag agent-platform:"$IMAGE_TAG" "$GW_REPO:$IMAGE_TAG"
-docker tag agent-platform:"$IMAGE_TAG" "$RT_REPO:$IMAGE_TAG"
-docker tag agent-platform:"$IMAGE_TAG" "$SB_REPO:$IMAGE_TAG"
-
-docker push "$GW_REPO:$IMAGE_TAG"
-docker push "$RT_REPO:$IMAGE_TAG"
-docker push "$SB_REPO:$IMAGE_TAG"
-```
+Use `docs/operations/production-rollout.md` and `scripts/prod_build_image.sh`.
+The current Terraform defines gateway, runtime, sandbox, and queue repositories;
+additional Hub services may use service-specific tags from the gateway repository.
+Do not rebuild production images from an unverified local checkout or infer the
+deployed service graph from the ECR repository count.
 
 ---
 
-## 5) Deploy / update ECS services to the new image tag
+## 5) Deploy or update ECS services
 
-If you changed `image_tag` in `terraform.tfvars`, apply again:
-
-```bash
-terraform apply
-```
-
-If you re-pushed the same tag (not recommended for production), force a new deployment:
-
-```bash
-CLUSTER="$(terraform output -raw ecs_cluster_name)"
-GW_SVC="$(terraform output -raw gateway_service_name)"
-RT_SVC="$(terraform output -raw runtime_service_name)"
-SB_SVC="$(terraform output -raw sandbox_service_name)"
-
-aws ecs update-service --cluster "$CLUSTER" --service "$GW_SVC" --force-new-deployment
-aws ecs update-service --cluster "$CLUSTER" --service "$RT_SVC" --force-new-deployment
-aws ecs update-service --cluster "$CLUSTER" --service "$SB_SVC" --force-new-deployment
-```
+Set immutable global or service-specific image tags, then use the reviewed
+operator-controlled plan/apply flow in `scripts/prod_terraform_cd.sh`. Do not
+force-update an assumed subset of ECS services as the normal rollout path.
 
 ---
 
@@ -348,26 +309,9 @@ Reference file: `.env.aws.example`
 
 ## Verification
 
-1) Check ALB health:
-
-```bash
-ALB_DNS="$(terraform output -raw alb_dns_name)"
-curl -sS "http://$ALB_DNS/health"
-```
-
-2) Send a message:
-
-```bash
-curl -sS -X POST "http://$ALB_DNS/v1/messages" \
-  -H "content-type: application/json" \
-  -d '{"user_id":"user-1","session_id":"sess-1","message":"Hello"}'
-```
-
-3) Confirm logs in CloudWatch Logs:
-
-- `/ecs/<project>-<env>/gateway-http`
-- `/ecs/<project>-<env>/runtime-grpc`
-- `/ecs/<project>-<env>/tool-sandbox`
+Use `scripts/prod_smoke.py` in public, operator, and internal modes as described
+earlier. Review ECS stability and CloudWatch logs for every service changed by
+the Terraform plan, not only the original core subset.
 
 ---
 
@@ -411,20 +355,3 @@ This baseline sets **ALB idle timeout** via `alb_idle_timeout_seconds` (default 
 - Scale gateway on CPU/memory first; later add an active-connection metric
 
 ---
-
-## Cost notes (~$80/month baseline)
-
-This baseline is designed to keep fixed monthly costs low. Primary cost drivers:
-
-- **NAT Gateway** (hourly + data processing)
-- **ALB** (hourly + LCUs)
-- **Fargate** (3 always-on tasks at 0.25 vCPU / 0.5GB)
-
-Secondary cost drivers:
-
-- CloudWatch Logs ingestion/retention
-- ECR storage
-- Secrets Manager (per secret + API calls)
-
-Qdrant Cloud is billed separately.
-

@@ -25,7 +25,7 @@ New to the repo? Follow [`doc/setup.md`](../doc/setup.md) first for GitHub SSH +
 | --- | --- | --- | --- |
 | Local (Compose) | Dev/demos | `gateway-http` on localhost | Fastest; includes local Qdrant container |
 | AWS Edge | Many external users | CloudFront + WAF + ALB | More moving parts; best external posture |
-| AWS Baseline (~$80/mo) | Small always-on footprint | ALB only | Cost-focused; easiest AWS runtime |
+| AWS production baseline | Current codified Hub service topology | ALB plus profile-specific Matrix edge | Existing production inventory and operator-controlled rollout |
 | On‑prem | Self-hosted | Your ingress/WAF | Kubernetes example included |
 
 ### Local (fastest)
@@ -48,17 +48,20 @@ make up
 - Docs: [`infra/aws/README.md`](aws/README.md)
 - Terraform: [`infra/aws/terraform/`](aws/terraform/)
 
-### AWS Baseline (~$80/mo)
+### AWS production baseline
 
-- Use when: smallest always-on AWS footprint for ~100 DAU.
-- Public exposure: **only** `gateway-http` (ALB HTTP).
-- Private services: `runtime-grpc`, `tool-sandbox` (internal-only, via Cloud Map).
+- Use when: operating or reviewing the current AWS ECS production topology.
+- Public exposure: Gateway through the ALB, plus profile-specific Matrix routes.
+- Private services: runtime, sandbox, queue, Cases, Eventbus, STT, Frank, and the internal model plane through service discovery and scoped security groups.
 - Docs: [`infra/aws_baseline_80/DEPLOYMENT.md`](aws_baseline_80/DEPLOYMENT.md)
 - Terraform: [`infra/aws_baseline_80/`](aws_baseline_80/)
+
+The `aws_baseline_80` directory name is retained for Terraform path, state, and
+operator compatibility. It is not a current monthly-price, service-count, user-
+capacity, or production-readiness claim.
 
 ### On‑prem / self‑hosted
 
 - Use when: Kubernetes clusters, private datacenters, or “air‑gapped-ish” environments.
 - Docs: [`infra/onprem/README.md`](onprem/README.md)
 - Example manifests: [`infra/onprem/k8s/`](onprem/k8s/)
-

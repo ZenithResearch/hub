@@ -16,7 +16,8 @@ vpc_cidr = "10.20.0.0/16"
 # 3. Set true and apply again to start ECS services.
 start_ecs_services = false
 
-# Baseline cost profile: 1 task each. Most services stay at 0.25 vCPU / 0.5 GB.
+# Default service counts and task sizes. Validate each service against the target
+# deployment profile and measured workload before production use.
 gateway_desired_count = 1
 runtime_desired_count = 1
 sandbox_desired_count = 1
@@ -100,4 +101,3 @@ clients_postgres_database_name       = "hub_clients"
 clients_postgres_username            = "hub_clients"
 clients_postgres_instance_class      = "db.t4g.micro"
 clients_postgres_backup_retention_days = 7
-

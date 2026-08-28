@@ -60,7 +60,8 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Single NAT gateway to hit the ~$80/mo baseline.
+# This profile currently provisions one NAT gateway. Review availability and
+# egress requirements before claiming production-tier conformance.
 resource "aws_eip" "nat" {
   domain = "vpc"
   tags   = merge(local.tags, { Name = "${local.name_prefix}-nat-eip" })
@@ -91,4 +92,3 @@ resource "aws_route_table_association" "private" {
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private.id
 }
-

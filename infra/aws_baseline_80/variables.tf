@@ -52,7 +52,8 @@ variable "log_retention_days" {
   default     = 14
 }
 
-# Target cost profile: 0.25 vCPU / 0.5 GB RAM always on, per service
+# Default task sizes; these are configuration defaults rather than a cost,
+# capacity, reliability, or workload-sizing claim.
 variable "task_cpu" {
   description = "Fargate CPU units (256 = 0.25 vCPU)."
   type        = number

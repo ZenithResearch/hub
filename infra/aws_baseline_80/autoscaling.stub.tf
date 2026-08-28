@@ -1,4 +1,5 @@
-# Optional autoscaling stubs (disabled by default; keep baseline predictable for ~$80/mo).
+# Optional autoscaling stubs. They are disabled until a deployment profile defines
+# measurable scaling targets, limits, and verification evidence.
 #
 # resource "aws_appautoscaling_target" "gateway" {
 #   max_capacity       = 4
@@ -22,4 +23,3 @@
 #     }
 #   }
 # }
-

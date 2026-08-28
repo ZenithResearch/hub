@@ -10,6 +10,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   fixtures, and stale active-doc terminology — keeps `native_case_pipeline` as
   the single documented and tested Frank execution path without changing its
   service implementation, recovery, or Cases observability.
+- Removed the obsolete “$80/month,” three-service, and approximate-user-capacity
+  AWS baseline narrative — prevents the legacy directory name and duplicated
+  deployment guide from understating the current production service topology.
 
 ### Fixed
 - Restricted Hypha broker publication to workflow dispatches from `main`, so

@@ -53,7 +53,9 @@ export STATE_BUCKET="agent-platform-tf-state-yourname-20260223"
 export LOCK_TABLE="agent-platform-tf-locks"
 
 export QDRANT_URL="https://your-qdrant-cloud-url"
-export QDRANT_API_KEY="YOUR_QDRANT_API_KEY"
+# Load QDRANT_API_KEY from an approved local secret store, then export the
+# existing environment value without placing it in this file or shell history.
+export QDRANT_API_KEY
 
 export IMAGE_TAG="v0.1.0"
 # Optional: override the ECR repo name used for the shared image
@@ -69,7 +71,9 @@ make aws-edge-up
 
 ## Prerequisites
 
-If you want the smallest always-on AWS footprint instead of CloudFront, see the cost-focused baseline in `infra/aws_baseline_80/DEPLOYMENT.md`.
+For the current operator-controlled AWS production inventory without the
+CloudFront edge profile, see `infra/aws_baseline_80/DEPLOYMENT.md`. The legacy
+directory name is not a current cost or capacity claim.
 
 - AWS account + credentials with permissions for: VPC, ECS, ALB, IAM, WAFv2, CloudWatch Logs, Route53 (optional), ACM (TLS)
 - Docker (to build/push the image)
@@ -229,4 +233,3 @@ CloudFront can work with WebSockets/SSE, but it adds moving parts:
 - test long-lived connections under load
 
 If you want fewer moving parts, you can disable CloudFront by setting `enable_cloudfront=false` and leaving WAF + ALB directly in front of `gateway-http`.
-
