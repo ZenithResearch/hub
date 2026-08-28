@@ -3,7 +3,7 @@
 Hub's target architecture is private by construction. Every Hub-owned runtime,
 state service, adapter, and operator API must be reachable only on a host-local,
 overlay, cluster-private, or VPC-private network. The only external admission path
-is a secS-magik verifier/permissioned-RPC boundary.
+passes through a secS-magik verifier/permissioned-RPC boundary.
 
 This is an approved target contract, not a claim that current profiles enforce it.
 Current Gateway HTTP, ALB/CloudFront, on-premises ingress, and Matrix client or
@@ -13,8 +13,8 @@ federation paths can bypass secS-magik and therefore do not conform yet.
 
 | Owner | Owns | Does not own |
 |---|---|---|
-| secS-magik | Final admission and authorization of every external call; envelope, signature, evidence, capability, replay, expiry, operation-descriptor, and verified-context checks | Hub business state, DevGraph objects, Matrix state, Queue state, model execution, or object bytes |
-| Hub | Private component networking, receiver-local Hub operation descriptors/handlers, state mutation after verified admission, deployment composition, and operating evidence | External identity issuance, raw wallet/browser login, or a second independent public auth gate |
+| secS-magik security layer | Final admission and authorization of every external call; envelope, signature, evidence, capability, replay, expiry, operation-descriptor, and verified-context checks | Hub business state, DevGraph objects, Matrix state, Queue state, model execution, or object bytes |
+| Hub | secS integration and packaging, private component networking, receiver-local Hub operation descriptors/handlers, state mutation after verified admission, deployment composition, and operating evidence | External identity issuance, raw wallet/browser login, or a second independent public auth gate |
 | Identity/evidence providers | Credentials, presentations, or evidence consumed by secS adapters | Direct Hub access or Hub operation authorization |
 
 “secS-magik owns the auth gate” means that secS makes the final allow/deny decision
@@ -22,13 +22,30 @@ before a call enters Hub. Browser or wallet login may produce identity evidence,
 Hub must not accept that evidence directly as authority and secS-magik does not need
 to become the identity issuer.
 
+## Integration and packaging modes
+
+secS-magik is a required logical security layer, not necessarily a separately
+operated external service. The implementation decision remains open between two
+conformant modes:
+
+| Mode | Packaging | Conformance requirement |
+|---|---|---|
+| Embedded | Hub imports a pinned secS package/library and performs verification inside the private receiver process | No request can reach a Hub handler before the imported verifier returns an accepted, bound context |
+| Co-deployed | The Hub deployment includes a pinned secS service, sidecar, or gateway as a mandatory composition member | Network and service policy prevent callers from reaching Hub handlers except through the secS deployment unit |
+
+In either mode, the Hub release must pin a compatible secS revision, supply the
+receiver manifest and operation bindings, configure evidence/policy, deploy or
+load the verifier, test failure behavior, and record verification evidence. The
+logical ownership rule is invariant even though the process boundary may differ.
+
 ## Target topology
 
 ```text
 external caller / agent / app
              |
              v
-  secS-magik verifier + permissioned RPC
+  secS-magik admission layer
+  (embedded import or co-deployed service)
              |
              | verified operation context only
              v
@@ -53,7 +70,7 @@ operations to local handlers and required secS evidence/capability policy.
 1. No external route reaches Gateway, Synapse, Queue, inference, object storage,
    DevGraph, databases, or operator endpoints without a secS verification decision.
 2. Hub services accept only private-network calls from named service identities or a
-   secS-verified receiver adapter.
+   secS-verified integration boundary, whether embedded or co-deployed.
 3. Hub does not maintain a second public authorization truth. Existing Review Auth
    can remain as workflow/session data during migration but cannot be the external
    admission authority in the target architecture.
@@ -91,7 +108,7 @@ does not create separate external product claims.
 
 | Requirement | Current evidence | Status |
 |---|---|---|
-| Hub secS receiver/adapter | Root README previously asserted integration, but no Hub secS adapter, verified-context decoder, receiver manifest, or integration test exists | Not implemented |
+| Hub secS integration | Root README previously asserted integration, but no imported/co-deployed integration, verified-context decoder, receiver manifest, packaging decision, or integration test exists | Not implemented |
 | secS-only ingress | Current AWS Gateway ALB/CloudFront, Matrix public routes, standalone Matrix EIP, and on-premises ingress bypass secS | Not implemented; current profiles are non-conformant |
 | DevGraph integration | DevGraph has repository-verified storage/model/auth/API/client layers in its own repo, but no Hub client, service membership, or secS operation binding exists | External substrate exists; Hub integration not implemented |
 | Matrix substrate | Local and AWS Matrix profiles, adapters, recovery controls, and historical operating evidence exist | Implemented substrate; secS-gated composition absent |
@@ -102,18 +119,20 @@ does not create separate external product claims.
 
 ## Required implementation sequence
 
-1. Define the Hub receiver manifest and semantic operation catalogue without assigning
+1. Select embedded or co-deployed packaging, then pin the secS revision and define
+   its dependency, startup, health, failure, and upgrade boundary.
+2. Define the Hub receiver manifest and semantic operation catalogue without assigning
    global opcodes or changing `ZenithPacket` v0.
-2. Define and verify the secS-to-Hub `VerifiedCallContext` handoff, including audience,
+3. Define and verify the secS-to-Hub `VerifiedCallContext` handoff, including audience,
    operation, resource, subject, expiry, replay scope, and receipt correlation.
-3. Add private adapters for DevGraph, Matrix, Queue, inference, and object storage.
-4. Introduce the general object authority and migrate artifact references without
+4. Add private adapters for DevGraph, Matrix, Queue, inference, and object storage.
+5. Introduce the general object authority and migrate artifact references without
    breaking existing Cases, Review, HubFS, or stored packet readers.
-5. Convert Gateway into a private aggregation/compatibility component and remove its
+6. Convert Gateway into a private aggregation/compatibility component and remove its
    public-auth ownership after all consumers use secS admission.
-6. Replace public ALB/Synapse/on-premises paths with secS-only ingress and fail-closed
+7. Replace public ALB/Synapse/on-premises paths with secS-only ingress and fail-closed
    network controls.
-7. Add end-to-end rejection-before-side-effect tests and private-composition evidence.
+8. Add end-to-end rejection-before-side-effect tests and private-composition evidence.
 
 No machine profile, persisted packet, API schema, or secS opcode changes in this
 documentation pass. Those are shared-contract changes and require producer,

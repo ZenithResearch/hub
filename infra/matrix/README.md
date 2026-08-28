@@ -7,8 +7,9 @@ Two deployment paths — local Docker and AWS EC2. See `DEPLOYMENT_PARITY.md` fo
 Both paths predate the approved secS-only private boundary. They document a
 working/deployable Matrix substrate, not the target Matrix claim. In the target,
 Matrix client, federation, administration, bridge, and ingest operations terminate
-or proxy through a secS-owned ingress path while Synapse remains private. The
-required proxy/adapter is not implemented. See
+or proxy through secS admission while Synapse remains private. secS may be embedded
+in that private proxy or co-deployed with it. The required integration is not
+implemented. See
 [`../../docs/architecture/private-exposure-boundary.md`](../../docs/architecture/private-exposure-boundary.md).
 
 ---

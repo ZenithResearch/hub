@@ -27,10 +27,10 @@ New to the repo? Follow [`doc/setup.md`](../doc/setup.md) first for GitHub SSH +
 
 | Path | Best for | Current edge | Target status |
 | --- | --- | --- | --- |
-| Local (Compose) | Dev/demos | `gateway-http` on localhost | Must become loopback/private-network plus secS receiver |
+| Local (Compose) | Dev/demos | `gateway-http` on localhost | Must become loopback/private-network plus embedded or co-deployed secS admission |
 | AWS Edge | Current external web path | CloudFront + WAF + ALB to Gateway | Non-conformant until edge admits only secS operations and Hub services are private |
 | AWS production baseline | Current codified Hub topology | ALB plus profile-specific Matrix edge | Deployable substrate; public paths do not prove the target |
-| On‑prem | Self-hosted prototype | Operator ingress/WAF | Prototype must replace direct Gateway ingress with secS-only admission |
+| On‑prem | Self-hosted prototype | Operator ingress/WAF | Prototype must replace direct Gateway ingress with embedded or co-deployed secS-only admission |
 
 ### Local (fastest)
 

@@ -5,7 +5,8 @@ contains Review SDK session/asset routes, operator routes, HubFS reads, health a
 OpenAPI, and proxies into Runtime, Queue, Eventbus, and Cases.
 
 The target architecture makes Gateway private. secS-magik owns final external
-admission and dispatches only verified operation context to private Hub handlers.
+admission and dispatches only verified operation context to private Hub handlers,
+whether its verifier is imported into the receiver or co-deployed with Hub.
 Current profiles still expose Gateway and let Review Auth act as an edge gate, so
 they are migration substrates rather than evidence of the target boundary. See
 [`../../docs/architecture/private-exposure-boundary.md`](../../docs/architecture/private-exposure-boundary.md).

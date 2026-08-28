@@ -15,6 +15,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   current public Gateway and Matrix paths are non-conformant migration substrates
   until a receiver adapter, verified-context handoff, and fail-closed deployment
   controls exist.
+- Clarified that secS-magik may be imported into Hub or co-deployed as a mandatory
+  service/sidecar — preserves final secS admission semantics without prematurely
+  fixing the implementation to a separate network process.
 
 ### Removed
 - Removed superseded Frank alternate-runtime documents, unused Hermes Kanban

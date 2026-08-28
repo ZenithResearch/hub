@@ -8,9 +8,10 @@ Canonical machine-readable contract:
 
 These profiles document the current machine contract and predate the approved
 secS-only private boundary. They do not establish target conformance. Future
-profile changes must add a secS receiver, private service networking, fail-closed
-exposure controls, and proof that rejected calls cause no Hub side effect without
-breaking existing readers.
+profile changes must add a pinned secS integration—embedded in the Hub receiver or
+co-deployed as a required service—plus private networking, fail-closed exposure
+controls, and proof that rejected calls cause no Hub side effect without breaking
+existing readers.
 
 Validation:
 
@@ -58,8 +59,8 @@ Source of truth:
 
 Rules:
 
-- Current legacy ingress terminates to `gateway-http`; the target terminates at a
-  secS-owned receiver and keeps Gateway private.
+- Current legacy ingress terminates to `gateway-http`; the target passes through a
+  secS admission layer, embedded or co-deployed, and keeps Gateway private.
 - Internal services remain private to the host/network.
 - Backups and restore drills are required before the node is called durable.
 - Matrix can be enabled, but `DEPLOYMENT_PARITY.md` applies.

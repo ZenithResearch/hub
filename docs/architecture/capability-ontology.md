@@ -51,8 +51,10 @@ admission decision. Hub therefore has no top-level authentication capability.
 | `DOM-DEP` Private deployment | Private composition, network isolation, and secS-only exposure | Private Hub boundary |
 | `DOM-ASR` Operability | Deploy, verify, update, observe, back up, restore, and preserve evidence | Operability |
 
-Authentication and external admission are owned by secS-magik, represented as
-external dependency `EXT-SECS-001`, rather than as a Hub capability domain.
+Authentication and external admission are owned logically by secS-magik,
+represented as required security substrate `SEC-SECS-001`, rather than as a Hub
+capability domain. The substrate may be imported into the Hub receiver or
+co-deployed with Hub; packaging does not change admission ownership.
 
 ## Functional-component kinds
 
@@ -63,7 +65,7 @@ external dependency `EXT-SECS-001`, rather than as a Hub capability domain.
 | `FC-LIB` Library | Imported cohesive behavior without a process lifecycle | common, knowledge, tool libraries |
 | `FC-API` Private API facade | Internal interface translating or constraining a capability | private Gateway, Matrix administration facade |
 | `FC-CON` Contract/schema | Versioned shape interpreted by multiple producers or consumers | protobuf, deployment profiles, model profiles |
-| `FC-ADP` Adapter/integration | Translation between Hub and an external provider or protocol | secS, DevGraph, Matrix, speech adapters |
+| `FC-ADP` Adapter/integration | Translation between Hub and another package, process, provider, or protocol | embedded/co-deployed secS, DevGraph, Matrix, speech adapters |
 | `FC-TOL` Tool | Registered bounded operation invoked by an agent or runtime | case and speech tools |
 | `FC-AGT` Agent/policy package | Repository-owned agent identity, configuration, and rules | Frank, Sophia |
 | `FC-PRC` Process/workflow | Declarative or compiled steps, inputs, and outputs | Review processes |

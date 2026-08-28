@@ -5,7 +5,7 @@ This directory contains Hub-owned runtime service packages. Each package README 
 ## Runtime topology
 
 ```text
-secS-magik target external gate
+secS-magik target admission layer (embedded or co-deployed)
   |
   +-- verified context --> private Gateway / capability handlers
   |-- Runtime gRPC --> Tool Sandbox
@@ -16,7 +16,7 @@ secS-magik target external gate
   |-- Matrix Bridge / Ingest / Feeds as intake and notification surfaces
 ```
 
-The secS receiver/adapter is not implemented yet. This diagram states the target
+The secS integration boundary is not implemented yet. This diagram states the target
 boundary; current Gateway and Matrix ports remain directly exposed in some
 profiles. All listed packages are internal functional components beneath the seven
 claims in [`../docs/architecture/capability-claims.md`](../docs/architecture/capability-claims.md).

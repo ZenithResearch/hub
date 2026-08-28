@@ -219,10 +219,15 @@ License pending / to be finalized before broader release.
 
 ## secS-magik exposure target
 
-secS-magik is the intended sole external admission gate for every Hub operation.
-The Hub repository does **not** yet contain a secS receiver adapter, verified-call
-context decoder, receiver manifest, or end-to-end integration tests. Current
+secS-magik is the intended sole logical external admission gate for every Hub operation.
+The Hub repository does **not** yet contain an embedded or co-deployed secS
+integration, verified-call context decoder, receiver manifest, or end-to-end tests. Current
 Gateway, Matrix, AWS, and on-premises exposure paths therefore do not conform.
+
+secS is a required logical layer, not necessarily a separate external service.
+Hub may import a pinned secS implementation into its private receiver or deploy a
+pinned secS service/sidecar with Hub. The packaging decision remains open; both
+modes must reject unauthorized calls before any Hub side effect.
 
 The target preserves ownership boundaries:
 

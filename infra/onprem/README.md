@@ -8,10 +8,11 @@ Hub boundary. It currently maps the runtime split as follows:
 - Service discovery via **cluster DNS**
 - Strict east/west controls via **NetworkPolicies** (Kubernetes) or firewall rules (VMs)
 
-The target replaces direct Gateway ingress with a secS-magik receiver, keeps
+The target replaces direct Gateway ingress with secS-magik admission, keeps
 Gateway and all other Hub services on `ClusterIP` or an equivalent private
-network, and admits only verified semantic operations. The secS adapter and
-target manifest are not implemented. See
+network, and admits only verified semantic operations. secS may be imported into
+the private receiver or co-deployed as a mandatory service/sidecar. Neither the
+integration nor the target manifest is implemented. See
 [`../../docs/architecture/private-exposure-boundary.md`](../../docs/architecture/private-exposure-boundary.md).
 
 ---
@@ -58,8 +59,8 @@ For NGINX Ingress, the manifest sets:
 Equivalent pattern:
 
 ```text
-WAF/ReverseProxy (nginx/HAProxy) -> secS receiver (target external gate)
-secS receiver                       -> gateway-http (private)
+WAF/ReverseProxy (nginx/HAProxy) -> secS admission (co-deployed option)
+secS admission                     -> gateway-http (private)
 runtime-grpc + tool-sandbox      -> private network only
 qdrant                           -> private or managed
 ```
@@ -68,7 +69,7 @@ Key configuration points:
 - Raise proxy/LB idle timeouts for long-lived connections
 - Use WebSocket ping/pong or SSE heartbeats
 - Restrict firewall rules:
-  - public -> secS receiver only (target; not implemented in current manifest)
-  - secS receiver -> gateway only
+  - public -> secS admission only (target; embedded or co-deployed)
+  - secS admission -> gateway only
   - gateway -> runtime only
   - runtime -> tool-sandbox only

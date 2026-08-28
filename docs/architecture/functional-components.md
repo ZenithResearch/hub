@@ -20,7 +20,7 @@ unit beneath one or more of them:
 | `CAP-QUEUE-001` Queue | `FRU-QUEUE-001`, `FRU-PROTO-001`, future secS adapter | Cases, Eventbus, Frank, workers, processes, and tools coordinate work internally |
 | `CAP-INFER-001` Inference | `FRU-LLM-001`, model profiles, Runtime/Sandbox/provider adapters | STT, tools, and knowledge retrieval are internal consumers or supporting paths |
 | `CAP-OBJECT-001` Object storage | future `FRU-OBJECT-001` | HubFS, S3 model artifacts, EFS, and local files are migration inputs, not the authority |
-| `CAP-PRIVATE-001` Private exposure | future `FRU-SECS-ADAPTER-001`, private Gateway, network/IaC controls | Review Auth and current public routes are legacy migration surfaces |
+| `CAP-PRIVATE-001` Private exposure | future `FRU-SECS-ADAPTER-001`, private Gateway, network/IaC controls | secS may be imported or co-deployed; Review Auth and current public routes are legacy migration surfaces |
 | `CAP-OPERATE-001` Operability | profiles, release/update/recovery/observation/evidence controls | every composition must be deployable and recoverable as a named private whole |
 
 Older `DOM-*` labels retained in the detailed rows are component concern tags from
@@ -132,7 +132,7 @@ capability maturity.
 | Frank alternate runtimes | Current code accepts only `native_case_pipeline`; cleanup commit `847de04` removes obsolete runtime docs and Kanban fixtures | Deprecated. Old persisted values may remain readable but current producers do not schedule them |
 | Superseded Frank/Sophia transition document | Described earlier layers and absent paths | Removed on cleanup branch at `847de04`; changelog retains provenance |
 | AWS cost/service-count narrative | Historical documentation understated the current Terraform graph | Removed on cleanup branch at `26a99a0`; `infra/aws_baseline_80/` remains only as a compatibility-sensitive path |
-| secS-magik integration target | secS provides a separate verifier/permissioned-RPC substrate, but Hub has no adapter, verified-context decoder, receiver manifest, or integration tests | Approved target, not implemented. secS must become the only external admission path before any gated Hub capability is claimed above C0 |
+| secS-magik integration target | secS provides a verifier/permissioned-RPC substrate in its own source repository; Hub has not selected embedded or co-deployed packaging and has no integration boundary, verified-context decoder, receiver manifest, or integration tests | Approved target, not implemented. secS must become the only logical external admission path before any gated Hub capability is claimed above C0 |
 | Older Matrix parity/adoption prose | Older EC2 and non-adopted assumptions conflict with newer profiles/evidence | Historical or stale-contract candidate; update additively before removing machine fields |
 | `docs/plans/` | Dated design and work notes | Historical by default; never evidence of current implementation |
 | `test-agent` | Exists under test/fixture-oriented rolodex content | Test fixture; excluded from product agent capability claims |
@@ -177,7 +177,7 @@ These are functional specification units, not current capabilities.
 
 | Proposed FRU · kind | Defined outcome | Missing implementation/evidence |
 |---|---|---|
-| `FRU-SECS-ADAPTER-001` secS receiver adapter · `FC-ADP` | Accept only verified secS call context, map receiver-local semantic operations to private Hub handlers, fail closed, and emit correlated receipts | Hub receiver manifest, context decoder, private dispatch, replay/expiry/audience tests, rejection-before-side-effect tests, deployment wiring |
+| `FRU-SECS-ADAPTER-001` secS integration boundary · `FC-ADP` | Import or call the pinned secS verifier, accept only verified call context, map receiver-local semantic operations to private Hub handlers, fail closed, and emit correlated receipts | Embedded-versus-co-deployed decision, dependency pin, Hub receiver manifest, context decoder, private dispatch, replay/expiry/audience tests, rejection-before-side-effect tests, startup/deployment wiring |
 | `FRU-DEVGRAPH-ADAPTER-001` DevGraph adapter · `FC-ADP` | Expose policy-filtered DevGraph query/mutation/event operations inside the private Hub boundary | Hub client/adapter, semantic operation mapping, state/event contract, failure behavior, deployment membership, secS integration tests |
 | `FRU-TIER-001` H1–H5 standard · `FC-SPC` | Machine-readable workload/deployment requirement tiers | Additive schema, per-tier component/data/security/recovery rules, provider overlays, validators, evidence |
 | `FRU-ONPREM-PROD-001` production on-premises Hub · `FC-SPC` | Full or explicitly tier-scoped product composition on private infrastructure | Queue/Cases/Frank/data/Matrix/operations parity, install, upgrade, rollback, monitoring, recovery, hardware profiles |

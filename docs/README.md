@@ -49,7 +49,9 @@ This directory contains current architecture/operations docs and older planning 
 
 - Root README stays broad and path-oriented.
 - Capability claims use stable `CAP-*` IDs; functional components use stable `FRU-*` IDs.
-- secS-magik owns final external admission; Hub services and state authorities remain virtually private.
+- secS-magik owns final external admission and may be imported into Hub or
+  co-deployed as a mandatory composition unit; Hub services and state authorities
+  remain virtually private in either mode.
 - A component's existence does not imply integration, deployability, operational evidence, or availability in every composition.
 - Service READMEs own service-specific ports, env vars, dependencies, and tests.
 - Operations docs own deploy/runbook procedures.
