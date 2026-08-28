@@ -5,6 +5,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Changed
+- Reframed runtime documentation around a capability ontology, full claim
+  catalogue, and complete functional-component registry — makes outcomes,
+  actors, data flow, domains, component kinds, interfaces, state authorities,
+  deployment composition, evidence, constraints, lifecycle, and unsupported
+  claims explicit without requiring a billing-driven SLA model.
+
 ### Removed
 - Removed superseded Frank alternate-runtime documents, unused Hermes Kanban
   fixtures, and stale active-doc terminology — keeps `native_case_pipeline` as
