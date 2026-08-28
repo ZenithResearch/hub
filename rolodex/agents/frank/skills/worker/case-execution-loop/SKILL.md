@@ -1,9 +1,9 @@
 ---
 name: case-execution-loop
 description: >
-  Frank-owned outer loop for materializing a canonical case DAG into a bounded
-  Hermes execution board, launching in-case workers, and reconciling results.
-version: "1.1.0"
+  Frank-owned outer loop for executing a canonical case DAG through Cases,
+  launching bounded profile workers when assigned, and reconciling results.
+version: "1.2.0"
 ---
 
 # case-execution-loop
@@ -11,15 +11,13 @@ version: "1.1.0"
 ## Purpose
 
 Frank owns case orchestration. Zenith's cases service remains the source of truth
-for case state, step readiness, dependencies, policy, and completion. Hermes
-Kanban is the in-case execution contract: Frank compiles the process DAG into a
-case-scoped board, launches profile workers against that board, and reconciles
-operational results back into the cases service.
+for case state, step readiness, dependencies, policy, and completion. Frank
+compiles the process DAG into a case-scoped dispatch packet, advances native
+case-run and step-run state, launches assigned profile workers when required,
+and reconciles validated results back into the cases service.
 
-This skill is the canonical worker execution loop. It may still be used by the
-legacy `hermes-worker-queue` compatibility bridge until a live Hermes Kanban
-adapter is available, but Sophia is no longer the canonical owner of case
-execution.
+This skill is the canonical worker execution loop shared with the
+`hermes-worker-queue` bridge. Sophia is not an internal case-execution owner.
 
 ## Inputs
 
@@ -35,24 +33,23 @@ execution.
 
 1. Load the case with `worker_cli.py load-case --case-id ...`.
 2. Treat `case.dispatch_packet_json` as Frank's compiled execution contract.
-3. Materialize or validate the case-scoped Hermes Kanban board plan. Each process
-   step maps to one task; each in-case dependency edge maps to one Hermes-native
-   task link.
+3. Validate the case-scoped run/step plan. Each process step maps to one Cases
+   step, and readiness follows the compiled DAG plus current slot state.
 4. Write initial payload-derived slots from `initial_context` only through the
    deterministic parent/orchestrator path. Slots are write-once; only write values
    that are still empty.
 5. Execute deterministic setup boundaries in the Frank-owned parent path when the
    process declares them, then recompute runnable tasks from live slot state.
-6. For each runnable task in the current board wave:
+6. For each runnable step in the current wave:
    - use the exact `resolved_step_brief`
    - include current input slot values
    - include the assigned profile / seat
    - include workspace policy
    - include expected output names and types
    - persist runtime/task state while work is active
-7. Launch bounded profile workers for task work. Workers execute inside the case
-   board; they do not redefine the DAG and do not directly mutate canonical case
-   state.
+7. Launch bounded profile workers for assigned step work. Workers execute inside
+   the compiled case contract; they do not redefine the DAG and do not directly
+   mutate canonical case state.
 8. Each worker returns a structured JSON envelope only.
 9. Frank validates returned outputs against the declared output schema and commits
    them durably to the cases service.
@@ -117,14 +114,14 @@ The helper prints JSON with:
 
 ## Rules
 
-- Frank owns orchestration, case policy, DAG compilation, board materialization,
-  lifecycle, and reconciliation.
-- Hermes/profile workers execute bounded in-case task work after Frank launches it.
-- Zenith remains source of truth; Hermes Kanban state is operational execution state.
-- Use Hermes-native links only for dependencies inside the current case.
+- Frank owns orchestration, case policy, DAG compilation, run/step lifecycle,
+  and reconciliation.
+- Profile workers execute bounded in-case step work after Frank assigns it.
+- Zenith Cases state is the operational and canonical execution state.
+- Use compiled DAG edges for dependencies inside the current case.
 - Cross-case dependencies stay in Zenith.
 - Do not redefine the case DAG or invent new slot names.
 - Do not let child workers write case slots directly.
 - Do not treat Sophia as a case executor; Sophia is comms/publication-facing.
 - Use `worker_cli.py` for deterministic runtime transitions and durable writes.
-- Keep runtime/task state durable on the step row or board task, not only session-local.
+- Keep runtime/task state durable on the Cases step row, not only session-local.

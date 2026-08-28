@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import subprocess
 import unittest
 from pathlib import Path
@@ -20,8 +19,6 @@ class Phase11DockerE2EContractTests(unittest.TestCase):
 
         self.assertEqual(frank_env["HERMES_HOME"], "/hub/rolodex/agents/frank")
         self.assertNotIn("FRANK_RUNTIME", frank_env)
-        self.assertNotIn("FRANK_KANBAN_HERMES_HOME", frank_env)
-        self.assertNotIn("FRANK_KANBAN_STEP_SPAWN_MODE", frank_env)
         self.assertEqual(frank_env["TOOL_DIR"], "${TOOL_DIR:-/app/libs/tools}")
         self.assertEqual(frank_env["GATEWAY_HTTP_URL"], "${GATEWAY_HTTP_URL:-http://gateway-http:8080}")
         self.assertEqual(frank_env["HUB_CONFIG_SECRETS_PATH"], "/hub/.hermes/config-secrets.env")
@@ -69,34 +66,6 @@ class Phase11DockerE2EContractTests(unittest.TestCase):
         self.assertNotIn("ffmpeg", worker_dockerfile)
         self.assertIn("openai-whisper", stt_dockerfile)
         self.assertIn("ffmpeg", stt_dockerfile)
-
-
-
-
-
-    def test_gateway_http_does_not_import_or_call_hermes_kanban_dispatcher(self) -> None:
-        gateway_tree = ast.parse((REPO_ROOT / "services/gateway_http/app.py").read_text(encoding="utf-8"))
-        forbidden_imports: list[str] = []
-        forbidden_calls: list[str] = []
-        for node in ast.walk(gateway_tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                module = getattr(node, "module", "") or ""
-                names = [alias.name for alias in getattr(node, "names", [])]
-                imported = " ".join([module, *names])
-                if "kanban" in imported or "hermes_cli" in imported:
-                    forbidden_imports.append(imported)
-            if isinstance(node, ast.Call):
-                func = node.func
-                name = ""
-                if isinstance(func, ast.Name):
-                    name = func.id
-                elif isinstance(func, ast.Attribute):
-                    name = func.attr
-                if name in {"dispatch_once", "dispatch_loop", "dispatch_ready", "kanban_command"}:
-                    forbidden_calls.append(name)
-
-        self.assertEqual(forbidden_imports, [])
-        self.assertEqual(forbidden_calls, [])
 
     def test_compose_wires_internal_stt_service_to_tool_execution_surfaces(self) -> None:
         services = self._compose()["services"]

@@ -32,7 +32,7 @@ operating mode.
 
 6. **Compile the execution packet.** Compile resolved step briefs, profile/seat assignments, workspace policy, expected outputs, and lifecycle rules. Persist this as the case-scoped dispatch packet.
 
-7. **Launch native execution.** Start the `native_case_pipeline` service-code path. Frank must not project Hermes Kanban or launch direct `services.frank.step_runner` subprocesses in the active runtime.
+7. **Launch native execution.** Start the `native_case_pipeline` service-code path. Cases run and step state remain the durable execution contract.
 
 8. **Reconcile.** Monitor native case-run state, commit validated outputs to the cases service, handle retries/reroutes/escalation, and close the case when it reaches a terminal state.
 
@@ -44,7 +44,7 @@ operating mode.
 - **Own orchestration, not arbitrary business execution.** Compile, launch, monitor, reconcile.
 - **Never let runtime state become the source of truth.** Cases/Zenith state is authoritative.
 - **Never route internal case execution through Sophia.** Sophia handles outbound comms, summaries, and publication-facing synthesis.
-- **Do not reintroduce alternate Frank runtime branches without a fresh defended work order.** `kanban` and `direct` are obsolete for the active Frank path.
+- **Keep one execution path.** Do not introduce alternate Frank runtime branches without a fresh defended work order and migration plan.
 - Acknowledge the queue only after durable handoff: canonical case exists, dispatch packet is stored, and the native execution launch path is durable.
 - If intent is ambiguous, ask one focused clarifying question. One question only.
 - When a step fails, decide: retry, reroute to an alternative executor, escalate to WAITING_INPUT/BLOCKED, or fail the case.

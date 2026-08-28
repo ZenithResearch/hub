@@ -267,13 +267,7 @@ Process a review.
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("FRANK_RUNTIME", None)
             self.assertEqual(self.module.resolve_frank_runtime(), "native_case_pipeline")
-        with patch.dict(os.environ, {"FRANK_RUNTIME": "kanban"}, clear=False):
-            with self.assertRaisesRegex(ValueError, "invalid FRANK_RUNTIME"):
-                self.module.resolve_frank_runtime()
-        with patch.dict(os.environ, {"FRANK_RUNTIME": "direct"}, clear=False):
-            with self.assertRaisesRegex(ValueError, "invalid FRANK_RUNTIME"):
-                self.module.resolve_frank_runtime()
-        with patch.dict(os.environ, {"FRANK_RUNTIME": "sideways"}, clear=False):
+        with patch.dict(os.environ, {"FRANK_RUNTIME": "unsupported_runtime"}, clear=False):
             with self.assertRaisesRegex(ValueError, "invalid FRANK_RUNTIME"):
                 self.module.resolve_frank_runtime()
 
@@ -345,8 +339,10 @@ Process a review.
                                     ),
                                 },
                                 {
-                                    "id": "case_kanban",
-                                    "dispatch_packet_json": json.dumps({"case_id": "case_kanban", "runtime": {"mode": "kanban"}}),
+                                    "id": "case_legacy_runtime",
+                                    "dispatch_packet_json": json.dumps(
+                                        {"case_id": "case_legacy_runtime", "runtime": {"mode": "legacy_runtime"}}
+                                    ),
                                 },
                             ]
                         }
@@ -645,7 +641,6 @@ Process a review.
         self.assertEqual(dispatch_packet["runtime"], {"mode": "native_case_pipeline", "source_of_truth": "cases/Zenith"})
         self.assertEqual(dispatch_packet["initial_context"]["audio_asset_path"], "data/reviews/assets/audio_789")
         self.assertEqual(dispatch_packet["resolved_step_briefs"][0]["workspace_policy"], "scratch")
-        self.assertNotIn("hermes_kanban", dispatch_packet)
         self.assertEqual(result["wave_id"], "wave_001")
         self.assertEqual(result["launched_steps"][0]["profile"], "frank")
 

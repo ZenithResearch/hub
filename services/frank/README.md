@@ -7,7 +7,7 @@ Frank is the Hub execution/controller service for native case pipelines. It cons
 - Compose service: `frank`
 - Source package: `services/frank/`
 - Entrypoint: `python -m services.frank.main`
-- Runtime mode: native case pipeline; obsolete direct/Kanban runtime branches should not be treated as active fallbacks.
+- Runtime mode: `native_case_pipeline`, the only supported Frank execution path.
 
 ## Connected services
 

@@ -1,7 +1,0 @@
-usage: hermes kanban context [-h] task_id
-
-positional arguments:
-  task_id
-
-options:
-  -h, --help  show this help message and exit

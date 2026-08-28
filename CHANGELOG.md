@@ -5,6 +5,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Removed
+- Removed superseded Frank alternate-runtime documents, unused Hermes Kanban
+  fixtures, and stale active-doc terminology — keeps `native_case_pipeline` as
+  the single documented and tested Frank execution path without changing its
+  service implementation, recovery, or Cases observability.
+
 ### Fixed
 - Restricted Hypha broker publication to workflow dispatches from `main`, so
   an unprotected production-environment configuration cannot publish a branch.

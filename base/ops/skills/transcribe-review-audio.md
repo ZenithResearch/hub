@@ -56,8 +56,8 @@ input:
 ```
 
 If the worker runtime does not expose `local_whisper` as a first-class callable,
-do not block just because the command is absent from `PATH`. In the Frank Kanban
-compose runtime, `local_whisper` is a registry-backed Python tool at
+do not block just because the command is absent from `PATH`. In the Hub compose
+runtime, `local_whisper` is a registry-backed Python tool at
 `/hub/libs/tools/local_whisper/tool.py` that forwards to the internal STT HTTP
 service. Use this fallback from `/hub`:
 

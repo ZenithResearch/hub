@@ -1,13 +1,12 @@
 # Frank Native Case Pipeline
 
-Frank's native case pipeline is the replacement execution path for review cases.
-It is service code in `services/frank`, not a prompted Hermes child session and
-not Hermes Kanban task dispatch.
+Frank's native case pipeline is the active execution path for review cases. It
+is service code in `services/frank` and uses Cases as its durable source of
+truth.
 
 ## Runtime
 
-- Default runtime: `native_case_pipeline` (service-code default; compose does not wire `FRANK_RUNTIME`)
-- Unsupported runtimes: `direct` and `kanban` are obsolete and rejected
+- Supported runtime: `native_case_pipeline` (service-code default; compose does not wire `FRANK_RUNTIME`)
 - Execution source of truth: cases / Zenith state
 - Board source of truth: cases-derived run and step state
 
@@ -93,7 +92,7 @@ The Swift UI should:
 - Subscribe to `GET /case-runs/{run_id}/stream` or the existing case stream for
   live updates.
 - Render board/checklist views from `GET /cases/{case_id}/board`, which is
-  derived from cases step-run state and does not depend on Hermes Kanban.
+  derived from Cases step-run state.
 - Render case variables from `GET /cases/{case_id}/board.variables`; do not
   label the whole list as constants. The API classifies variables as
   `dispatcher_input`, `produced_output`, `pending_output`, or

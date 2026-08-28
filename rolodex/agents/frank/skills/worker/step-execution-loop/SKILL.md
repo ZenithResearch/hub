@@ -2,15 +2,15 @@
 name: step-execution-loop
 description: >
   Frank-owned inner loop contract for bounded Hermes/profile workers executing a
-  single task inside a case-scoped Kanban board.
-version: "1.1.0"
+  single assigned step inside a native case pipeline.
+version: "1.2.0"
 ---
 
 # step-execution-loop
 
 ## Purpose
 
-Execute one assigned task inside a Frank-materialized case board and return a
+Execute one assigned step inside a Frank-compiled case and return a
 structured JSON result. Frank owns canonical case writeback, lifecycle decisions,
 retries, reroutes, and reconciliation. The worker owns only the bounded task work
 inside the case execution contract.
@@ -18,7 +18,7 @@ inside the case execution contract.
 ## Inputs
 
 - `case_id`
-- `task_id` / `step_db_row_id`
+- `step_db_row_id`
 - `agent_run_id`
 - assigned profile / seat
 - workspace policy
@@ -58,8 +58,8 @@ not assume assets already exist under `/hub/data/reviews/assets`.
 - For successful output-producing steps, `outputs` must contain exactly the
   declared output variable names.
 - Output values must match the declared variable types in the resolved step brief.
-- Do not call `set_step_running`; execution ownership is established by the board
-  dispatcher and Frank-owned DAG.
+- Do not call `set_step_running`; execution ownership is established by Frank and
+  the Cases step-run lifecycle.
 - Runtime state is mutable task tracking only; it is not a substitute for
   declared outputs.
 - Task helpers may not delegate further unless Frank explicitly assigned an

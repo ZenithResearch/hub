@@ -20,7 +20,6 @@ This directory contains current architecture/operations docs and older planning 
 
 - `gateway-http.md` — Gateway route map, review auth/session flow, middleware, and source layout.
 - `frank-native-case-pipeline.md` — Frank native case-pipeline runtime and Cases observability contract.
-- `frank-sophia-runtime-transition-layers.md` — Frank/Sophia boundary notes.
 - `case-dispatch-review.md` — case dispatch review notes.
 - `local-runtime-state.md` — tracked vs ignored runtime-state boundary.
 - `hermes-forward-strategy-report-2026-04-29.md` — strategic/background report.
