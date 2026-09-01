@@ -45,6 +45,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   account validation, and ephemeral on-host Docker authentication.
 
 ### Added
+- Added capability-gated Hypha administration-secret rotation with verifier-only atomic persistence on the encrypted Matrix data volume — lets operators rotate broker authority from Hypha, revokes every short-lived administration session, preserves the configured bootstrap verifier as an emergency recovery seed, and never stores or returns the raw replacement secret.
 - Added a fail-closed fresh Synapse backup and isolated-restore gate — creates
   hourly and daily application-consistent multi-volume DLM snapshots with
   PostgreSQL checkpoint/XFS freeze hooks, auto-thaw safety, bounded restore

@@ -56,9 +56,10 @@ mountpoint -q "$DATA_MOUNT" || mount "$DATA_MOUNT"
 mountpoint -q "$DATA_MOUNT" || { echo "Matrix data volume is not mounted" >&2; exit 1; }
 findmnt --verify --verbose >/dev/null
 
-mkdir -p "$MATRIX_DIR" "$DATA_MOUNT/postgres" "$DATA_MOUNT/synapse" "$DATA_MOUNT/caddy-data" "$DATA_MOUNT/caddy-config"
-chmod 700 "$MATRIX_DIR" "$DATA_MOUNT"
+mkdir -p "$MATRIX_DIR" "$DATA_MOUNT/postgres" "$DATA_MOUNT/synapse" "$DATA_MOUNT/caddy-data" "$DATA_MOUNT/caddy-config" "$DATA_MOUNT/hypha-admin-broker"
+chmod 700 "$MATRIX_DIR" "$DATA_MOUNT" "$DATA_MOUNT/hypha-admin-broker"
 chown 991:991 "$DATA_MOUNT/synapse"
+chown 65532:65532 "$DATA_MOUNT/hypha-admin-broker"
 
 install -d -m 0755 /etc/systemd/system/docker.service.d
 cat > /etc/systemd/system/docker.service.d/matrix-data.conf <<'EOF_DOCKER_MOUNT'
@@ -261,6 +262,9 @@ services:
     env_file: /opt/matrix/broker.env
     environment:
       HYPHA_ADMIN_BROKER_SERVICE_USER_ID: '@_hypha_admin_broker:${matrix_server_name}'
+      HYPHA_ADMIN_BROKER_SECRET_VERIFIER_PATH: /var/lib/hypha-admin-broker/operator-secret.verifier
+    volumes:
+      - /opt/matrix-data/hypha-admin-broker:/var/lib/hypha-admin-broker
     tmpfs:
       - /tmp:noexec,nosuid,size=16m
     cap_drop:

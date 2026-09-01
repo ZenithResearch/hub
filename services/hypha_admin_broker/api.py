@@ -15,7 +15,9 @@ from .auth import (
     BrokerSessionStore,
     RateLimited,
     SessionCapacityExceeded,
+    encode_scrypt_verifier,
 )
+from .secret_store import AtomicFileSecretVerifierStore, SecretVerifierStoreError
 from .synapse import SynapseAuthorityRejected
 
 _API_PREFIX = "/_hypha/admin/v1"
@@ -40,6 +42,17 @@ class SessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     secret: str
+
+
+class RotateSecretRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    new_secret: str = Field(
+        min_length=32,
+        max_length=512,
+        pattern=r"^[^\x00-\x1f\x7f]+$",
+    )
+    confirmation: Literal["rotate_admin_secret"]
 
 
 class UserPayload(BaseModel):
@@ -184,6 +197,7 @@ def create_app(
     *,
     session_store: BrokerSessionStore,
     synapse: SynapseAdminAdapter,
+    secret_verifier_store: AtomicFileSecretVerifierStore | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):  # type: ignore[no-untyped-def]
@@ -300,6 +314,31 @@ def create_app(
         except AuthenticationRejected:
             return _error(401, "administration session is invalid or expired")
         return None
+
+    @app.get(_API_PREFIX + "/capabilities")
+    async def capabilities(request: Request) -> JSONResponse:
+        if denied := authorize_operation(request):
+            return denied
+        features = ["secret_rotation"] if secret_verifier_store is not None else []
+        return _bounded_json(
+            status_code=200,
+            content={"contract_version": 1, "features": features},
+            too_large_message="administration response was too large",
+        )
+
+    @app.post(_API_PREFIX + "/secret/rotate", status_code=204)
+    async def rotate_secret(request: Request, payload: RotateSecretRequest) -> Response:
+        if denied := authorize_operation(request):
+            return denied
+        if secret_verifier_store is None:
+            return _error(503, "administration secret rotation is unavailable")
+        try:
+            verifier = encode_scrypt_verifier(payload.new_secret)
+            secret_verifier_store.replace(verifier)
+            session_store.rotate(verifier)
+        except (AuthenticationRejected, SecretVerifierStoreError, TypeError, ValueError):
+            return _error(503, "administration secret rotation is unavailable")
+        return Response(status_code=204)
 
     @app.post(_API_PREFIX + "/users", status_code=201)
     async def create_account(request: Request, payload: CreateAccountRequest) -> JSONResponse:

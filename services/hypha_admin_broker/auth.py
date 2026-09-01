@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+import threading
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
@@ -139,6 +140,12 @@ def encode_scrypt_verifier(
     return f"scrypt${n}${r}${p}${_urlsafe_encode(parsed.salt)}${_urlsafe_encode(digest)}"
 
 
+def validate_scrypt_verifier(encoded: str) -> None:
+    """Validate a verifier without exposing its parsed secret-derived fields."""
+
+    _parse_verifier(encoded)
+
+
 class BrokerSessionStore:
     """Process-local, fail-closed administration sessions."""
 
@@ -175,70 +182,83 @@ class BrokerSessionStore:
         self._failure_window_seconds = failure_window_seconds
         self._sessions: dict[bytes, _Session] = {}
         self._failures: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = threading.RLock()
 
     def authenticate(self, secret: str, *, source: str) -> SessionGrant:
-        now = self._clock()
-        failures = self._bounded_failures(source, now)
-        if len(failures) >= self._max_failures:
-            raise RateLimited()
-        try:
-            raw_secret = _secret_bytes(secret)
-        except AuthenticationRejected:
-            failures.append(now)
-            raise
-        candidate = hashlib.scrypt(
-            raw_secret,
-            salt=self._verifier.salt,
-            n=self._verifier.n,
-            r=self._verifier.r,
-            p=self._verifier.p,
-            dklen=len(self._verifier.digest),
-        )
-        if not hmac.compare_digest(candidate, self._verifier.digest):
-            failures.append(now)
-            raise AuthenticationRejected()
-        self._failures.pop(source, None)
-        self._prune_sessions(now)
-        if len(self._sessions) >= self._max_sessions:
-            raise SessionCapacityExceeded()
-        raw_token = self._token_factory(_TOKEN_BYTES)
-        if not isinstance(raw_token, bytes) or len(raw_token) != _TOKEN_BYTES:
-            raise SessionCapacityExceeded()
-        token = _urlsafe_encode(raw_token)
-        digest = self._token_digest(token)
-        if digest in self._sessions:
-            raise SessionCapacityExceeded()
-        absolute_expires_at = now + self._absolute_timeout_seconds
-        self._sessions[digest] = _Session(
-            issued_at=now,
-            idle_expires_at=now + self._idle_timeout_seconds,
-            absolute_expires_at=absolute_expires_at,
-        )
-        return SessionGrant(
-            session_token=token,
-            absolute_expires_at=absolute_expires_at,
-            expires_in_seconds=self._absolute_timeout_seconds,
-            idle_timeout_seconds=self._idle_timeout_seconds,
-        )
+        with self._lock:
+            now = self._clock()
+            failures = self._bounded_failures(source, now)
+            if len(failures) >= self._max_failures:
+                raise RateLimited()
+            try:
+                raw_secret = _secret_bytes(secret)
+            except AuthenticationRejected:
+                failures.append(now)
+                raise
+            candidate = hashlib.scrypt(
+                raw_secret,
+                salt=self._verifier.salt,
+                n=self._verifier.n,
+                r=self._verifier.r,
+                p=self._verifier.p,
+                dklen=len(self._verifier.digest),
+            )
+            if not hmac.compare_digest(candidate, self._verifier.digest):
+                failures.append(now)
+                raise AuthenticationRejected()
+            self._failures.pop(source, None)
+            self._prune_sessions(now)
+            if len(self._sessions) >= self._max_sessions:
+                raise SessionCapacityExceeded()
+            raw_token = self._token_factory(_TOKEN_BYTES)
+            if not isinstance(raw_token, bytes) or len(raw_token) != _TOKEN_BYTES:
+                raise SessionCapacityExceeded()
+            token = _urlsafe_encode(raw_token)
+            digest = self._token_digest(token)
+            if digest in self._sessions:
+                raise SessionCapacityExceeded()
+            absolute_expires_at = now + self._absolute_timeout_seconds
+            self._sessions[digest] = _Session(
+                issued_at=now,
+                idle_expires_at=now + self._idle_timeout_seconds,
+                absolute_expires_at=absolute_expires_at,
+            )
+            return SessionGrant(
+                session_token=token,
+                absolute_expires_at=absolute_expires_at,
+                expires_in_seconds=self._absolute_timeout_seconds,
+                idle_timeout_seconds=self._idle_timeout_seconds,
+            )
 
     def authorize(self, session_token: str) -> None:
-        now = self._clock()
-        digest = self._token_digest(session_token)
-        session = self._sessions.get(digest)
-        if session is None:
-            raise AuthenticationRejected()
-        if now >= session.idle_expires_at or now >= session.absolute_expires_at:
-            self._sessions.pop(digest, None)
-            raise AuthenticationRejected()
-        session.idle_expires_at = min(
-            now + self._idle_timeout_seconds,
-            session.absolute_expires_at,
-        )
+        with self._lock:
+            now = self._clock()
+            digest = self._token_digest(session_token)
+            session = self._sessions.get(digest)
+            if session is None:
+                raise AuthenticationRejected()
+            if now >= session.idle_expires_at or now >= session.absolute_expires_at:
+                self._sessions.pop(digest, None)
+                raise AuthenticationRejected()
+            session.idle_expires_at = min(
+                now + self._idle_timeout_seconds,
+                session.absolute_expires_at,
+            )
 
     def logout(self, session_token: str) -> None:
-        digest = self._token_digest(session_token)
-        if self._sessions.pop(digest, None) is None:
-            raise AuthenticationRejected()
+        with self._lock:
+            digest = self._token_digest(session_token)
+            if self._sessions.pop(digest, None) is None:
+                raise AuthenticationRejected()
+
+    def rotate(self, verifier: str) -> None:
+        """Atomically replace authority and revoke every outstanding session."""
+
+        replacement = _parse_verifier(verifier)
+        with self._lock:
+            self._verifier = replacement
+            self._sessions.clear()
+            self._failures.clear()
 
     def _token_digest(self, token: str) -> bytes:
         if not isinstance(token, str) or not token or len(token) > 128:
