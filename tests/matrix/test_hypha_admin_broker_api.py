@@ -6,6 +6,10 @@ from fastapi.testclient import TestClient
 
 from services.hypha_admin_broker.api import create_app
 from services.hypha_admin_broker.auth import BrokerSessionStore, encode_scrypt_verifier
+from services.hypha_admin_broker.secret_store import (
+    AtomicFileSecretVerifierStore,
+    SecretVerifierStoreError,
+)
 from services.hypha_admin_broker.synapse import SynapseAuthorityRejected
 
 SECRET = "correct-administration-secret-value-1234"
@@ -46,12 +50,17 @@ class FakeSynapseAdmin:
                     "room_id": "!room:example.org",
                     "name": "Room",
                     "joined_member_count": 1,
+                    "owner_user_id": "@alice:example.org",
+                    "visibility": "public",
                 }
             ],
         }
 
 
-def make_client() -> tuple[TestClient, FakeSynapseAdmin]:
+def make_client(
+    *,
+    secret_verifier_store: AtomicFileSecretVerifierStore | None = None,
+) -> tuple[TestClient, FakeSynapseAdmin]:
     verifier = encode_scrypt_verifier(SECRET, salt=b"0123456789abcdef", n=2**10, r=8, p=1)
     store = BrokerSessionStore(
         verifier=verifier,
@@ -61,7 +70,11 @@ def make_client() -> tuple[TestClient, FakeSynapseAdmin]:
         absolute_timeout_seconds=600,
     )
     synapse = FakeSynapseAdmin()
-    app = create_app(session_store=store, synapse=synapse)
+    app = create_app(
+        session_store=store,
+        synapse=synapse,
+        secret_verifier_store=secret_verifier_store,
+    )
     return TestClient(app), synapse
 
 
@@ -133,6 +146,8 @@ def test_snapshot_requires_exact_bearer_scheme_and_calls_only_typed_adapter():
     assert response.status_code == 200
     assert response.json()["users"][0]["user_id"] == "@alice:example.org"
     assert response.json()["rooms"][0]["room_id"] == "!room:example.org"
+    assert response.json()["rooms"][0]["owner_user_id"] == "@alice:example.org"
+    assert response.json()["rooms"][0]["visibility"] == "public"
     assert synapse.snapshot_calls == 1
     assert token not in response.text
     assert_security_headers(response)
@@ -271,3 +286,93 @@ def test_upstream_authority_rejection_revokes_the_broker_session():
     assert rejected.status_code == 401
     assert replay.status_code == 401
     assert rejected.json() == {"error": "administration session is invalid or expired"}
+
+
+def test_capabilities_are_authenticated_and_advertise_only_configured_rotation(tmp_path):
+    unavailable, _ = make_client()
+    denied = unavailable.get("/_hypha/admin/v1/capabilities")
+    assert denied.status_code == 401
+    token = authenticate(unavailable)
+    legacy = unavailable.get(
+        "/_hypha/admin/v1/capabilities",
+        headers={"authorization": f"Bearer {token}"},
+    )
+    assert legacy.status_code == 200
+    assert legacy.json() == {"contract_version": 1, "features": []}
+
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    verifier_store = AtomicFileSecretVerifierStore(str(state / "operator-secret.verifier"))
+    verifier_store.load_or_initialize(
+        encode_scrypt_verifier(SECRET, salt=b"0123456789abcdef", n=2**10, r=8, p=1)
+    )
+    configured, _ = make_client(secret_verifier_store=verifier_store)
+    configured_token = authenticate(configured)
+    capabilities = configured.get(
+        "/_hypha/admin/v1/capabilities",
+        headers={"authorization": f"Bearer {configured_token}"},
+    )
+    assert capabilities.status_code == 200
+    assert capabilities.json() == {
+        "contract_version": 1,
+        "features": ["secret_rotation"],
+    }
+
+
+def test_rotation_persists_verifier_revokes_sessions_and_returns_no_secret(tmp_path):
+    replacement = "replacement-administration-secret-value-5678"
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    verifier_path = state / "operator-secret.verifier"
+    verifier_store = AtomicFileSecretVerifierStore(str(verifier_path))
+    verifier_store.load_or_initialize(
+        encode_scrypt_verifier(SECRET, salt=b"0123456789abcdef", n=2**10, r=8, p=1)
+    )
+    client, _ = make_client(secret_verifier_store=verifier_store)
+    token = authenticate(client)
+    headers = {"authorization": f"Bearer {token}"}
+
+    invalid = client.post(
+        "/_hypha/admin/v1/secret/rotate",
+        headers=headers,
+        json={"new_secret": replacement, "confirmation": "wrong"},
+    )
+    rotated = client.post(
+        "/_hypha/admin/v1/secret/rotate",
+        headers=headers,
+        json={"new_secret": replacement, "confirmation": "rotate_admin_secret"},
+    )
+
+    assert invalid.status_code == 400
+    assert rotated.status_code == 204
+    assert rotated.content == b""
+    assert replacement not in verifier_path.read_text(encoding="ascii")
+    assert client.get("/_hypha/admin/v1/snapshot", headers=headers).status_code == 401
+    assert client.post("/_hypha/admin/v1/session", json={"secret": SECRET}).status_code == 401
+    assert client.post(
+        "/_hypha/admin/v1/session",
+        json={"secret": replacement},
+    ).status_code == 201
+
+
+def test_rotation_persistence_failure_keeps_current_authority_and_leaks_nothing():
+    replacement = "replacement-administration-secret-value-5678"
+
+    class FailingStore:
+        def replace(self, _verifier: str) -> None:
+            raise SecretVerifierStoreError()
+
+    client, _ = make_client(secret_verifier_store=FailingStore())  # type: ignore[arg-type]
+    token = authenticate(client)
+    headers = {"authorization": f"Bearer {token}"}
+
+    response = client.post(
+        "/_hypha/admin/v1/secret/rotate",
+        headers=headers,
+        json={"new_secret": replacement, "confirmation": "rotate_admin_secret"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"error": "administration secret rotation is unavailable"}
+    assert replacement not in response.text
+    assert client.get("/_hypha/admin/v1/snapshot", headers=headers).status_code == 200

@@ -184,3 +184,26 @@ def test_failed_authentication_is_rate_limited_per_bounded_source():
 def test_invalid_verifier_configuration_fails_closed_without_accepting_any_secret():
     with pytest.raises(ValueError, match="invalid administration secret verifier"):
         BrokerSessionStore(verifier="not-a-verifier")
+
+
+def test_rotation_replaces_authority_and_revokes_every_existing_session():
+    old_secret = "correct-administration-secret-value-1234"
+    new_secret = "replacement-administration-secret-value-5678"
+    store = make_store(secret=old_secret, tokens=Tokens())
+    prior = store.authenticate(old_secret, source="192.0.2.1")
+    replacement = encode_scrypt_verifier(
+        new_secret,
+        salt=b"fedcba9876543210",
+        n=2**10,
+        r=8,
+        p=1,
+    )
+
+    store.rotate(replacement)
+
+    with pytest.raises(AuthenticationRejected):
+        store.authorize(prior.session_token)
+    with pytest.raises(AuthenticationRejected):
+        store.authenticate(old_secret, source="192.0.2.1")
+    grant = store.authenticate(new_secret, source="192.0.2.2")
+    assert grant.session_token

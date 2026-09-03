@@ -123,6 +123,9 @@ def _configuration_rewriter(*, hostname: str, image: str) -> str:
     env_file: /opt/matrix/broker.env
     environment:
       HYPHA_ADMIN_BROKER_SERVICE_USER_ID: '@_hypha_admin_broker:{hostname}'
+      HYPHA_ADMIN_BROKER_SECRET_VERIFIER_PATH: /var/lib/hypha-admin-broker/operator-secret.verifier
+    volumes:
+      - /opt/matrix-data/hypha-admin-broker:/var/lib/hypha-admin-broker
     tmpfs:
       - /tmp:noexec,nosuid,size=16m
     cap_drop:
@@ -250,6 +253,10 @@ def deployment_commands(*, hostname: str, image: str) -> tuple[str, ...]:
         "set -euo pipefail",
         "umask 077",
         "MATRIX_DIR=/opt/matrix",
+        "BROKER_STATE_DIR=/opt/matrix-data/hypha-admin-broker",
+        'mkdir -p "$BROKER_STATE_DIR"',
+        'chown 65532:65532 "$BROKER_STATE_DIR"',
+        'chmod 700 "$BROKER_STATE_DIR"',
         'backup="$MATRIX_DIR/backups/hypha-admin-broker-$(date -u +%Y%m%dT%H%M%SZ)"',
         'mkdir -p "$backup"',
         'cp --preserve=mode,ownership "$MATRIX_DIR/compose.yaml" "$backup/compose.yaml"',

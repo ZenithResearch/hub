@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Added
+
+- Added all-local-user directory visibility and authoritative public-room ownership metadata — administrators can find every account and identify who created each public room, including accounts and rooms without shared membership.
+
 ### Changed
 - Added Hub Monitor to the controlled product surface as a private, read-only view
   of monitored deployments, expected and observed machines, health, release,
@@ -45,6 +49,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   account validation, and ephemeral on-host Docker authentication.
 
 ### Added
+- Added capability-gated Hypha administration-secret rotation with verifier-only atomic persistence on the encrypted Matrix data volume — lets operators rotate broker authority from Hypha, revokes every short-lived administration session, preserves the configured bootstrap verifier as an emergency recovery seed, and never stores or returns the raw replacement secret.
 - Added a fail-closed fresh Synapse backup and isolated-restore gate — creates
   hourly and daily application-consistent multi-volume DLM snapshots with
   PostgreSQL checkpoint/XFS freeze hooks, auto-thaw safety, bounded restore

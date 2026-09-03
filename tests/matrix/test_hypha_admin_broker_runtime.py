@@ -50,3 +50,30 @@ def test_runtime_app_fails_closed_when_authority_configuration_is_missing(missin
         create_runtime_app(configured)
 
     assert str(captured.value) == "Hypha administration broker configuration is invalid"
+
+
+def test_runtime_uses_persisted_verifier_as_authority_after_rotation(tmp_path):
+    configured = environment()
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    verifier_path = state / "operator-secret.verifier"
+    configured["HYPHA_ADMIN_BROKER_SECRET_VERIFIER_PATH"] = str(verifier_path)
+
+    app = create_runtime_app(configured)
+
+    assert app.docs_url is None
+    assert verifier_path.is_file()
+    assert verifier_path.stat().st_mode & 0o777 == 0o600
+    assert SECRET not in verifier_path.read_text(encoding="ascii")
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["relative/verifier", "", "/" + ("x" * 1_024)],
+)
+def test_runtime_rejects_unsafe_verifier_paths(path: str):
+    configured = environment()
+    configured["HYPHA_ADMIN_BROKER_SECRET_VERIFIER_PATH"] = path
+
+    with pytest.raises(BrokerConfigurationError):
+        create_runtime_app(configured)

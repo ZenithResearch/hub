@@ -2,6 +2,12 @@
 
 Matrix (Synapse) deployment for hub-to-hub communication across the Zenith network.
 
+The tracked homeserver configuration exposes every active local account through
+the authenticated Matrix user directory. This is intentional for the private
+organizational server: users such as `@mgpi` remain discoverable before they
+share a room. The Hypha administration broker separately returns the complete
+account inventory plus every room's creator and public/private visibility.
+
 Two deployment paths — local Docker and AWS EC2. See `DEPLOYMENT_PARITY.md` for the source-of-truth, backup/restore, appservice, and cloud/self-hosted parity contract.
 
 Both paths predate the approved secS-only private boundary. They document a

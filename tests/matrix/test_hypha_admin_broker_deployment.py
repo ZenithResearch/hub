@@ -41,8 +41,18 @@ def test_broker_container_is_internal_non_root_read_only_and_unprivileged():
     broker_block = user_data.split("  hypha-admin-broker:", 1)[1].split("  caddy:", 1)[0]
     assert "ports:" not in broker_block
     assert "/var/run/docker.sock" not in broker_block
-    assert "/opt/matrix-data" not in broker_block
+    assert "/opt/matrix-data/postgres" not in broker_block
+    assert "/opt/matrix-data/synapse" not in broker_block
     assert "matrix-db" not in broker_block
+    assert (
+        "/opt/matrix-data/hypha-admin-broker:/var/lib/hypha-admin-broker"
+        in broker_block
+    )
+    assert (
+        "HYPHA_ADMIN_BROKER_SECRET_VERIFIER_PATH: "
+        "/var/lib/hypha-admin-broker/operator-secret.verifier"
+        in broker_block
+    )
 
 
 def test_broker_runtime_secret_schema_uses_verifier_and_server_only_service_credential():
@@ -155,6 +165,13 @@ def test_existing_instance_is_updated_by_reviewed_ssm_deployer_with_rollback():
     ]:
         assert marker in deployer
     assert deployer.index("/_hypha/admin/v1/ready") < deployer.index('"trap - ERR"')
+    for marker in [
+        "BROKER_STATE_DIR=/opt/matrix-data/hypha-admin-broker",
+        'chown 65532:65532 "$BROKER_STATE_DIR"',
+        'chmod 700 "$BROKER_STATE_DIR"',
+        "HYPHA_ADMIN_BROKER_SECRET_VERIFIER_PATH",
+    ]:
+        assert marker in deployer
     for forbidden in [
         "--secret-value",
         "HYPHA_ADMIN_BROKER_SECRET=",

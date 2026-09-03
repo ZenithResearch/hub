@@ -58,6 +58,11 @@ federation_enabled: ${MATRIX_FEDERATION_ENABLED}
 enable_registration: ${MATRIX_ENABLE_REGISTRATION}
 enable_registration_without_verification: ${MATRIX_ENABLE_REGISTRATION}
 
+# This is a private organizational homeserver: every local account belongs in
+# the signed-in user directory, even before two people share a joined room.
+user_directory:
+  search_all_users: true
+
 # Rate limiting — sensible defaults for hub-scale traffic
 rc_message:
   per_second: 0.2

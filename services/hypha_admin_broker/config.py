@@ -16,6 +16,7 @@ class BrokerConfigurationError(RuntimeError):
 @dataclass(frozen=True, repr=False)
 class BrokerConfiguration:
     secret_verifier: str
+    secret_verifier_path: str | None
     service_user_id: str
     service_password: str
     synapse_origin: str = "http://matrix-synapse:8008"
@@ -32,8 +33,17 @@ class BrokerConfiguration:
         values = {name: environment[name] for name in required}
         if any(not isinstance(value, str) or not value for value in values.values()):
             raise BrokerConfigurationError()
+        verifier_path = environment.get("HYPHA_ADMIN_BROKER_SECRET_VERIFIER_PATH")
+        if verifier_path is not None and (
+            not isinstance(verifier_path, str)
+            or not verifier_path.startswith("/")
+            or not verifier_path.strip()
+            or len(verifier_path) > 1_024
+        ):
+            raise BrokerConfigurationError()
         return cls(
             secret_verifier=values["HYPHA_ADMIN_BROKER_SECRET_VERIFIER"],
+            secret_verifier_path=verifier_path,
             service_user_id=values["HYPHA_ADMIN_BROKER_SERVICE_USER_ID"],
             service_password=values["HYPHA_ADMIN_BROKER_SERVICE_PASSWORD"],
         )
