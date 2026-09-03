@@ -50,6 +50,8 @@ class FakeSynapseAdmin:
                     "room_id": "!room:example.org",
                     "name": "Room",
                     "joined_member_count": 1,
+                    "owner_user_id": "@alice:example.org",
+                    "visibility": "public",
                 }
             ],
         }
@@ -144,6 +146,8 @@ def test_snapshot_requires_exact_bearer_scheme_and_calls_only_typed_adapter():
     assert response.status_code == 200
     assert response.json()["users"][0]["user_id"] == "@alice:example.org"
     assert response.json()["rooms"][0]["room_id"] == "!room:example.org"
+    assert response.json()["rooms"][0]["owner_user_id"] == "@alice:example.org"
+    assert response.json()["rooms"][0]["visibility"] == "public"
     assert synapse.snapshot_calls == 1
     assert token not in response.text
     assert_security_headers(response)

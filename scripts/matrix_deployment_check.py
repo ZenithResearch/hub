@@ -10,7 +10,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +58,11 @@ def main() -> int:
         "matrix.homeserver_signing_key_data",
         'signing_key_path: "/data/${MATRIX_SERVER_NAME}.signing.key"' in homeserver,
         "signing key remains in /data runtime volume",
+    ))
+    tests.append(check(
+        "matrix.homeserver_all_users_searchable",
+        "user_directory:\n  search_all_users: true" in homeserver,
+        "signed-in users can search every local homeserver account",
     ))
 
     compose = (ROOT / "infra/matrix/docker-compose.yml").read_text()

@@ -5,6 +5,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Added
+
+- Added all-local-user directory visibility and authoritative public-room ownership metadata — administrators can find every account and identify who created each public room, including accounts and rooms without shared membership.
+
 ### Changed
 - Added Hub Monitor to the controlled product surface as a private, read-only view
   of monitored deployments, expected and observed machines, health, release,

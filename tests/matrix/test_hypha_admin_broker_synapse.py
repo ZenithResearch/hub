@@ -147,6 +147,8 @@ def test_snapshot_logs_in_server_side_then_uses_typed_admin_paths_and_hides_serv
                             "room_id": "!room:example.org",
                             "name": "Room",
                             "joined_members": 1,
+                            "creator": "@alice:example.org",
+                            "public": True,
                         }
                     ],
                     "total_rooms": 1,
@@ -174,6 +176,8 @@ def test_snapshot_logs_in_server_side_then_uses_typed_admin_paths_and_hides_serv
                 "room_id": "!room:example.org",
                 "name": "Room",
                 "joined_member_count": 1,
+                "owner_user_id": "@alice:example.org",
+                "visibility": "public",
             }
         ],
     }

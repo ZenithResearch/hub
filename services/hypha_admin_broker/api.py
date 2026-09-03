@@ -71,6 +71,8 @@ class RoomPayload(BaseModel):
     room_id: str = Field(min_length=3, max_length=512)
     name: str = Field(max_length=255)
     joined_member_count: int = Field(ge=0)
+    owner_user_id: str | None = Field(default=None, min_length=3, max_length=512)
+    visibility: Literal["public", "private"] | None = None
 
 
 class SnapshotPayload(BaseModel):

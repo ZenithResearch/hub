@@ -569,18 +569,24 @@ class SynapseAdminAdapterClient:
         room_id = value.get("room_id")
         name = value.get("name")
         members = value.get("joined_members")
+        creator = value.get("creator")
+        is_public = value.get("public")
         if (
             not self._valid_matrix_id(room_id, "!")
             or (name is not None and not isinstance(name, str))
             or not isinstance(members, int)
             or isinstance(members, bool)
             or members < 0
+            or not self._valid_matrix_id(creator, "@")
+            or not isinstance(is_public, bool)
         ):
             raise SynapseAdminError()
         return {
             "room_id": room_id,
             "name": name or room_id,
             "joined_member_count": members,
+            "owner_user_id": creator,
+            "visibility": "public" if is_public else "private",
         }
 
     async def _account(self, user_id: str) -> dict[str, object]:
