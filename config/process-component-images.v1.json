@@ -1,0 +1,150 @@
+{
+  "base": {
+    "config_digest": "sha256:2e02f8b636153806132f7afe71eab3eb41611e5464e429cef4f0927d39292e80",
+    "index_digest": "sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c",
+    "manifest_digest": "sha256:228390eced221ad2986a3dd77e10b1accca6ba8ceb36f1572de1b346a337cc1a",
+    "platform": "linux/arm64",
+    "python_version": "3.12.12",
+    "rootfs_diff_ids": [
+      "sha256:100031c9cce7b091dd637c1afa21331c3448979cc0953828264b5868ec3f225e",
+      "sha256:7d9e14b92a5462bc25f27c7225ccbfd919303ad240e3e44ebacfb639f16573a6",
+      "sha256:edc46d2649b4a11db14b483cbc36296c0969b257410236b9e3a777de7d4535a9",
+      "sha256:2d83ed6643723ec4e7194dda5f8fe4b0596096857e5a59dc379a0c8d50587aa2"
+    ],
+    "reference": "docker.io/library/python@sha256:228390eced221ad2986a3dd77e10b1accca6ba8ceb36f1572de1b346a337cc1a"
+  },
+  "components": {
+    "frank": {
+      "package": "frank-executor",
+      "source_commit": "4689ea6315a3d636f365d5511295a41d4c458511",
+      "version": "0.1.0",
+      "wheel_sha256": "6c84adc2f94143cb07da95a2992424f91e6fbdd882799b46bf149c3beeead4ff"
+    },
+    "process-runtime": {
+      "package": "process-runtime",
+      "source_commit": "4bdcd06decd12d72fa03a91797119169e2f30d45",
+      "version": "0.1.0",
+      "wheel_sha256": "743a4757ba5665304e4e5cecff4cd45d99841698777742155e30c82664ee246b"
+    },
+    "service-management": {
+      "package": "service-management",
+      "source_commit": "f49f8d776ad37aa113c2e8ab218ac84b4ad6b55c",
+      "version": "0.1.0",
+      "wheel_sha256": "22574bb2fc9a2f1a06277afc96799f734fd0e565d5893c12e2307e47fb64807d"
+    }
+  },
+  "contracts": {
+    "frank-adapter": {
+      "member": "frank_executor-0.1.0.data/data/share/frank-executor/contracts/integration-adapter-v1.schema.json",
+      "package": "frank-executor",
+      "sha256": "1b8059277396ec5c5b999c211ba73d6c1a63dce019b75ef5f888c4975ec21607"
+    },
+    "frank-runtime": {
+      "member": "frank_executor-0.1.0.data/data/share/frank-executor/contracts/runtime-v1.schema.json",
+      "package": "frank-executor",
+      "sha256": "c3dd6334a9e8e920c27f8c7d9edcef1e8ca1addec21690237fb817f0079c4059"
+    },
+    "runtime-sdk": {
+      "member": "process_runtime_client/runtime-v1.schema.json",
+      "package": "process-runtime",
+      "sha256": "c3dd6334a9e8e920c27f8c7d9edcef1e8ca1addec21690237fb817f0079c4059"
+    }
+  },
+  "native_helpers": [],
+  "production_ready": false,
+  "schema": "hub.component-image-policy.v1",
+  "source_date_epoch": 0,
+  "tuple_manifest_sha256": "33ff468b3fd32ba8aa51e6cbcf91fabc5dbc559f932d0d147ddfc44fd4efc92b",
+  "wheels": [
+    {
+      "filename": "anyio-4.15.1-py3-none-any.whl",
+      "name": "anyio",
+      "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
+      "version": "4.15.1"
+    },
+    {
+      "filename": "attrs-26.1.0-py3-none-any.whl",
+      "name": "attrs",
+      "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+      "version": "26.1.0"
+    },
+    {
+      "filename": "certifi-2026.7.22-py3-none-any.whl",
+      "name": "certifi",
+      "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
+      "version": "2026.7.22"
+    },
+    {
+      "filename": "frank_executor-0.1.0-py3-none-any.whl",
+      "name": "frank-executor",
+      "sha256": "6c84adc2f94143cb07da95a2992424f91e6fbdd882799b46bf149c3beeead4ff",
+      "version": "0.1.0"
+    },
+    {
+      "filename": "h11-0.16.0-py3-none-any.whl",
+      "name": "h11",
+      "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+      "version": "0.16.0"
+    },
+    {
+      "filename": "httpcore-1.0.9-py3-none-any.whl",
+      "name": "httpcore",
+      "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+      "version": "1.0.9"
+    },
+    {
+      "filename": "httpx-0.28.1-py3-none-any.whl",
+      "name": "httpx",
+      "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+      "version": "0.28.1"
+    },
+    {
+      "filename": "idna-3.20-py3-none-any.whl",
+      "name": "idna",
+      "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+      "version": "3.20"
+    },
+    {
+      "filename": "jsonschema-4.26.0-py3-none-any.whl",
+      "name": "jsonschema",
+      "sha256": "d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce",
+      "version": "4.26.0"
+    },
+    {
+      "filename": "jsonschema_specifications-2025.9.1-py3-none-any.whl",
+      "name": "jsonschema-specifications",
+      "sha256": "98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe",
+      "version": "2025.9.1"
+    },
+    {
+      "filename": "process_runtime-0.1.0-py3-none-any.whl",
+      "name": "process-runtime",
+      "sha256": "743a4757ba5665304e4e5cecff4cd45d99841698777742155e30c82664ee246b",
+      "version": "0.1.0"
+    },
+    {
+      "filename": "referencing-0.37.0-py3-none-any.whl",
+      "name": "referencing",
+      "sha256": "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231",
+      "version": "0.37.0"
+    },
+    {
+      "filename": "rpds_py-2026.9.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+      "name": "rpds-py",
+      "sha256": "2693b2728bbcc48d09a981a356954b0c47c53ff25b545856f28a889ea619f69a",
+      "version": "2026.9.1"
+    },
+    {
+      "filename": "service_management-0.1.0-py3-none-any.whl",
+      "name": "service-management",
+      "sha256": "22574bb2fc9a2f1a06277afc96799f734fd0e565d5893c12e2307e47fb64807d",
+      "version": "0.1.0"
+    },
+    {
+      "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+      "name": "typing_extensions",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "version": "4.16.0"
+    }
+  ]
+}

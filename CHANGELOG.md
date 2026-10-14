@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Changed
+
+- Record a fresh installed-artifact tuple with reviewed Runtime/Service transport and Frank result wheels — verifies current cross-component recovery and mismatch rejection while preserving open native/provider/production gates.
+
+
 ### Fixed
 - Invoke Frank's reviewed installed public health command from combined operator checks and return bounded redacted owner/recovery diagnostics — an HTTP endpoint placeholder could not establish executor readiness or identify its failing dependency.
 - Reject malformed or conflicting legacy review evidence, incomplete DAG bindings and altered handler resources, and recheck lease/fence at transaction commit — readiness labels and leases that expired during writes could otherwise permit unsafe success.
@@ -55,6 +60,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   account validation, and ephemeral on-host Docker authentication.
 
 ### Added
+
+- Add pinned component-image contexts, offline hash-locked host bootstrap and bounded OCI integrity checks — make package/source bindings, dependency closure and future image reproduction verifiable before publication.
 
 - Added installed-wheel tuple checks and CI schema mismatch rejection, and enforced admission rollback through the receiver transaction boundary — source imports and routing metadata alone did not prove the deployed bytes or stop direct new-run admission.
 
@@ -267,3 +274,5 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ### Changed
 
 - Reconcile the completion plan with the reusable quest roadmap and reviewed native/Frank source commits — keep the operational plan current while retaining open custody, issuer, installed and workflow qualification gates.
+
+- Record the plan evidence in the changelog and retain the ignored operational packet privately — preserve its source hashes without publishing private execution artifacts or implying qualification.
