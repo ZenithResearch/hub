@@ -11,6 +11,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 
 ### Fixed
+- Verify raw local base identity across Docker config-ID and containerd manifest-ID stores, cross-bind loaded image digests and prohibit runtime pulls — allows the pinned images to build and smoke locally without weakening hash checks or consulting a registry during container startup.
 - Invoke Frank's reviewed installed public health command from combined operator checks and return bounded redacted owner/recovery diagnostics — an HTTP endpoint placeholder could not establish executor readiness or identify its failing dependency.
 - Reject malformed or conflicting legacy review evidence, incomplete DAG bindings and altered handler resources, and recheck lease/fence at transaction commit — readiness labels and leases that expired during writes could otherwise permit unsafe success.
 - Capture actual legacy review artifacts at each commit and compare typed runtime replay, including the final source-bound packet and failed status evidence — mutable packet paths and differing failure-output models otherwise hide migration errors.
@@ -60,6 +61,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   account validation, and ephemeral on-host Docker authentication.
 
 ### Added
+
+- Commit reviewed component-image preparation as `f423800` — retain reproducible package contexts and integrity checks while actual image builds and qualification remain pending.
 
 - Add pinned component-image contexts, offline hash-locked host bootstrap and bounded OCI integrity checks — make package/source bindings, dependency closure and future image reproduction verifiable before publication.
 

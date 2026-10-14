@@ -317,8 +317,7 @@ def layer_diff_id(source, media, total):
         if stream is not source: stream.close()
 
 
-def verify_oci(path, policy, owner):
-    require(owner in OWNERS, 'Unknown component owner')
+def _read_oci(path, *, base_export=False):
     require(path.is_file() and not path.is_symlink() and path.stat().st_size <= MAX_OCI_BYTES
             and path.stat().st_size % 512 == 0, 'Oversized/unsafe OCI archive')
     try:
@@ -373,25 +372,138 @@ def verify_oci(path, policy, owner):
             computed.append(diff_id); total += size
         descriptors = [index['manifests'][0], manifest['config'], *layers]
         expected_files = {'oci-layout', 'index.json'} | {'blobs/sha256/'+d['digest'][7:] for d in descriptors}
+        if base_export and 'manifest.json' in members:
+            sidecar = json.loads(read('manifest.json'))
+            require(type(sidecar) is list and len(sidecar) == 1 and type(sidecar[0]) is dict
+                    and set(sidecar[0]) == {'Config', 'Layers', 'RepoTags'}
+                    and sidecar[0]['RepoTags'] in (None, [])
+                    and sidecar[0]['Config'] == 'blobs/sha256/'+manifest['config']['digest'][7:]
+                    and sidecar[0]['Layers'] == ['blobs/sha256/'+layer['digest'][7:] for layer in layers],
+                    'Docker save sidecar differs from validated OCI graph')
+            expected_files.add('manifest.json')
         require({name for name, member in members.items() if member.isfile()} == expected_files,
                 'Unreferenced/unadmitted OCI data')
         require(all(name in ('', 'blobs', 'blobs/sha256') for name, member in members.items() if member.isdir()),
                 'Unadmitted OCI directory')
         require(config['architecture'] == 'arm64' and config['os'] == 'linux', 'Wrong image platform')
-        base_layers = policy['base']['rootfs_diff_ids']
-        require(computed[:len(base_layers)] == base_layers, 'Pinned base filesystem changed')
+        receipt = {'manifest_digest': index['manifests'][0]['digest'], 'config_digest': manifest['config']['digest'],
+                'archive_sha256': sha(path), 'layer_digests': [x['digest'] for x in layers],
+                'rootfs_diff_ids': computed, 'uncompressed_layer_bytes': total}
+        return {'receipt': receipt, 'config': config, 'manifest': manifest,
+                'manifest_descriptor': index['manifests'][0]}
+    except (tarfile.TarError, gzip.BadGzipFile, EOFError, zlib.error, KeyError, TypeError, ValueError) as error:
+        if isinstance(error, ImageInputError): raise
+        raise ImageInputError('Malformed OCI/layer archive') from error
+
+
+def _component_config(config, policy, owner):
+    try:
         require(config['config']['Entrypoint'] == entrypoint(owner) and config['config']['Cmd'] == ['--help']
                 and config['config']['User'] == '10001:10001', 'Component entrypoint/user changed')
         require(config['config']['Labels']['io.hub.production-qualified'] == 'false'
                 and config['config']['Labels']['io.hub.native-helpers'] == 'absent'
                 and config['config']['Labels']['org.opencontainers.image.revision'] == policy['components'][owner]['source_commit'],
                 'Image qualification/source boundary changed')
-        return {'manifest_digest': index['manifests'][0]['digest'], 'config_digest': manifest['config']['digest'],
-                'archive_sha256': sha(path), 'layer_digests': [x['digest'] for x in layers],
-                'rootfs_diff_ids': computed, 'uncompressed_layer_bytes': total}
-    except (tarfile.TarError, gzip.BadGzipFile, EOFError, zlib.error, KeyError, TypeError, ValueError) as error:
-        if isinstance(error, ImageInputError): raise
-        raise ImageInputError('Malformed OCI/layer archive') from error
+    except (KeyError, TypeError) as error:
+        raise ImageInputError('Malformed component config') from error
+
+
+def _verified_component(path, policy, owner):
+    require(owner in OWNERS, 'Unknown component owner')
+    data = _read_oci(path)
+    base_layers = policy['base']['rootfs_diff_ids']
+    require(data['receipt']['rootfs_diff_ids'][:len(base_layers)] == base_layers, 'Pinned base filesystem changed')
+    _component_config(data['config'], policy, owner)
+    return data
+
+
+def verify_oci(path, policy, owner):
+    return _verified_component(path, policy, owner)['receipt']
+
+
+def verify_base_export(path, base):
+    data = _read_oci(path, base_export=True)
+    receipt = data['receipt']
+    require(receipt['manifest_digest'] == base['manifest_digest']
+            and receipt['config_digest'] == base['config_digest']
+            and receipt['rootfs_diff_ids'] == base['rootfs_diff_ids'], 'Local base export differs from pinned manifest/config/rootfs')
+    return {**receipt, 'manifest_size': data['manifest_descriptor']['size']}
+
+
+def _inspect_local(docker, reference, output, name):
+    result = subprocess.run([docker, 'image', 'inspect', reference], capture_output=True, timeout=20)
+    require(len(result.stdout)+len(result.stderr) <= MAX_JSON_BYTES, 'Oversized local image inspect')
+    (output/(name+'.stdout')).write_bytes(result.stdout)
+    (output/(name+'.stderr')).write_bytes(result.stderr)
+    (output/(name+'.receipt.json')).write_bytes(canonical({'reference': reference, 'returncode': result.returncode,
+        'stdout_sha256': sha(output/(name+'.stdout')), 'stderr_sha256': sha(output/(name+'.stderr'))})+b'\n')
+    if result.returncode:
+        require(result.returncode == 1, 'Local image inspect failed')
+        return None
+    try: inspected = json.loads(result.stdout)
+    except (TypeError, ValueError) as error: raise ImageInputError('Malformed local image inspect') from error
+    require(type(inspected) is list and len(inspected) == 1 and type(inspected[0]) is dict, 'Ambiguous local image identity')
+    return inspected[0]
+
+
+def _screen_local(inspected, manifest_digest, config_digest, diff_ids):
+    require(inspected.get('Architecture') == 'arm64' and inspected.get('Os') == 'linux'
+            and inspected.get('RootFS') == {'Type': 'layers', 'Layers': diff_ids}, 'Local image platform/rootfs mismatch')
+    identity = inspected.get('Id'); descriptor = inspected.get('Descriptor')
+    require(identity in (manifest_digest, config_digest), 'Local image identity is not an admitted digest')
+    if identity == manifest_digest or descriptor is not None:
+        require(type(descriptor) is dict and descriptor.get('digest') == manifest_digest
+                and descriptor.get('mediaType') == 'application/vnd.oci.image.manifest.v1+json'
+                and type(descriptor.get('size')) is int and 0 < descriptor['size'] <= MAX_JSON_BYTES,
+                'Local manifest descriptor mismatch')
+    return 'containerd-manifest-id' if identity == manifest_digest else 'classic-config-id'
+
+
+def verify_preloaded_base(base, output, docker):
+    inspected = _inspect_local(docker, base['reference'], output, 'base.inspect')
+    require(inspected is not None, 'Pinned base not preloaded')
+    mode = _screen_local(inspected, base['manifest_digest'], base['config_digest'], base['rootfs_diff_ids'])
+    aliases = {prefix+'@'+base['manifest_digest'] for prefix in ('python', 'library/python', 'docker.io/library/python')}
+    require(type(inspected.get('RepoDigests')) is list and all(type(item) is str for item in inspected['RepoDigests'])
+            and aliases.intersection(inspected['RepoDigests']),
+            'Local base repository digest mismatch')
+    receipt = {'mode': mode, 'local_image_id': inspected['Id'], 'manifest_digest': base['manifest_digest'],
+               'config_digest': base['config_digest'], 'rootfs_diff_ids': base['rootfs_diff_ids'],
+               'raw_local_export_verified': False}
+    if mode == 'containerd-manifest-id':
+        path = output/'base.local-save.tar'
+        command = [docker, 'image', 'save', '--platform', base['platform'], '--output', str(path), base['reference']]
+        with (output/'base.local-save.log').open('xb') as log:
+            subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=120)
+        receipt.update(verify_base_export(path, base))
+        require(inspected['Descriptor']['size'] == receipt['manifest_size'],
+                'Local base manifest descriptor size mismatch')
+        receipt['raw_local_export_verified'] = True
+    (output/'base.verification.json').write_bytes(canonical(receipt)+b'\n')
+    return receipt
+
+
+def select_loaded_image(path, policy, owner, expected, output, docker):
+    # Rebind the selector to exact validated raw archive bytes. Never select a
+    # tag or treat inspect's summary as a config SHA or manifest substitute.
+    data = _verified_component(path, policy, owner)
+    actual = data['receipt']
+    require(actual == expected, 'Loaded image receipt differs from validated archive')
+    for position, reference in enumerate((actual['manifest_digest'], actual['config_digest'])):
+        inspected = _inspect_local(docker, reference, output, owner+'.local-inspect-'+str(position))
+        if inspected is None: continue
+        mode = _screen_local(inspected, actual['manifest_digest'], actual['config_digest'], actual['rootfs_diff_ids'])
+        raw_config = data['config']['config']; local_config = inspected.get('Config')
+        require(type(local_config) is dict and all(local_config.get(key) == raw_config.get(key)
+                for key in ('Entrypoint', 'Cmd', 'User', 'Labels', 'Env', 'WorkingDir')), 'Loaded image config summary contradicts raw archive')
+        if inspected.get('Descriptor') is not None:
+            require(inspected['Descriptor']['size'] == data['manifest_descriptor']['size'], 'Loaded image manifest size mismatch')
+        result = {'mode': mode, 'local_image_id': inspected['Id'], 'archive_sha256': actual['archive_sha256'],
+                  'manifest_digest': actual['manifest_digest'], 'config_digest': actual['config_digest'],
+                  'rootfs_diff_ids': actual['rootfs_diff_ids'], 'raw_archive_reverified': True}
+        (output/(owner+'.local-image.json')).write_bytes(canonical(result)+b'\n')
+        return result
+    raise ImageInputError('Validated component image is absent from local store')
 
 
 def build_images(root, expected_sha, output, docker='docker'):
@@ -400,11 +512,8 @@ def build_images(root, expected_sha, output, docker='docker'):
     policy = manifest['policy']
     # Coordinate/preload this exact public base outside this command. No pull,
     # daemon startup, builder creation, registry login or push occurs here.
-    base = subprocess.run([docker, 'image', 'inspect', policy['base']['reference']], capture_output=True, check=True, timeout=20)
-    inspected = json.loads(base.stdout)
-    require(len(inspected) == 1 and inspected[0]['Id'] == policy['base']['config_digest']
-            and inspected[0]['Architecture'] == 'arm64' and inspected[0]['Os'] == 'linux', 'Preloaded base mismatch')
     output.mkdir(mode=0o700)
+    base = verify_preloaded_base(policy['base'], output, docker)
     tooling = {}
     for name, command in [('engine', [docker, 'version', '--format', '{{json .Server}}']),
                           ('buildx', [docker, 'buildx', 'version'])]:
@@ -430,8 +539,9 @@ def build_images(root, expected_sha, output, docker='docker'):
         require(records[0] == records[1], 'Repeated image exports differ; no publication')
         with (output/(owner+'.load.log')).open('wb') as log:
             subprocess.run([docker, 'load', '--input', str(output/(owner+'-1.oci.tar'))], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=120)
-        image_id = records[0]['config_digest']
-        container = [docker, 'run', '--rm', '--network=none', '--read-only', '--cap-drop=ALL',
+        selected = select_loaded_image(output/(owner+'-1.oci.tar'), policy, owner, records[0], output, docker)
+        image_id = selected['local_image_id']
+        container = [docker, 'run', '--rm', '--pull=never', '--network=none', '--read-only', '--cap-drop=ALL',
             '--security-opt=no-new-privileges', '--tmpfs', '/data:uid=10001,gid=10001,mode=0700', '--tmpfs', '/tmp:mode=1777',
             '--entrypoint', '/opt/component/bin/python', image_id, '-I', '-B']
         result = subprocess.run(container+['/opt/image-tools/smoke.py', owner], capture_output=True, check=True, timeout=60)
@@ -448,11 +558,12 @@ def build_images(root, expected_sha, output, docker='docker'):
         resources = {package['name']: {name: digest for name, digest in package['members'].items() if '/resources/' in name}
                      for package in build_inputs['packages'] if any('/resources/' in n for n in package['members'])}
         images[owner] = {**records[0], 'source_commit': policy['components'][owner]['source_commit'],
+            'local_image_selection': selected,
             'reproduced_identically': True, 'smoke': smoke, 'resource_inventory': resources,
             'installed_inventory_sha256': sha(output/(owner+'.installed.json')),
             'build_input_sha256': sha(root/owner/'build-inputs.json')}
     report = {'schema': 'hub.component-image-artifacts.v1', 'context_manifest_sha256': expected_sha,
-              'policy': policy, 'toolchain': tooling, 'images': images,
+              'policy': policy, 'toolchain': tooling, 'base_verification': base, 'images': images,
               'publication': 'local artifacts only; never pushed', 'production_ready': False}
     (output/'image-manifest.json').write_bytes(canonical(report)+b'\n')
     return report

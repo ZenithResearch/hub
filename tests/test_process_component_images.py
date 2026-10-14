@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 import tarfile
+import subprocess
 from unittest.mock import patch
 import zipfile
 
@@ -14,6 +15,7 @@ import pytest
 from scripts.process_component_images import (
     ImageInputError, build_images, canonical, entrypoint, prepare_contexts, validate_prepared,
     verify_oci, wheel_inventory, HOST_TOOLS,
+    verify_base_export, select_loaded_image,
 )
 
 
@@ -208,12 +210,12 @@ def layer_tar(number):
 
 def image_archive(path, policy, *, mutate=None, corrupt=False, false_diff_ids=False,
                   layer_bytes=None, media='application/vnd.oci.image.layer.v1.tar+gzip', encoded=None,
-                  descriptor_mutate=None, archive_extra=None):
+                  descriptor_mutate=None, archive_extra=None, owner='frank'):
     layers = [layer_tar(n) for n in range(4)] if layer_bytes is None else layer_bytes
     actual_diff_ids = ['sha256:'+sha(raw) for raw in layers]
     claims = ['sha256:'+str(n)*64 for n in range(4)] if false_diff_ids else actual_diff_ids
     policy['base']['rootfs_diff_ids'] = claims
-    owner='frank'; config={'architecture':'arm64','os':'linux',
+    config={'architecture':'arm64','os':'linux',
         'rootfs':{'type':'layers','diff_ids':claims},
         'config':{'Entrypoint':entrypoint(owner),'Cmd':['--help'],'User':'10001:10001',
                   'Labels':{'io.hub.production-qualified':'false','io.hub.native-helpers':'absent',
@@ -345,3 +347,244 @@ def test_nonzero_hidden_oci_trailer_is_rejected(inputs):
     path=inputs[3]/'outer-trailer.tar';image_archive(path,inputs[0])
     with path.open('ab') as output: output.write(b'hidden'+b'\0'*506)
     with pytest.raises(ImageInputError,match='trailing OCI'): verify_oci(path,inputs[0],'frank')
+
+
+def archive_files(path):
+    with tarfile.open(path,'r:') as archive:
+        return {m.name:archive.extractfile(m).read() for m in archive if m.isfile()}
+
+
+def write_archive_files(path,files):
+    with tarfile.open(path,'w') as archive:
+        for name,raw in files.items():
+            member=tarfile.TarInfo(name);member.size=len(raw);archive.addfile(member,io.BytesIO(raw))
+
+
+@pytest.fixture
+def local_base(inputs):
+    policy,_,_,directory=inputs
+    path=directory/'base-save.tar';image_archive(path,policy)
+    inspect=bind_base_archive(path,policy)
+    return policy,path,inspect
+
+
+def bind_base_archive(path,policy):
+    files=archive_files(path);index=json.loads(files['index.json']);descriptor=index['manifests'][0]
+    manifest=json.loads(files['blobs/sha256/'+descriptor['digest'][7:]])
+    config=json.loads(files['blobs/sha256/'+manifest['config']['digest'][7:]])
+    files['manifest.json']=canonical([{'Config':'blobs/sha256/'+manifest['config']['digest'][7:],
+        'Layers':['blobs/sha256/'+row['digest'][7:] for row in manifest['layers']],'RepoTags':None}])
+    write_archive_files(path,files)
+    policy['base'].update(manifest_digest=descriptor['digest'],config_digest=manifest['config']['digest'],
+                          reference='docker.io/library/python@'+descriptor['digest'])
+    inspect={'Id':descriptor['digest'],'Descriptor':descriptor,'RepoDigests':['python@'+descriptor['digest']],
+             'Architecture':'arm64','Os':'linux','RootFS':{'Type':'layers','Layers':config['rootfs']['diff_ids']},
+             'Config':config['config']}
+    return inspect
+
+
+class ReachedFirstBuild(RuntimeError):
+    pass
+
+
+def base_build_replay(inputs,local_base,*,inspected=None,save_returncode=0,calls=None):
+    policy,archive,actual=local_base
+    prepare(inputs);root=inputs[3]/'prepared';digest=sha((root/'contexts.json').read_bytes())
+    calls=[] if calls is None else calls
+    def docker(command,**kwargs):
+        calls.append(command)
+        if command[1:3]==['image','inspect']:
+            return subprocess.CompletedProcess(command,0,canonical([actual if inspected is None else inspected]),b'')
+        if command[1:3]==['image','save']:
+            target=Path(command[command.index('--output')+1]);target.write_bytes(archive.read_bytes())
+            if save_returncode:raise subprocess.CalledProcessError(save_returncode,command)
+            return subprocess.CompletedProcess(command,0,b'',b'')
+        if command[1:3]==['buildx','build']:raise ReachedFirstBuild()
+        if command[1]=='version' or command[1:3]==['buildx','version']:
+            return subprocess.CompletedProcess(command,0,b'fixture-tool-version',b'')
+        raise AssertionError(command)
+    with patch('scripts.process_component_images.subprocess.run',side_effect=docker):
+        build_images(root,digest,inputs[3]/'images')
+    return calls
+
+
+@pytest.mark.parametrize('mode',['containerd','classic'])
+def test_public_build_accepts_exact_local_base_store_modes(inputs,local_base,mode):
+    inspected=json.loads(canonical(local_base[2]))
+    if mode=='classic':
+        inspected['Id']=local_base[0]['base']['config_digest'];inspected.pop('Descriptor')
+    with pytest.raises(ReachedFirstBuild):base_build_replay(inputs,local_base,inspected=inspected)
+    output=inputs[3]/'images'
+    if mode=='containerd':
+        assert (output/'base.local-save.tar').read_bytes()==local_base[1].read_bytes()
+        receipt=json.loads((output/'base.verification.json').read_bytes())
+        assert receipt['raw_local_export_verified'] is True
+        assert receipt['manifest_digest']==local_base[0]['base']['manifest_digest']
+    else:
+        assert json.loads((output/'base.verification.json').read_bytes())['mode']=='classic-config-id'
+
+
+@pytest.mark.parametrize('change',['id','descriptor','descriptor-size','platform','rootfs','repository','missing-descriptor',
+    'missing-blob','tampered-config','sidecar-config','sidecar-layers','sidecar-tag','extra-file','partial-save','save-error'])
+def test_public_base_failures_precede_every_build_load_and_run(inputs,local_base,change):
+    policy,path,inspected=local_base
+    inspected=json.loads(canonical(inspected));files=archive_files(path)
+    if change=='id':inspected['Id']='sha256:'+'0'*64
+    elif change=='descriptor':inspected['Descriptor']['digest']='sha256:'+'0'*64
+    elif change=='descriptor-size':inspected['Descriptor']['size']+=1
+    elif change=='platform':inspected['Architecture']='amd64'
+    elif change=='rootfs':inspected['RootFS']['Layers']=[]
+    elif change=='repository':inspected['RepoDigests']=['unadmitted@'+policy['base']['manifest_digest']]
+    elif change=='missing-descriptor':inspected.pop('Descriptor')
+    elif change=='missing-blob':
+        manifest=json.loads(files['blobs/sha256/'+policy['base']['manifest_digest'][7:]])
+        del files['blobs/sha256/'+manifest['layers'][0]['digest'][7:]]
+    elif change=='tampered-config':files['blobs/sha256/'+policy['base']['config_digest'][7:]]+=b'changed'
+    elif change.startswith('sidecar-'):
+        sidecar=json.loads(files['manifest.json'])
+        if change=='sidecar-config':sidecar[0]['Config']='wrong-config'
+        elif change=='sidecar-layers':sidecar[0]['Layers'].reverse()
+        else:sidecar[0]['RepoTags']=['unadmitted:latest']
+        files['manifest.json']=canonical(sidecar)
+    elif change=='extra-file':files['unadmitted']=b'fixture'
+    write_archive_files(path,files)
+    if change=='partial-save':path.write_bytes(path.read_bytes()[:700])
+    calls=[]
+    with pytest.raises((ImageInputError,subprocess.CalledProcessError)):
+        base_build_replay(inputs,local_base,inspected=inspected,save_returncode=1 if change=='save-error' else 0,calls=calls)
+    assert not any(c[1:3] in (['buildx','build'],['load','--input']) or c[1]=='run' for c in calls)
+    assert not (inputs[3]/'images/image-manifest.json').exists()
+    assert not (inputs[3]/'images/base.verification.json').exists()
+
+
+@pytest.mark.parametrize('change',['platform','rootfs','manifest-pin','config-pin'])
+def test_local_raw_base_semantics_and_pins_are_required(inputs,change):
+    policy=inputs[0];path=inputs[3]/'local-base.tar'
+    def mutate(config):
+        if change=='platform':config['architecture']='amd64'
+        elif change=='rootfs':config['rootfs']['diff_ids'].reverse()
+    image_archive(path,policy,mutate=mutate);bind_base_archive(path,policy)
+    if change=='manifest-pin':policy['base']['manifest_digest']='sha256:'+'0'*64
+    elif change=='config-pin':policy['base']['config_digest']='sha256:'+'0'*64
+    with pytest.raises(ImageInputError):verify_base_export(path,policy['base'])
+
+
+@pytest.mark.parametrize('mode',['containerd','classic'])
+def test_loaded_component_selects_only_raw_archive_bound_local_digest(inputs,mode):
+    policy=inputs[0];path=inputs[3]/'component.tar';image_archive(path,policy)
+    files=archive_files(path);desc=json.loads(files['index.json'])['manifests'][0]
+    manifest=json.loads(files['blobs/sha256/'+desc['digest'][7:]])
+    raw=json.loads(files['blobs/sha256/'+manifest['config']['digest'][7:]])
+    inspected={'Id':desc['digest'],'Descriptor':desc,'Architecture':'arm64','Os':'linux',
+        'RootFS':{'Type':'layers','Layers':raw['rootfs']['diff_ids']},'Config':raw['config']}
+    if mode=='classic':inspected['Id']=manifest['config']['digest'];inspected.pop('Descriptor')
+    receipt=verify_oci(path,policy,'frank');output=inputs[3]/'selection';output.mkdir();calls=[]
+    def inspect(command,**kwargs):
+        calls.append(command)
+        if mode=='classic' and command[-1]==receipt['manifest_digest']:
+            return subprocess.CompletedProcess(command,1,b'[]',b'local image absent')
+        return subprocess.CompletedProcess(command,0,canonical([inspected]),b'')
+    with patch('scripts.process_component_images.subprocess.run',side_effect=inspect):
+        selected=select_loaded_image(path,policy,'frank',receipt,output,'docker')
+    assert selected['local_image_id']==inspected['Id'] and selected['raw_archive_reverified']
+    assert all(c[1:3]==['image','inspect'] and c[-1] in (receipt['manifest_digest'],receipt['config_digest']) for c in calls)
+
+
+@pytest.mark.parametrize('change',['tag','manifest','config','descriptor-size','platform','rootfs','entrypoint','labels','env',
+    'missing','ambiguous','receipt-manifest','receipt-config','receipt-tag','archive-missing-blob'])
+def test_loaded_component_mismatch_never_runs_or_pulls(inputs,change):
+    policy=inputs[0];path=inputs[3]/'component.tar';image_archive(path,policy)
+    files=archive_files(path);desc=json.loads(files['index.json'])['manifests'][0]
+    manifest=json.loads(files['blobs/sha256/'+desc['digest'][7:]])
+    raw=json.loads(files['blobs/sha256/'+manifest['config']['digest'][7:]])
+    inspected={'Id':desc['digest'],'Descriptor':desc,'Architecture':'arm64','Os':'linux',
+        'RootFS':{'Type':'layers','Layers':raw['rootfs']['diff_ids']},'Config':raw['config']}
+    receipt=verify_oci(path,policy,'frank')
+    if change=='tag':inspected['Id']='unadmitted:latest'
+    elif change=='manifest':inspected['Descriptor']['digest']='sha256:'+'0'*64
+    elif change=='config':inspected['Id']='sha256:'+'0'*64
+    elif change=='descriptor-size':inspected['Descriptor']['size']+=1
+    elif change=='platform':inspected['Os']='windows'
+    elif change=='rootfs':inspected['RootFS']['Layers']=[]
+    elif change=='entrypoint':inspected['Config']['Entrypoint']=['unadmitted']
+    elif change=='labels':inspected['Config']['Labels']['io.hub.production-qualified']='true'
+    elif change=='env':inspected['Config']['Env']=['UNADMITTED=fixture']
+    elif change=='receipt-manifest':receipt['manifest_digest']='sha256:'+'0'*64
+    elif change=='receipt-config':receipt['config_digest']='sha256:'+'0'*64
+    elif change=='receipt-tag':receipt['tag']='unadmitted:latest'
+    elif change=='archive-missing-blob':
+        del files['blobs/sha256/'+manifest['layers'][0]['digest'][7:]];write_archive_files(path,files)
+    output=inputs[3]/'selection';output.mkdir();calls=[]
+    def inspect(command,**kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command,1 if change=='missing' else 0,
+            b'[]' if change=='missing' else canonical([inspected,inspected] if change=='ambiguous' else [inspected]),b'')
+    with patch('scripts.process_component_images.subprocess.run',side_effect=inspect):
+        with pytest.raises(ImageInputError):select_loaded_image(path,policy,'frank',receipt,output,'docker')
+    assert all(c[1:3]==['image','inspect'] for c in calls)
+    assert not (output/'frank.local-image.json').exists()
+
+
+def test_component_archive_does_not_accept_docker_save_sidecar(inputs,local_base):
+    with pytest.raises(ImageInputError,match='Unreferenced'):
+        verify_oci(local_base[1],inputs[0],'frank')
+
+
+@pytest.mark.parametrize('mode,failure',[('containerd',None),('classic',None),
+    ('containerd','tag'),('containerd','config-summary'),('containerd','absent')])
+def test_public_build_flow_uses_only_validated_local_image_and_never_pulls(inputs,local_base,mode,failure):
+    # The Docker responses here are synthetic CLI contract fixtures. Actual
+    # component builds and owner smoke require a separate engine receipt.
+    policy,base_archive,base_inspect=local_base
+    if mode=='classic':base_inspect['Id']=policy['base']['config_digest'];base_inspect.pop('Descriptor')
+    prepare(inputs);root=inputs[3]/'prepared';digest=sha((root/'contexts.json').read_bytes())
+    output=inputs[3]/'images';calls=[];loaded={}
+    def docker(command,**kwargs):
+        calls.append(command)
+        if command[1:3]==['image','inspect']:
+            if command[-1]==policy['base']['reference']:body=base_inspect
+            elif command[-1] in loaded:body=json.loads(canonical(loaded[command[-1]]))
+            else:return subprocess.CompletedProcess(command,1,b'[]',b'local image absent')
+            if command[-1]!=policy['base']['reference']:
+                if failure=='absent':return subprocess.CompletedProcess(command,1,b'[]',b'local image absent')
+                if failure=='tag':body['Id']='unadmitted:latest'
+                elif failure=='config-summary':body['Config']['Entrypoint']=['unadmitted']
+            return subprocess.CompletedProcess(command,0,canonical([body]),b'')
+        if command[1:3]==['image','save']:
+            Path(command[command.index('--output')+1]).write_bytes(base_archive.read_bytes())
+        elif command[1:3]==['buildx','build']:
+            destination=next(p[5:] for p in command[command.index('--output')+1].split(',') if p.startswith('dest='))
+            image_archive(Path(destination),policy,owner=Path(command[-1]).name)
+        elif command[1]=='load':
+            files=archive_files(Path(command[-1]));desc=json.loads(files['index.json'])['manifests'][0]
+            manifest=json.loads(files['blobs/sha256/'+desc['digest'][7:]])
+            raw=json.loads(files['blobs/sha256/'+manifest['config']['digest'][7:]])
+            row={'Id':desc['digest'],'Descriptor':desc,'Architecture':'arm64','Os':'linux',
+                 'RootFS':{'Type':'layers','Layers':raw['rootfs']['diff_ids']},'Config':raw['config']}
+            if mode=='classic':row['Id']=manifest['config']['digest'];row.pop('Descriptor')
+            loaded[row['Id']]=row
+        elif command[1]=='run':
+            assert '--pull=never' in command and '--network=none' in command and '--read-only' in command
+            assert '--cap-drop=ALL' in command and '--security-opt=no-new-privileges' in command
+            image=command[command.index('--entrypoint')+2]
+            assert image in loaded and image.startswith('sha256:')
+            if '/opt/image-tools/smoke.py' in command:
+                return subprocess.CompletedProcess(command,0,canonical({'component':command[-1],
+                    'production_default_deny':True,'external_sends':0,'production_qualified':False}),b'')
+            return subprocess.CompletedProcess(command,0,b'{"synthetic_inventory_fixture":true}',b'')
+        elif not (command[1]=='version' or command[1:3]==['buildx','version']):raise AssertionError(command)
+        return subprocess.CompletedProcess(command,0,b'synthetic-tool-version',b'')
+    with patch('scripts.process_component_images.subprocess.run',side_effect=docker):
+        if failure:
+            with pytest.raises(ImageInputError):build_images(root,digest,output)
+        else:
+            result=build_images(root,digest,output)
+            assert set(result['images'])=={'frank','process-runtime','service-management'}
+            assert all(row['local_image_selection']['mode']==('classic-config-id' if mode=='classic' else 'containerd-manifest-id')
+                       for row in result['images'].values())
+    if failure:
+        assert not any(c[1]=='run' for c in calls)
+        assert not (output/'image-manifest.json').exists()
+    else:
+        assert len([c for c in calls if c[1]=='run'])==6
+        assert (output/'image-manifest.json').exists()
