@@ -15,6 +15,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 
 ### Changed
+- Recorded reviewed process composition and legacy containment source separately from operator-private evidence — public repository checks remain clean while exact local request and qualification packets are preserved.
 - Added Hub Monitor to the controlled product surface as a private, read-only view
   of monitored deployments, expected and observed machines, health, release,
   freshness, and drift. Monitoring inclusion and expected placement are explicitly
@@ -262,3 +263,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ### Added
 - `docs/gateway-http.md` — reference doc covering startup (full stack vs. standalone), all routes, env vars, middleware, and source layout.
+
+### Changed
+
+- Reconcile the completion plan with the reusable quest roadmap and reviewed native/Frank source commits — keep the operational plan current while retaining open custody, issuer, installed and workflow qualification gates.
