@@ -18,7 +18,7 @@ claims a step is complete before cases accepts the outputs.
 
 The cases service exposes first-class observability records:
 
-- `case_runs`: one execution attempt for a case.
+- `case_runs`: one immutable-identity execution attempt for a case; every retry gets a new row.
 - `step_runs`: one execution attempt for a process step.
 - `execution_spans`: nested task or tool scopes inside a step.
 - `execution_events`: append-only timeline records.
@@ -105,7 +105,7 @@ secret environment values.
 
 ## Native Execution
 
-The initial native runner performs:
+The frozen personal-review resource selects these handlers. The runner schedules only dependency-satisfied work:
 
 - Step 1: materialize review assets and commit root review outputs.
 - Step 2: call `stt-http` directly and commit transcript outputs.
@@ -115,7 +115,4 @@ The initial native runner performs:
 - Step 8: update review status through the gateway using the repository-owned Review Case Automaton contract in `docs/operations/review-case-automaton.md`. Ready packets become public `processed` with automaton status `succeeded`; degraded/non-ready packets become terminal public `failed` with automaton status `failed`. Step 8 does not retry, rerun, or enter a fix loop.
 - Step 9: write a daily-note compatibility artifact.
 
-Frank startup scans open or in-progress cases with
-`runtime.mode = native_case_pipeline` and schedules incomplete native pipelines
-again. Step and run idempotency keys prevent duplicate run/step records during
-retry.
+Frank startup and watchdog inspect incomplete native Cases and acquire an atomic lease before scheduling. Active leases prevent duplicate runners. Expiry permits a distinct attempt only when frozen eligibility and effect evidence permit safe recovery. Unknown or observed-but-uncommitted external outcomes require reconciliation. Exact claim replay preserves one attempt; retries never reuse terminated attempts.

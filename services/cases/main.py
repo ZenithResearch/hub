@@ -24,19 +24,22 @@ import os
 import sqlite3
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import asyncio
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .contract import ProcessContractError, compile_process_contract
+from .execution_contract import errors as contract_errors, execution_errors, state_errors
+from . import execution_store
 
 log = logging.getLogger("cases")
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "info").upper())
@@ -80,6 +83,67 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 
+_request_context: ContextVar[dict[str, Any]] = ContextVar("legacy_request", default={})
+
+
+def _request_case(conn, path):
+    parts = path.strip("/").split("/")
+    if len(parts) < 2:
+        return None, None
+    table = {"case-runs": "case_runs", "step-runs": "step_runs", "execution-spans": "execution_spans"}.get(parts[0])
+    if parts[0] == "cases":
+        return conn.execute("SELECT * FROM cases WHERE id=?", (parts[1],)).fetchone(), None
+    if table:
+        target = conn.execute(f"SELECT * FROM {table} WHERE id=?", (parts[1],)).fetchone()
+        if target:
+            run_id = target["id"] if table == "case_runs" else target["case_run_id"]
+            run = conn.execute("SELECT * FROM case_runs WHERE id=?", (run_id,)).fetchone()
+            return conn.execute("SELECT * FROM cases WHERE id=?", (run["case_id"],)).fetchone(), run_id
+    return None, None
+
+
+@contextmanager
+def request_db():
+    conn = get_db()
+    context = _request_context.get()
+    admitted_claim = None
+    finishing_claim = False
+    try:
+        with conn:
+            if context.get("method") in {"POST", "PUT", "PATCH", "DELETE"}:
+                conn.execute("BEGIN IMMEDIATE")
+                case, target_run = _request_case(conn, context["path"])
+                if case is not None:
+                    managed = execution_store.managed(conn, case)
+                    problems = state_errors(_parse_contract(case),[dict(row) for row in _step_rows(conn,case["id"])])
+                    if managed:
+                        problems = list(dict.fromkeys(problems + execution_errors(_parse_contract(case))))
+                    if problems:
+                        raise HTTPException(409, {"code":"legacy_contract_read_only", "reasons":problems})
+                    path = context["path"]
+                    # Claim/finish implement their own atomic idempotency checks.
+                    exempt = path.endswith(("/execution/claim", "/execution/finish"))
+                    initial_packet = path.endswith("/dispatch-packet") and execution_store.claim_row(conn, case["id"]) is None
+                    if managed and not exempt and not initial_packet:
+                        lease = execution_store.require_claim(conn, case["id"], context.get("run_id"), context.get("fence"))
+                        if target_run and target_run != lease["run_id"]:
+                            raise HTTPException(409, "cannot mutate another legacy attempt")
+                        admitted_claim = (case["id"], lease["run_id"], lease["fence"])
+                    elif managed and path.endswith("/execution/finish"):
+                        lease = execution_store.claim_row(conn, case["id"])
+                        if lease is not None and lease["state"] == "active":
+                            lease = execution_store.require_claim(conn, case["id"], context.get("run_id"), context.get("fence"))
+                            admitted_claim = (case["id"], lease["run_id"], lease["fence"])
+                            finishing_claim = True
+            yield conn
+            if admitted_claim is not None:
+                # A slow write may outlive the lease after writer-lock admission.
+                # Recheck inside the same transaction before any commit is visible.
+                execution_store.require_claim(conn, *admitted_claim, allow_released=finishing_claim)
+    finally:
+        conn.close()
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
     cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     if column not in cols:
@@ -97,12 +161,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "case_steps", "runtime_updated_at", "TEXT")
     _ensure_column(conn, "case_slots", "agent_run_id", "TEXT")
     _ensure_column(conn, "case_slots", "produced_at", "TEXT")
-    conn.execute("UPDATE cases SET status = 'IN_PROGRESS' WHERE status = 'RUNNING'")
+    for row in conn.execute("SELECT * FROM cases WHERE status='RUNNING'").fetchall():
+        if not state_errors(_parse_contract(row),[dict(step) for step in _step_rows(conn,row["id"])]):
+            conn.execute("UPDATE cases SET status='IN_PROGRESS' WHERE id=?",(row["id"],))
     conn.commit()
 
 
 def init_db() -> None:
-    with get_db() as conn:
+    with request_db() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS cases (
           id               TEXT PRIMARY KEY,
@@ -561,14 +627,22 @@ def _parse_contract(row: sqlite3.Row) -> dict[str, Any] | None:
     raw = row["contract_json"]
     if not raw:
         return None
-    return json.loads(raw)
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else None
+    except (ValueError, TypeError):
+        return None
 
 
 def _parse_dispatch_packet(row: sqlite3.Row) -> dict[str, Any] | None:
     raw = row["dispatch_packet_json"]
     if not raw:
         return None
-    return json.loads(raw)
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value,dict) else None
+    except (ValueError,TypeError):
+        return None
 
 
 def _case_creation_response(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
@@ -936,7 +1010,7 @@ def _matches_variable_type(expected_type: str, value: Any) -> bool:
         return isinstance(value, list)
     if normalized == "object":
         return isinstance(value, dict)
-    return True
+    return False
 
 
 def _compute_case_status(
@@ -960,7 +1034,10 @@ def _compute_case_status(
 def _recompute_case_state(conn: sqlite3.Connection, case_id: str, *, t: str | None = None) -> None:
     case_row = _load_case_row(conn, case_id)
     contract = _parse_contract(case_row)
-    if not contract:
+    if state_errors(contract,[dict(row) for row in _step_rows(conn,case_id)]):
+        return
+    # A native step completes only through its fenced output transaction.
+    if execution_store.managed(conn, case_row):
         return
 
     timestamp = t or now()
@@ -1068,6 +1145,7 @@ class UpdateDispatchPacketIn(BaseModel):
 
 
 class CompleteStepOutputsIn(BaseModel):
+    terminal_status: Literal["COMPLETED", "FAILED"] = "COMPLETED"
     outputs_json: dict[str, Any]
     agent_run_id: str | None = None
     notes: list[str] | None = None
@@ -1150,12 +1228,107 @@ class CreateExecutionArtifactIn(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    with get_db() as conn:
+    with request_db() as conn:
         _migrate(conn)
+        execution_store.install(conn)
     yield
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.middleware("http")
+async def legacy_request_scope(request, call_next):
+    token = _request_context.set({"method":request.method, "path":request.url.path,
+        "run_id":request.headers.get("x-legacy-run-id"), "fence":request.headers.get("x-legacy-fence")})
+    try:
+        return await call_next(request)
+    finally:
+        _request_context.reset(token)
+
+
+class LegacyClaimIn(BaseModel):
+    request_key: str = Field(min_length=1, max_length=200)
+    owner: str = Field(min_length=1, max_length=200)
+    lease_seconds: int = Field(default=120, ge=10, le=600)
+    initial_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class LegacyHeartbeatIn(BaseModel):
+    lease_seconds: int = Field(default=120, ge=10, le=600)
+
+
+class LegacyFinishIn(BaseModel):
+    outcome: Literal["completed", "failed", "blocked", "cancelled"]
+    reason: str = Field(default="", max_length=2000)
+
+
+class LegacyEffectIn(BaseModel):
+    step_run_id: str
+    operation: Literal["transcribe", "write_status", "daily_note"]
+    state: Literal["unknown", "observed"]
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.get("/cases/{case_id}/execution")
+def legacy_execution_state(case_id: str):
+    with request_db() as conn:
+        case = _load_case_row(conn,case_id)
+        claim = execution_store.claim_row(conn,case_id)
+        effects = conn.execute("SELECT * FROM legacy_execution_effects WHERE case_id=? ORDER BY created_at",(case_id,)).fetchall()
+        reasons = list(dict.fromkeys(execution_errors(_parse_contract(case)) + state_errors(_parse_contract(case),[dict(row) for row in _step_rows(conn,case_id)])))
+        return {"eligible":not reasons,"reasons":reasons,"claim":dict(claim) if claim else None,
+                "lease_active":bool(claim and claim["state"]=="active" and claim["expires_at"]>time.time()),
+                "effects":[_row_with_json(row,"evidence_json") for row in effects]}
+
+
+@app.post("/cases/{case_id}/execution/claim")
+def legacy_claim(case_id: str, body: LegacyClaimIn):
+    with request_db() as conn:
+        return execution_store.claim(conn,_load_case_row(conn,case_id),body,globals())
+
+
+@app.post("/cases/{case_id}/execution/heartbeat")
+def legacy_heartbeat(case_id: str, body: LegacyHeartbeatIn):
+    with request_db() as conn:
+        context=_request_context.get()
+        execution_store.require_claim(conn,case_id,context.get("run_id"),context.get("fence"))
+        conn.execute("UPDATE legacy_execution_claims SET expires_at=?,updated_at=? WHERE case_id=?",(time.time()+body.lease_seconds,now(),case_id))
+        return dict(execution_store.claim_row(conn,case_id))
+
+
+@app.post("/cases/{case_id}/execution/effects")
+def legacy_effect(case_id: str, body: LegacyEffectIn):
+    with request_db() as conn:
+        return execution_store.effect(conn,case_id,body,globals())
+
+
+@app.post("/cases/{case_id}/execution/finish")
+def legacy_finish(case_id: str, body: LegacyFinishIn):
+    with request_db() as conn:
+        context=_request_context.get()
+        claim=execution_store.claim_row(conn,case_id)
+        if claim and claim["state"]=="released" and claim["run_id"]==context.get("run_id") and str(claim["fence"])==context.get("fence"):
+            run=_case_run_row(conn,claim["run_id"])
+            if run["status"]==body.outcome:
+                return {"status":run["status"],"id":run["id"],"reused":True}
+        claim=execution_store.require_claim(conn,case_id,context.get("run_id"),context.get("fence"))
+        case=_load_case_row(conn,case_id)
+        if case["status"]=="FAILED" and body.outcome!="failed":
+            raise HTTPException(409,"failed legacy Case outcome is terminal")
+        steps=_step_rows(conn,case_id)
+        unknown=conn.execute("SELECT id FROM legacy_execution_effects WHERE case_id=? AND state IN ('unknown','observed')",(case_id,)).fetchone()
+        if body.outcome=="completed" and (unknown or not steps or any(row["status"]!="COMPLETED" for row in steps)):
+            raise HTTPException(409,"unfinished steps or unknown effects cannot complete")
+        outcome = "blocked" if unknown else body.outcome
+        case_status={"completed":"COMPLETED","failed":"FAILED","blocked":"BLOCKED","cancelled":"BLOCKED"}[outcome]
+        t=now()
+        conn.execute("UPDATE case_runs SET status=?,updated_at=?,ended_at=? WHERE id=?",(outcome,t,t,claim["run_id"]))
+        conn.execute("UPDATE legacy_execution_claims SET state='released',updated_at=? WHERE case_id=?",(t,case_id))
+        conn.execute("UPDATE cases SET status=?,completed_at=? WHERE id=?",(case_status,t if outcome in {"completed","failed"} else None,case_id))
+        _write_case_log(conn,case_id,"legacy_attempt",body.reason or outcome,metadata={"attempt_id":claim["run_id"],"fence":claim["fence"],"outcome":outcome})
+        return {"status":outcome,"id":claim["run_id"],"reused":False}
+
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -1166,7 +1339,7 @@ def health():
 
 @app.post("/cases", status_code=201)
 def create_case(body: CreateCaseIn):
-    with get_db() as conn:
+    with request_db() as conn:
         existing = conn.execute(
             "SELECT * FROM cases WHERE queue_message_id = ? ORDER BY created_at ASC LIMIT 1",
             (body.queue_message_id,),
@@ -1185,7 +1358,7 @@ def create_case(body: CreateCaseIn):
 
     case_id = new_id("case")
     t = now()
-    with get_db() as conn:
+    with request_db() as conn:
         conn.execute(
             "INSERT INTO cases (id, queue_message_id, process_name, process_path, process_source, process_hash, contract_json, dispatch_packet_json, title, objective, sender, status, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?)",
@@ -1221,7 +1394,7 @@ def create_case(body: CreateCaseIn):
 def get_case(case_id: str):
     request_start = time.perf_counter()
     db_start = time.perf_counter()
-    with get_db() as conn:
+    with request_db() as conn:
         _recompute_case_state(conn, case_id)
         row = _load_case_row(conn, case_id)
         steps = conn.execute("SELECT * FROM case_steps WHERE case_id = ? ORDER BY idx", (case_id,)).fetchall()
@@ -1231,6 +1404,9 @@ def get_case(case_id: str):
         audits = _audit_rows(conn, case_id)
         contract = _parse_contract(row)
         dispatch_packet = _parse_dispatch_packet(row)
+        eligibility = state_errors(contract,[dict(step) for step in steps])
+        if execution_store.managed(conn,row):
+            eligibility = list(dict.fromkeys(eligibility + execution_errors(contract)))
     db_ms = _elapsed_ms(db_start)
     step_dicts = [_step_row_to_dict(step) for step in steps]
     case_dict = dict(row)
@@ -1243,6 +1419,7 @@ def get_case(case_id: str):
         "logs": [dict(l) for l in logs],
         "artifacts": [_row_with_json(a, "metadata_json") for a in artifacts],
         "model_task_audits": audits,
+        "execution_eligibility": {"eligible":not eligibility, "reasons":eligibility},
         "progress": _build_progress(step_dicts),
     }
     log.info(
@@ -1264,6 +1441,8 @@ def get_case(case_id: str):
 
 @app.post("/cases/{case_id}/runs", status_code=201)
 def create_case_run(case_id: str, body: CreateCaseRunIn):
+    if body.runtime_mode == "native_case_pipeline":
+        raise HTTPException(409, "native execution must acquire a durable claim")
     request_start = time.perf_counter()
     t = now()
     status = _normalize_observability_status(body.status, CASE_RUN_STATUSES, field="case run status")
@@ -1271,7 +1450,7 @@ def create_case_run(case_id: str, body: CreateCaseRunIn):
     idempotency_key = str(body.idempotency_key or "").strip() or None
     reused = False
     db_start = time.perf_counter()
-    with get_db() as conn:
+    with request_db() as conn:
         _load_case_row(conn, case_id)
         if idempotency_key:
             existing = conn.execute(
@@ -1348,7 +1527,7 @@ def create_case_run(case_id: str, body: CreateCaseRunIn):
 
 @app.get("/cases/{case_id}/runs")
 def list_case_runs(case_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         _load_case_row(conn, case_id)
         rows = conn.execute("SELECT * FROM case_runs WHERE case_id = ? ORDER BY created_at", (case_id,)).fetchall()
     return {"case_runs": [_row_with_json(row, "metadata_json") for row in rows]}
@@ -1356,7 +1535,7 @@ def list_case_runs(case_id: str):
 
 @app.get("/case-runs/{run_id}")
 def get_case_run(run_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         row = _case_run_row(conn, run_id)
     return _row_with_json(row, "metadata_json")
 
@@ -1364,8 +1543,10 @@ def get_case_run(run_id: str):
 @app.put("/case-runs/{run_id}")
 def update_case_run(run_id: str, body: UpdateCaseRunIn):
     t = now()
-    with get_db() as conn:
+    with request_db() as conn:
         row = _case_run_row(conn, run_id)
+        if execution_store.managed(conn,_load_case_row(conn,row["case_id"])):
+            raise HTTPException(409,"native attempts finish through execution/finish")
         status = row["status"]
         if body.status is not None:
             status = _normalize_observability_status(body.status, CASE_RUN_STATUSES, field="case run status")
@@ -1388,7 +1569,7 @@ def create_step_run(run_id: str, body: CreateStepRunIn):
     status = _normalize_observability_status(body.status, STEP_RUN_STATUSES, field="step run status")
     metadata = body.metadata or {}
     idempotency_key = str(body.idempotency_key or "").strip() or None
-    with get_db() as conn:
+    with request_db() as conn:
         case_run = _case_run_row(conn, run_id)
         if body.case_run_id != run_id:
             raise HTTPException(422, "case_run_id must match URL run id")
@@ -1410,6 +1591,12 @@ def create_step_run(run_id: str, body: CreateStepRunIn):
                 payload = _row_with_json(existing, "metadata_json")
                 payload["reused"] = True
                 return payload
+        case = _load_case_row(conn,case_id)
+        if execution_store.managed(conn,case):
+            if body.status != "running":
+                raise HTTPException(409,"native step attempts start running only")
+            execution_store.require_ready(conn,case,body.step_db_row_id,globals())
+            conn.execute("UPDATE case_steps SET status='RUNNING',updated_at=? WHERE id=?",(t,body.step_db_row_id))
         step_run_id = new_id("step_run")
         started_at = t if status == "running" else None
         ended_at = t if status in {"completed", "blocked", "failed", "skipped"} else None
@@ -1458,7 +1645,7 @@ def create_step_run(run_id: str, body: CreateStepRunIn):
 
 @app.get("/case-runs/{run_id}/steps")
 def list_case_run_steps(run_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         _case_run_row(conn, run_id)
         rows = conn.execute("SELECT * FROM step_runs WHERE case_run_id = ? ORDER BY idx, created_at", (run_id,)).fetchall()
     return {"step_runs": [_row_with_json(row, "metadata_json") for row in rows]}
@@ -1467,8 +1654,10 @@ def list_case_run_steps(run_id: str):
 @app.put("/step-runs/{step_run_id}")
 def update_step_run(step_run_id: str, body: UpdateStepRunIn):
     t = now()
-    with get_db() as conn:
+    with request_db() as conn:
         row = _step_run_row(conn, step_run_id)
+        if execution_store.managed(conn,_load_case_row(conn,row["case_id"])):
+            raise HTTPException(409,"native step attempts finish through fenced step commits")
         status = row["status"]
         if body.status is not None:
             status = _normalize_observability_status(body.status, STEP_RUN_STATUSES, field="step run status")
@@ -1490,7 +1679,7 @@ def update_step_run(step_run_id: str, body: UpdateStepRunIn):
 def create_execution_span(run_id: str, body: CreateExecutionSpanIn):
     t = now()
     status = _normalize_observability_status(body.status, SPAN_STATUSES, field="span status")
-    with get_db() as conn:
+    with request_db() as conn:
         case_run = _case_run_row(conn, run_id)
         if body.case_run_id != run_id:
             raise HTTPException(422, "case_run_id must match URL run id")
@@ -1542,7 +1731,7 @@ def create_execution_span(run_id: str, body: CreateExecutionSpanIn):
 @app.put("/execution-spans/{span_id}")
 def update_execution_span(span_id: str, body: UpdateExecutionSpanIn):
     t = now()
-    with get_db() as conn:
+    with request_db() as conn:
         row = conn.execute("SELECT * FROM execution_spans WHERE id = ?", (span_id,)).fetchone()
         if not row:
             raise HTTPException(404, "execution span not found")
@@ -1564,7 +1753,7 @@ def update_execution_span(span_id: str, body: UpdateExecutionSpanIn):
 
 @app.get("/step-runs/{step_run_id}/spans")
 def list_step_run_spans(step_run_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         _step_run_row(conn, step_run_id)
         rows = conn.execute("SELECT * FROM execution_spans WHERE step_run_id = ? ORDER BY created_at", (step_run_id,)).fetchall()
     return {"spans": [_row_with_json(row, "metadata_json") for row in rows]}
@@ -1577,7 +1766,7 @@ def create_execution_event(run_id: str, body: CreateExecutionEventIn):
     event_type = str(body.type or "").strip()
     if not event_type:
         raise HTTPException(422, "event type is required")
-    with get_db() as conn:
+    with request_db() as conn:
         case_run = _case_run_row(conn, run_id)
         if body.case_run_id != run_id:
             raise HTTPException(422, "case_run_id must match URL run id")
@@ -1620,7 +1809,7 @@ def create_execution_event(run_id: str, body: CreateExecutionEventIn):
 
 @app.get("/case-runs/{run_id}/events")
 def list_case_run_events(run_id: str, event_type: str | None = None, span_id: str | None = None):
-    with get_db() as conn:
+    with request_db() as conn:
         _case_run_row(conn, run_id)
         query = "SELECT * FROM execution_events WHERE case_run_id = ?"
         params: list[Any] = [run_id]
@@ -1637,7 +1826,7 @@ def list_case_run_events(run_id: str, event_type: str | None = None, span_id: st
 
 @app.get("/step-runs/{step_run_id}/events")
 def list_step_run_events(step_run_id: str, event_type: str | None = None, span_id: str | None = None):
-    with get_db() as conn:
+    with request_db() as conn:
         _step_run_row(conn, step_run_id)
         query = "SELECT * FROM execution_events WHERE step_run_id = ?"
         params: list[Any] = [step_run_id]
@@ -1661,7 +1850,7 @@ def create_execution_artifact(run_id: str, body: CreateExecutionArtifactIn):
         raise HTTPException(422, "artifact role is required")
     if not uri:
         raise HTTPException(422, "artifact uri is required")
-    with get_db() as conn:
+    with request_db() as conn:
         case_run = _case_run_row(conn, run_id)
         if body.case_run_id != run_id:
             raise HTTPException(422, "case_run_id must match URL run id")
@@ -1710,7 +1899,7 @@ def create_execution_artifact(run_id: str, body: CreateExecutionArtifactIn):
 
 @app.get("/step-runs/{step_run_id}/artifacts")
 def list_step_run_artifacts(step_run_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         _step_run_row(conn, step_run_id)
         rows = conn.execute("SELECT * FROM execution_artifacts WHERE step_run_id = ? ORDER BY created_at", (step_run_id,)).fetchall()
     return {"artifacts": [_row_with_json(row, "metadata_json") for row in rows]}
@@ -1733,7 +1922,7 @@ def get_mirror_file_content(encoded_path: str):
 
 @app.get("/case-runs/{run_id}/artifacts")
 def list_case_run_artifacts(run_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         _case_run_row(conn, run_id)
         rows = conn.execute("SELECT * FROM execution_artifacts WHERE case_run_id = ? ORDER BY created_at", (run_id,)).fetchall()
     return {"artifacts": [_row_with_json(row, "metadata_json") for row in rows]}
@@ -1741,14 +1930,14 @@ def list_case_run_artifacts(run_id: str):
 
 @app.get("/execution-artifacts/{artifact_id}")
 def get_execution_artifact(artifact_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         row = _artifact_row(conn, artifact_id)
         return _row_with_json(row, "metadata_json")
 
 
 @app.get("/execution-artifacts/{artifact_id}/content")
 def get_execution_artifact_content(artifact_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         row = _artifact_row(conn, artifact_id)
         if str(row["redaction_status"] or "").lower() in {"redacted", "restricted"}:
             raise HTTPException(403, "artifact content is redacted or restricted")
@@ -1767,7 +1956,7 @@ def get_execution_artifact_content(artifact_id: str):
 
 @app.get("/case-runs/{run_id}/artifacts/{artifact_id}")
 def get_case_run_artifact(run_id: str, artifact_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         _case_run_row(conn, run_id)
         row = _artifact_row(conn, artifact_id)
         if row["case_run_id"] != run_id:
@@ -1777,7 +1966,7 @@ def get_case_run_artifact(run_id: str, artifact_id: str):
 
 @app.get("/case-runs/{run_id}/artifacts/{artifact_id}/content")
 def get_case_run_artifact_content(run_id: str, artifact_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         _case_run_row(conn, run_id)
         row = _artifact_row(conn, artifact_id)
         if row["case_run_id"] != run_id:
@@ -1826,13 +2015,13 @@ async def stream_case_run(run_id: str):
 
 @app.get("/cases/{case_id}/board")
 def get_case_board(case_id: str):
-    with get_db() as conn:
+    with request_db() as conn:
         case_row = _load_case_row(conn, case_id)
         contract = _parse_contract(case_row) or {}
         slots_by_name = _slot_rows_by_name(conn, case_id)
         variables, variable_counts = _board_variable_projection(
             case_id=case_id,
-            contract=contract,
+            contract={} if contract_errors(contract) else contract,
             slots_by_name=slots_by_name,
         )
         steps = [_step_row_to_dict(step) for step in _step_rows(conn, case_id)]
@@ -1890,7 +2079,7 @@ def get_case_board(case_id: str):
 def create_steps(case_id: str, body: CreateStepsIn):
     t = now()
     created = []
-    with get_db() as conn:
+    with request_db() as conn:
         row = _load_case_row(conn, case_id)
         if row["contract_json"]:
             raise HTTPException(409, "contract-backed cases instantiate steps from contract_json")
@@ -1919,7 +2108,7 @@ def create_steps(case_id: str, body: CreateStepsIn):
 @app.put("/cases/{case_id}/steps/{step_db_id}")
 def update_step(case_id: str, step_db_id: str, body: UpdateStepIn):
     t = now()
-    with get_db() as conn:
+    with request_db() as conn:
         row = _load_case_row(conn, case_id)
         step_row = conn.execute(
             "SELECT * FROM case_steps WHERE id = ? AND case_id = ?",
@@ -1928,8 +2117,21 @@ def update_step(case_id: str, step_db_id: str, body: UpdateStepIn):
         if not step_row:
             raise HTTPException(404, "step not found")
 
+        controlled = execution_store.managed(conn,row)
+        if controlled:
+            if body.result_json is not None:
+                raise HTTPException(409,"native outputs require atomic complete-outputs")
+            attempt = execution_store.require_step(conn,case_id,step_db_id,body.agent_run_id,globals(),allow_completed=True)
+            if attempt["status"] != "running" and attempt["status"].upper() != body.status:
+                raise HTTPException(409,"terminal attempt outcome is immutable")
         contract = _parse_contract(row)
         normalized_status = _normalize_step_status(body.status)
+        if controlled and normalized_status == "COMPLETED":
+            execution_store.require_effect_observation(conn,row,step_row,body.agent_run_id,globals())
+        if controlled and normalized_status == "COMPLETED" and _contract_step(contract,step_row["step_id"]).get("output_variables"):
+            raise HTTPException(409,"native output step requires complete-outputs")
+        if controlled and normalized_status not in {"COMPLETED", "FAILED"}:
+            raise HTTPException(409,"native attempt lifecycle owns step readiness")
         if contract and body.result_json is not None:
             try:
                 step_contract = _contract_step(contract, step_row["step_id"])
@@ -1993,6 +2195,9 @@ def update_step(case_id: str, step_db_id: str, body: UpdateStepIn):
                     produced_at=t if body.agent_run_id else None,
                 )
 
+        if controlled:
+            conn.execute("UPDATE step_runs SET status=?,updated_at=?,ended_at=? WHERE id=?",(normalized_status.lower(),t,t,body.agent_run_id))
+            conn.execute("UPDATE legacy_execution_effects SET state='committed',updated_at=? WHERE step_run_id=? AND state='observed'",(t,body.agent_run_id))
         result = json.dumps(body.result_json) if body.result_json is not None else step_row["result_json"]
         if normalized_status is not None:
             completed_at = t if normalized_status == "COMPLETED" else None
@@ -2017,7 +2222,7 @@ def update_step(case_id: str, step_db_id: str, body: UpdateStepIn):
 @app.put("/cases/{case_id}/steps/{step_db_id}/runtime-state")
 def update_step_runtime_state(case_id: str, step_db_id: str, body: UpdateStepRuntimeStateIn):
     t = now()
-    with get_db() as conn:
+    with request_db() as conn:
         _load_case_row(conn, case_id)
         step_row = conn.execute(
             "SELECT * FROM case_steps WHERE id = ? AND case_id = ?",
@@ -2036,7 +2241,7 @@ def update_step_runtime_state(case_id: str, step_db_id: str, body: UpdateStepRun
 @app.post("/cases/{case_id}/steps/{step_db_id}/complete-outputs")
 def complete_step_outputs(case_id: str, step_db_id: str, body: CompleteStepOutputsIn):
     t = now()
-    with get_db() as conn:
+    with request_db() as conn:
         row = _load_case_row(conn, case_id)
         step_row = conn.execute(
             "SELECT * FROM case_steps WHERE id = ? AND case_id = ?",
@@ -2053,6 +2258,13 @@ def complete_step_outputs(case_id: str, step_db_id: str, body: CompleteStepOutpu
         except KeyError as exc:
             raise HTTPException(409, "step is missing from the persisted contract") from exc
 
+        controlled = execution_store.managed(conn,row)
+        if controlled:
+            attempt = execution_store.require_step(conn,case_id,step_db_id,body.agent_run_id,globals(),allow_completed=True)
+            if attempt["status"] != "running" and attempt["status"].upper() != body.terminal_status:
+                raise HTTPException(409,"terminal attempt outcome is immutable")
+        if controlled:
+            execution_store.require_effect_observation(conn,row,step_row,body.agent_run_id,globals())
         declared_outputs = list(step_contract.get("output_variables") or [])
         if not declared_outputs:
             raise HTTPException(422, "step does not declare output variables")
@@ -2070,7 +2282,8 @@ def complete_step_outputs(case_id: str, step_db_id: str, body: CompleteStepOutpu
                 step_id=step_row["step_id"],
                 metadata={"missing_outputs": missing, "extra_outputs": extras},
             )
-            conn.commit()
+            if not controlled:
+                conn.commit()
             raise HTTPException(
                 422,
                 f"output envelope mismatch; missing={missing or []} extra={extras or []}",
@@ -2092,7 +2305,8 @@ def complete_step_outputs(case_id: str, step_db_id: str, body: CompleteStepOutpu
                 step_id=step_row["step_id"],
                 metadata={"type_errors": type_errors},
             )
-            conn.commit()
+            if not controlled:
+                conn.commit()
             raise HTTPException(422, f"typed output validation failed: {type_errors}")
 
         slots_by_name = _slot_rows_by_name(conn, case_id)
@@ -2113,7 +2327,8 @@ def complete_step_outputs(case_id: str, step_db_id: str, body: CompleteStepOutpu
                 step_id=step_row["step_id"],
                 metadata={"conflicting_outputs": conflicts},
             )
-            conn.commit()
+            if not controlled:
+                conn.commit()
             raise HTTPException(409, f"output slots already populated: {', '.join(conflicts)}")
 
         for name, value in body.outputs_json.items():
@@ -2132,7 +2347,7 @@ def complete_step_outputs(case_id: str, step_db_id: str, body: CompleteStepOutpu
         runtime_state = _parse_runtime_state(step_row["runtime_state_json"]) or {}
         runtime_state.update(
             {
-                "status": "completed",
+                "status": body.terminal_status.lower(),
                 "completed_at": t,
                 "committed_outputs": declared_outputs,
             }
@@ -2140,7 +2355,7 @@ def complete_step_outputs(case_id: str, step_db_id: str, body: CompleteStepOutpu
         conn.execute(
             "UPDATE case_steps SET status = ?, result_json = ?, runtime_state_json = ?, runtime_updated_at = ?, updated_at = ?, completed_at = ? WHERE id = ? AND case_id = ?",
             (
-                "COMPLETED",
+                body.terminal_status,
                 json.dumps(body.outputs_json),
                 json.dumps(runtime_state),
                 t,
@@ -2150,6 +2365,11 @@ def complete_step_outputs(case_id: str, step_db_id: str, body: CompleteStepOutpu
                 case_id,
             ),
         )
+        if controlled:
+            conn.execute("UPDATE step_runs SET status=?,updated_at=?,ended_at=? WHERE id=?",(body.terminal_status.lower(),t,t,body.agent_run_id))
+            conn.execute("UPDATE legacy_execution_effects SET state='committed',updated_at=? WHERE step_run_id=? AND state='observed'",(t,body.agent_run_id))
+            if body.terminal_status=="FAILED":
+                conn.execute("UPDATE cases SET status='FAILED',completed_at=? WHERE id=?",(t,case_id))
         for note in body.notes or []:
             if str(note).strip():
                 _write_case_log(
@@ -2161,14 +2381,16 @@ def complete_step_outputs(case_id: str, step_db_id: str, body: CompleteStepOutpu
                 )
         _recompute_case_state(conn, case_id, t=t)
     _broadcast(case_id, f"step.updated:{step_db_id}:COMPLETED")
-    return {"ok": True, "completed_at": t}
+    return {"ok": True, "completed_at": t, "status":body.terminal_status}
 
 
 @app.post("/cases/{case_id}/slots")
 def upsert_slot(case_id: str, body: UpsertSlotIn):
     t = now()
-    with get_db() as conn:
+    with request_db() as conn:
         row = _load_case_row(conn, case_id)
+        if execution_store.managed(conn,row):
+            raise HTTPException(409,"native roots bind at claim; outputs commit through their attempt")
         contract = _parse_contract(row)
         if contract and body.name not in set(contract["slot_names"]):
             _write_case_log(
@@ -2208,7 +2430,7 @@ def upsert_slot(case_id: str, body: UpsertSlotIn):
 
 @app.put("/cases/{case_id}/dispatch-packet")
 def update_dispatch_packet(case_id: str, body: UpdateDispatchPacketIn):
-    with get_db() as conn:
+    with request_db() as conn:
         _load_case_row(conn, case_id)
         conn.execute(
             "UPDATE cases SET dispatch_packet_json = ? WHERE id = ?",
@@ -2232,7 +2454,7 @@ def upsert_model_task_audit(case_id: str, body: UpsertModelTaskAuditIn):
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
-    with get_db() as conn:
+    with request_db() as conn:
         _load_case_row(conn, case_id)
         existing = conn.execute(
             "SELECT * FROM model_task_audits WHERE case_id = ? AND idempotency_key = ?",
@@ -2279,7 +2501,7 @@ def upsert_model_task_audit(case_id: str, body: UpsertModelTaskAuditIn):
 def create_log(case_id: str, body: CreateLogIn):
     log_id = new_id("log")
     t = now()
-    with get_db() as conn:
+    with request_db() as conn:
         _load_case_row(conn, case_id)
         conn.execute(
             "INSERT INTO case_logs (id, case_id, step_id, type, message, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -2294,8 +2516,10 @@ def update_case_status(case_id: str, body: UpdateStatusIn):
     t = now()
     status = _normalize_case_status(body.status)
     completed_at = t if status in TERMINAL_CASE_STATUSES else None
-    with get_db() as conn:
+    with request_db() as conn:
         row = _load_case_row(conn, case_id)
+        if execution_store.managed(conn,row):
+            raise HTTPException(409,"native Case status derives from its fenced execution")
         claimed_at = row["claimed_at"]
         if status == "IN_PROGRESS" and not claimed_at:
             claimed_at = t
@@ -2349,7 +2573,7 @@ def list_cases(
     include_heavy: bool = False,
 ):
     request_start = time.perf_counter()
-    with get_db() as conn:
+    with request_db() as conn:
         columns = "*" if include_heavy else CASE_LIST_LIGHT_COLUMNS
         q = f"SELECT {columns} FROM cases WHERE 1=1"
         params: list[Any] = []

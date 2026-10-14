@@ -407,8 +407,8 @@ def extract_feedback_items(segments: list[dict[str, Any]], target_candidates: li
 
 def _binding_matches_feedback(binding: dict[str, Any], feedback: dict[str, Any]) -> bool:
     feedback_id = str(feedback.get("id") or "")
-    if feedback_id and str(binding.get("feedback_item_id") or "") == feedback_id:
-        return True
+    if feedback_id and binding.get("feedback_item_id"):
+        return str(binding["feedback_item_id"]) == feedback_id
     target_refs = {str(ref) for ref in feedback.get("target_refs") or [] if ref}
     binding_refs = {str(ref) for ref in binding.get("target_refs") or [] if ref}
     return bool(target_refs & binding_refs)
@@ -421,12 +421,14 @@ def _bindings_for_feedback(feedback: dict[str, Any], source_bindings: list[dict[
 def _binding_status(feedback: dict[str, Any], source_bindings: list[dict[str, Any]]) -> str:
     bindings = _bindings_for_feedback(feedback, source_bindings)
     statuses = {str(binding.get("status") or "").lower() for binding in bindings}
-    if statuses & {"verified", "bound"}:
-        return "verified"
     if "blocked" in statuses:
         return "blocked"
     if "deferred" in statuses:
         return "deferred"
+    if "missing" in statuses:
+        return "missing"
+    if statuses & {"verified", "bound"}:
+        return "verified"
     return "missing"
 
 
@@ -765,7 +767,68 @@ def build_implementation_handoff(packet: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _packet_structure_valid(packet: Any) -> bool:
+    """Reject malformed evidence before truthiness can promote it to ready."""
+    if (
+        not isinstance(packet, dict)
+        or not isinstance(packet.get("transcript"), dict)
+        or not isinstance(packet["transcript"].get("text"), str)
+        or not isinstance(packet.get("feedback_items"), list)
+    ):
+        return False
+
+    def references_valid(value: Any) -> bool:
+        return isinstance(value, list) and all(
+            isinstance(ref, str) and bool(ref.strip()) for ref in value
+        )
+
+    identities: set[str] = set()
+    for item in packet["feedback_items"]:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("id"), str)
+            or not item["id"].strip()
+            or item["id"] in identities
+            or not references_valid(item.get("target_refs", []))
+        ):
+            return False
+        identities.add(item["id"])
+    if "source_bindings" in packet:
+        if not isinstance(packet["source_bindings"], list):
+            return False
+        for binding in packet["source_bindings"]:
+            if (
+                not isinstance(binding, dict)
+                or not isinstance(binding.get("status"), str)
+                or binding.get("status") not in {"verified", "bound", "blocked", "deferred", "missing"}
+                or not references_valid(binding.get("target_refs", []))
+                or (
+                    binding.get("feedback_item_id") is not None
+                    and not isinstance(binding["feedback_item_id"], str)
+                )
+            ):
+                return False
+    for name in ("events", "actionability", "quality", "review"):
+        if name in packet and not isinstance(packet[name], dict):
+            return False
+    events = packet.get("events", {})
+    if "target_candidates" in events and (
+        not isinstance(events["target_candidates"], list)
+        or any(not isinstance(item, dict) for item in events["target_candidates"])
+    ):
+        return False
+    for value in packet.get("actionability", {}).values():
+        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+            return False
+    quality = packet.get("quality", {})
+    if "status" in quality and not isinstance(quality["status"], str):
+        return False
+    return True
+
+
 def packet_quality(packet: dict[str, Any]) -> dict[str, Any]:
+    if not _packet_structure_valid(packet):
+        return {"status":"failed","warnings":["malformed canonical review packet"],"must_fix_before_delegation":["repair packet structure"],"feedback_item_count":0,"target_candidate_count":0}
     feedback_count = len(packet.get("feedback_items") or [])
     target_count = len(((packet.get("events") or {}).get("target_candidates")) or [])
     transcript_text = str(((packet.get("transcript") or {}).get("text")) or "").strip()

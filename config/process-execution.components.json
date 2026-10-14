@@ -1,0 +1,35 @@
+{
+  "schema": "hub.process-composition.v1",
+  "environment": "development",
+  "admission_mode": "shadow",
+  "external_effects": false,
+  "authority_qualified": false,
+  "components": {
+    "process-runtime": {
+      "package": "process-runtime",
+      "version": "0.1.0",
+      "endpoint": "http://127.0.0.1:8092",
+      "contract_schema": "runtime.v1",
+      "contract_sha256": "c3dd6334a9e8e920c27f8c7d9edcef1e8ca1addec21690237fb817f0079c4059"
+    },
+    "service-management": {
+      "package": "service-management",
+      "version": "0.1.0",
+      "endpoint": "http://127.0.0.1:8091",
+      "contract_schema": "service.command.v1",
+      "contract_sha256": "050142062980eaf202ea7dcf1992bd5cb348b8f958282de7595508b8714c58ef"
+    },
+    "frank": {
+      "package": "frank-executor",
+      "version": "0.1.0",
+      "endpoint": "http://127.0.0.1:8093",
+      "contract_schema": "frank.integration-adapter.v1",
+      "contract_sha256": "1b8059277396ec5c5b999c211ba73d6c1a63dce019b75ef5f888c4975ec21607"
+    }
+  },
+  "secret_references": {
+    "matrix": "secret:env:FRANK_MATRIX_TOKEN",
+    "wallet_profile": "secret:file:operator-selected-wallet-profile",
+    "receiver_policy": "secret:file:operator-selected-runtime-policy"
+  }
+}

@@ -1,0 +1,330 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.zenith.local/frank/integration-adapter-v1.schema.json",
+  "title": "Frank integration protocol v1",
+  "description": "Envelope contract; native result authority verification remains mandatory in production. Transport provenance alone never authorizes output. Implementors also conform to the async lifecycle Protocol in ports.py.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/work"
+    },
+    {
+      "$ref": "#/$defs/result"
+    },
+    {
+      "$ref": "#/$defs/integration_config"
+    },
+    {
+      "$ref": "#/$defs/frank_config"
+    }
+  ],
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "step_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "fence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "run_id",
+        "step_id",
+        "attempt_id",
+        "fence"
+      ]
+    },
+    "work": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "frank.work.v1"
+        },
+        "binding": {
+          "$ref": "#/$defs/binding"
+        },
+        "actor_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "integration_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "route": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "effect_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "operation": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "inputs": {
+          "type": "object"
+        },
+        "output_types": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema",
+        "binding",
+        "actor_id",
+        "integration_id",
+        "route",
+        "effect_id",
+        "operation",
+        "scope",
+        "inputs",
+        "output_types"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "frank.result.v1"
+        },
+        "event_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "binding": {
+          "$ref": "#/$defs/binding"
+        },
+        "actor_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "integration_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "route": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "effect_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "provider_reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "outcome": {
+          "enum": [
+            "acknowledged",
+            "succeeded",
+            "failed",
+            "unknown"
+          ]
+        },
+        "outputs": {
+          "type": "object"
+        },
+        "proof": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema",
+        "event_id",
+        "binding",
+        "actor_id",
+        "integration_id",
+        "route",
+        "effect_id",
+        "provider_reference",
+        "outcome",
+        "outputs"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "not": {
+                  "const": "succeeded"
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outputs": {
+                "maxProperties": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "integration_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "frank.integrations.v1"
+        },
+        "integrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "plugin": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "config": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "id",
+              "plugin",
+              "enabled",
+              "config"
+            ]
+          }
+        },
+        "actors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "actor_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "integration_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "uniqueItems": true
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "uniqueItems": true
+              },
+              "route": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "required": [
+              "actor_id",
+              "integration_id",
+              "capabilities",
+              "resources",
+              "route"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "integrations",
+        "actors"
+      ]
+    },
+    "frank_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "frank.config.v1"
+        },
+        "environment": {
+          "enum": [
+            "production",
+            "development",
+            "test"
+          ]
+        },
+        "runtime_endpoint": {
+          "type": "string"
+        },
+        "journal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allow_local_dev_untrusted": {
+          "type": "boolean"
+        },
+        "integrations": {
+          "$ref": "#/$defs/integration_config"
+        }
+      },
+      "required": [
+        "schema",
+        "environment",
+        "runtime_endpoint",
+        "journal",
+        "allow_local_dev_untrusted",
+        "integrations"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "environment": {
+                "const": "production"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "allow_local_dev_untrusted": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

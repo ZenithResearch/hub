@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Fixed
+- Invoke Frank's reviewed installed public health command from combined operator checks and return bounded redacted owner/recovery diagnostics — an HTTP endpoint placeholder could not establish executor readiness or identify its failing dependency.
+- Reject malformed or conflicting legacy review evidence, incomplete DAG bindings and altered handler resources, and recheck lease/fence at transaction commit — readiness labels and leases that expired during writes could otherwise permit unsafe success.
+- Capture actual legacy review artifacts at each commit and compare typed runtime replay, including the final source-bound packet and failed status evidence — mutable packet paths and differing failure-output models otherwise hide migration errors.
+- Contain the legacy review runner with frozen DAG validation, read-only invalid snapshots and explicit process handler resources — ordinal scheduling and invalid graphs could activate unsupported work or fabricate completion.
+- Fail closed on degraded and unreadable review packets, and commit failed writeback evidence with the step outcome — the old runner marked non-ready packets successful despite the documented review contract.
+- Add durable fenced claims, distinct retry attempts and transactional output/effect evidence — concurrent runners, host failure and ambiguous provider responses could otherwise reuse attempts or repeat external work.
+
+
 ### Changed
 - Added Hub Monitor to the controlled product surface as a private, read-only view
   of monitored deployments, expected and observed machines, health, release,
@@ -45,6 +54,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   account validation, and ephemeral on-host Docker authentication.
 
 ### Added
+
+- Added installed-wheel tuple checks and CI schema mismatch rejection, and enforced admission rollback through the receiver transaction boundary — source imports and routing metadata alone did not prove the deployed bytes or stop direct new-run admission.
+
+- Added pinned independent process/runtime/service/Frank composition with schema hash checks, owner-specific readiness, secret references and reversible admission flags — keeps Hub out of business-state ownership and prevents unqualified production routing.
+
+- Added an isolated four-component public-contract verification and rollback drill with retained production no-go evidence — checks Service handoff/revision, runtime restart/fences, Frank unknown/duplicate delivery and unchanged outputs without performing external actions.
 - Added a fail-closed fresh Synapse backup and isolated-restore gate — creates
   hourly and daily application-consistent multi-volume DLM snapshots with
   PostgreSQL checkpoint/XFS freeze hooks, auto-thaw safety, bounded restore

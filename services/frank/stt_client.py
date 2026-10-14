@@ -81,13 +81,15 @@ def normalize_elevenlabs_response(data: dict[str, Any], *, model: str) -> dict[s
     }
 
 
-async def transcribe_audio(client: httpx.AsyncClient, audio_path: str) -> dict[str, Any]:
+async def transcribe_audio(client: httpx.AsyncClient, audio_path: str, *, allow_fallback: bool = True) -> dict[str, Any]:
     provider = selected_provider()
     preprocessing = await preprocess_audio(client, audio_path)
     transcription_audio_path = str(preprocessing["audio_path"])
     try:
         payload = await _transcribe_with_provider(client, transcription_audio_path, provider)
     except Exception:
+        if not allow_fallback:
+            raise
         fallback = (os.environ.get("STT_FALLBACK_PROVIDER") or "").strip().lower()
         fallback = _PROVIDER_ALIASES.get(fallback, fallback)
         if not fallback or fallback == provider:

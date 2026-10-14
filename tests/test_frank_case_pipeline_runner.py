@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from services.cases.contract import compile_process_contract
+from services.cases.execution_contract import profile_for
 from services.frank.case_pipeline_runner import CasePipelineRunner
 from services.frank.review_case_automaton import REVIEW_SCOPE_FULL
 
@@ -38,18 +39,7 @@ class _RunnerClient:
         self.spans: list[dict] = []
         self.case_detail = {
             "case": {"id": "case_review_1", "status": "OPEN"},
-            "contract": {
-                "steps": [
-                    {
-                        "step_id": "step_1",
-                        "output_variables": ["review_id_short", "audio_asset_path", "events"],
-                    },
-                    {
-                        "step_id": "step_2",
-                        "output_variables": ["transcript", "audio_offset_ms", "words"],
-                    },
-                ]
-            },
+            "contract": compile_process_contract((Path(__file__).resolve().parents[1] / "base/ops/processes/process-queued-review.md").read_text()),
             "steps": [
                 {"id": "step_db_1", "step_id": "step_1", "name": "Load review record", "idx": 0, "status": "READY"},
                 {"id": "step_db_2", "step_id": "step_2", "name": "Transcribe audio", "idx": 1, "status": "PENDING"},
@@ -66,8 +56,21 @@ class _RunnerClient:
                 {"name": "words", "value": None},
             ],
         }
+        # This fixture exercises the first two handlers; later committed steps are
+        # retained in the full frozen graph. API invariants are covered separately.
+        self.case_detail["steps"].extend(
+            {"id":f"step_db_{n}","step_id":f"step_{n}","name":f"Retained {n}","idx":n-1,"status":"COMPLETED"}
+            for n in range(3,10)
+        )
+        names = {slot["name"] for slot in self.case_detail["slots"]}
+        self.case_detail["slots"].extend(
+            {"name":name,"value":None} for name in self.case_detail["contract"]["variables"] if name not in names
+        )
+        for slot in self.case_detail["slots"]:
+            if slot["name"] in self.case_detail["contract"]["root_inputs"] and slot["value"] is None:
+                slot["value"] = json.dumps(0 if slot["name"]=="duration_ms" else "fixture")
 
-    async def get(self, url, timeout=None):
+    async def get(self, url, timeout=None, **kwargs):
         self.operations.append(("GET", url, None))
         if url.endswith("/cases/case_review_1"):
             return _FakeResponse(self.case_detail)
@@ -77,10 +80,14 @@ class _RunnerClient:
             return _FakeResponse(content=b'[{"selector": ".button"}]', headers={"content-type": "application/json"})
         return _FakeResponse({}, status_code=404)
 
-    async def post(self, url, json=None, timeout=None):
+    async def post(self, url, json=None, timeout=None, **kwargs):
         self.operations.append(("POST", url, json))
-        if url.endswith("/cases/case_review_1/runs"):
-            return _FakeResponse({"id": self.case_run_id, "status": "running", "reused": False})
+        if url.endswith("/cases/case_review_1/execution/claim"):
+            self.case_detail["case"]["status"] = "IN_PROGRESS"
+            return _FakeResponse({"run_id":self.case_run_id,"fence":1,"state":"active","owner":json["owner"],"request_key":json["request_key"]})
+        if url.endswith("/cases/case_review_1/execution/finish"):
+            self.case_detail["case"]["status"] = json["outcome"].upper()
+            return _FakeResponse({"id":self.case_run_id,"status":json["outcome"]})
         if url.endswith(f"/case-runs/{self.case_run_id}/steps"):
             step_run_id = f"step_run_{json['step_db_row_id']}"
             self.step_run_by_step_db_id[json["step_db_row_id"]] = step_run_id
@@ -98,7 +105,7 @@ class _RunnerClient:
             step_db_id = url.split("/steps/")[1].split("/")[0]
             for step in self.case_detail["steps"]:
                 if step["id"] == step_db_id:
-                    step["status"] = "COMPLETED"
+                    step["status"] = json.get("terminal_status","COMPLETED")
             slot_values = {slot["name"]: slot for slot in self.case_detail["slots"]}
             for key, value in (json["outputs_json"] or {}).items():
                 slot_values[key]["value"] = __import__("json").dumps(value)
@@ -120,7 +127,7 @@ class _RunnerClient:
             return _FakeResponse({"log_id": "log_1"})
         return _FakeResponse({"ok": True})
 
-    async def put(self, url, json=None, timeout=None):
+    async def put(self, url, json=None, timeout=None, **kwargs):
         self.operations.append(("PUT", url, json))
         if url.endswith("/cases/case_review_1/status"):
             self.case_detail["case"]["status"] = json["status"]
@@ -136,7 +143,7 @@ class _RunnerClient:
             return _FakeResponse({"ok": True})
         return _FakeResponse({"ok": True})
 
-    async def patch(self, url, json=None, timeout=None):
+    async def patch(self, url, json=None, timeout=None, **kwargs):
         self.operations.append(("PATCH", url, json))
         return _FakeResponse({"review_id": "review_12345678", "status": (json or {}).get("status", "processed")})
 
@@ -147,7 +154,7 @@ class _SttDisconnectThenSuccessClient(_RunnerClient):
         self.fail_attempts = fail_attempts
         self.transcribe_attempts = 0
 
-    async def post(self, url, json=None, timeout=None):
+    async def post(self, url, json=None, timeout=None, **kwargs):
         if url.endswith("/transcribe"):
             self.operations.append(("POST", url, json))
             self.transcribe_attempts += 1
@@ -165,7 +172,7 @@ class _SttDisconnectThenSuccessClient(_RunnerClient):
 
 
 class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_step_2_retries_once_when_stt_disconnects(self) -> None:
+    async def test_step_2_fails_closed_when_stt_disconnects(self) -> None:
         client = _SttDisconnectThenSuccessClient()
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = Path(tmpdir) / "audio.webm"
@@ -185,14 +192,14 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
                 "slots": [{"name": "audio_asset_path", "value": json.dumps(str(audio_path))}],
             }
 
-            result = await runner.execute_step_2("case_run_1", "step_run_2", case_detail, case_dir)
+            with self.assertRaises(httpx.RemoteProtocolError):
+                await runner.execute_step_2("case_run_1", "step_run_2", case_detail, case_dir)
 
-        self.assertEqual(result["transcript"], "retry succeeded")
-        self.assertEqual(client.transcribe_attempts, 2)
+        self.assertEqual(client.transcribe_attempts, 1)
         transcribe_posts = [op for op in client.operations if op[0] == "POST" and op[1].endswith("/transcribe")]
-        self.assertEqual(len(transcribe_posts), 2)
+        self.assertEqual(len(transcribe_posts), 1)
 
-    async def test_step_2_waits_and_retries_multiple_transient_stt_disconnects(self) -> None:
+    async def test_step_2_does_not_sleep_or_retry_ambiguous_disconnects(self) -> None:
         client = _SttDisconnectThenSuccessClient(fail_attempts=2)
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = Path(tmpdir) / "audio.webm"
@@ -213,11 +220,11 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             }
 
             with patch("services.frank.case_pipeline_runner.asyncio.sleep", new_callable=AsyncMock) as sleep:
-                result = await runner.execute_step_2("case_run_1", "step_run_2", case_detail, case_dir)
+                with self.assertRaises(httpx.RemoteProtocolError):
+                    await runner.execute_step_2("case_run_1", "step_run_2", case_detail, case_dir)
 
-        self.assertEqual(result["transcript"], "retry succeeded")
-        self.assertEqual(client.transcribe_attempts, 3)
-        self.assertEqual(sleep.await_count, 2)
+        self.assertEqual(client.transcribe_attempts, 1)
+        sleep.assert_not_awaited()
 
     async def test_step_2_transcript_artifact_records_audio_preprocessor_metadata(self) -> None:
         client = _RunnerClient()
@@ -290,10 +297,9 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
         step1_complete_index = next(
             index for index, (_, url, _) in enumerate(client.operations) if "/steps/step_db_1/complete-outputs" in url
         )
-        step1_run_complete_index = next(
-            index for index, (_, url, payload) in enumerate(client.operations) if url.endswith("/step-runs/step_run_step_db_1") and payload and payload.get("status") == "completed"
-        )
-        self.assertLess(step1_complete_index, step1_run_complete_index)
+        completed_event_index = next(index for index, (_, url, payload) in enumerate(client.operations) if url.endswith("/events") and payload.get("type")=="step.completed")
+        self.assertLess(step1_complete_index, completed_event_index)
+        self.assertFalse(any(method=="PUT" and "/step-runs/" in url for method,url,_ in client.operations))
 
     async def test_native_runner_resumes_blocked_case_when_steps_are_runnable(self) -> None:
         client = _RunnerClient()
@@ -320,101 +326,36 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.completed_step_ids, ("step_1", "step_2"))
-        in_progress_updates = [
-            payload
-            for method, url, payload in client.operations
-            if method == "PUT" and url.endswith("/cases/case_review_1/status") and payload and payload.get("status") == "IN_PROGRESS"
-        ]
-        self.assertGreaterEqual(len(in_progress_updates), 1)
+        self.assertTrue(any(method=="POST" and url.endswith("/execution/claim") for method,url,_ in client.operations))
+        self.assertFalse(any(method=="PUT" and url.endswith("/status") for method,url,_ in client.operations))
 
-    async def test_create_case_run_reuses_idempotent_run_after_read_timeout(self) -> None:
-        class TimeoutThenExistingRunClient(_RunnerClient):
-            async def post(self, url, json=None, timeout=None):
-                if url.endswith("/cases/case_review_1/runs"):
-                    self.operations.append(("POST", url, json))
-                    raise httpx.ReadTimeout("timed out creating case run")
-                return await super().post(url, json=json, timeout=timeout)
+    async def test_create_case_run_replays_exact_claim_after_read_timeout(self) -> None:
+        class TimeoutThenClaimClient(_RunnerClient):
+            async def post(self, url, json=None, timeout=None, **kwargs):
+                if url.endswith("/execution/claim") and not self.operations:
+                    self.operations.append(("POST",url,json))
+                    raise httpx.ReadTimeout("claim response lost after commit")
+                return await super().post(url,json=json,timeout=timeout,**kwargs)
+        client=TimeoutThenClaimClient()
+        runner=CasePipelineRunner(client=client,cases_url="http://cases:8083",gateway_url="http://gateway",stt_url="http://stt",execution_root=Path("/tmp"))
+        result=await runner.create_case_run("case_review_1",{"initial_context":{"review_id":"review"}})
+        self.assertEqual(result["id"],client.case_run_id)
+        self.assertEqual(len(client.operations),2)
+        self.assertEqual(client.operations[0],client.operations[1])
+        self.assertEqual(result["claim"]["request_key"],runner.claim_request_key)
 
-            async def get(self, url, timeout=None):
-                if url.endswith("/cases/case_review_1/runs"):
-                    self.operations.append(("GET", url, None))
-                    return _FakeResponse(
-                        {
-                            "case_runs": [
-                                {
-                                    "id": self.case_run_id,
-                                    "status": "running",
-                                    "idempotency_key": "native_case_pipeline:case_review_1",
-                                    "reused_after_timeout": False,
-                                }
-                            ]
-                        }
-                    )
-                return await super().get(url, timeout=timeout)
-
-        client = TimeoutThenExistingRunClient()
-        runner = CasePipelineRunner(
-            client=client,
-            cases_url="http://cases:8083",
-            gateway_url="http://gateway-http:8080",
-            stt_url="http://stt-http:8765",
-            execution_root=Path("/tmp"),
-        )
-
-        case_run = await runner.create_case_run("case_review_1", {"event_type": "review_submitted"})
-
-        self.assertEqual(case_run["id"], client.case_run_id)
-        self.assertTrue(case_run["reused_after_timeout"])
-        self.assertEqual(
-            [(method, url) for method, url, _ in client.operations],
-            [
-                ("POST", "http://cases:8083/cases/case_review_1/runs"),
-                ("GET", "http://cases:8083/cases/case_review_1/runs"),
-            ],
-        )
-
-    async def test_create_case_run_retries_once_after_timeout_when_no_run_exists(self) -> None:
-        class TimeoutThenRetryClient(_RunnerClient):
-            def __init__(self):
-                super().__init__()
-                self.run_post_count = 0
-
-            async def post(self, url, json=None, timeout=None):
-                if url.endswith("/cases/case_review_1/runs"):
-                    self.run_post_count += 1
-                    self.operations.append(("POST", url, json))
-                    if self.run_post_count == 1:
-                        raise httpx.ReadTimeout("timed out creating case run")
-                    return _FakeResponse({"id": self.case_run_id, "status": "running", "reused": False})
-                return await super().post(url, json=json, timeout=timeout)
-
-            async def get(self, url, timeout=None):
-                if url.endswith("/cases/case_review_1/runs"):
-                    self.operations.append(("GET", url, None))
-                    return _FakeResponse({"case_runs": []})
-                return await super().get(url, timeout=timeout)
-
-        client = TimeoutThenRetryClient()
-        runner = CasePipelineRunner(
-            client=client,
-            cases_url="http://cases:8083",
-            gateway_url="http://gateway-http:8080",
-            stt_url="http://stt-http:8765",
-            execution_root=Path("/tmp"),
-        )
-
-        case_run = await runner.create_case_run("case_review_1", {"event_type": "review_submitted"})
-
-        self.assertEqual(case_run["id"], client.case_run_id)
-        self.assertEqual(client.run_post_count, 2)
-        self.assertEqual(
-            [(method, url) for method, url, _ in client.operations],
-            [
-                ("POST", "http://cases:8083/cases/case_review_1/runs"),
-                ("GET", "http://cases:8083/cases/case_review_1/runs"),
-                ("POST", "http://cases:8083/cases/case_review_1/runs"),
-            ],
-        )
+    async def test_create_case_run_stops_after_second_ambiguous_claim_response(self) -> None:
+        class AlwaysTimeoutClient(_RunnerClient):
+            async def post(self, url, json=None, timeout=None, **kwargs):
+                self.operations.append(("POST",url,json))
+                raise httpx.ReadTimeout("claim outcome unavailable")
+        client=AlwaysTimeoutClient()
+        runner=CasePipelineRunner(client=client,cases_url="http://cases:8083",gateway_url="http://gateway",stt_url="http://stt",execution_root=Path("/tmp"))
+        with self.assertRaises(httpx.ReadTimeout):
+            await runner.create_case_run("case_review_1",{})
+        self.assertEqual(len(client.operations),2)
+        self.assertEqual(client.operations[0],client.operations[1])
+        self.assertIsNone(runner.claim)
 
     async def test_step_3_resolves_component_names_from_target_field(self) -> None:
         runner = CasePipelineRunner(
@@ -498,7 +439,7 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             ]
         }
         with tempfile.TemporaryDirectory() as tmpdir:
-            outputs = await runner.execute_structured_analysis_baseline("step_5", case_detail, Path(tmpdir))
+            outputs = await runner.execute_structured_analysis_baseline("extract", case_detail, Path(tmpdir))
             packet_path = Path(tmpdir) / "artifacts" / "review_packet.json"
 
             self.assertTrue(packet_path.exists())
@@ -523,7 +464,7 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             ]
         }
         with tempfile.TemporaryDirectory() as tmpdir:
-            outputs = await runner.execute_structured_analysis_baseline("step_7", case_detail, Path(tmpdir))
+            outputs = await runner.execute_structured_analysis_baseline("write_review", case_detail, Path(tmpdir))
             review_path = Path(outputs["review_note_path"])
 
             content = review_path.read_text(encoding="utf-8")
@@ -553,60 +494,34 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
         outputs = await runner.execute_step_8(case_detail)
 
         patch_payload = next(payload for method, url, payload in client.operations if method == "PATCH" and url.endswith("/v1/reviews/review_12345678/status"))
-        self.assertEqual(patch_payload["status"], "processed")
-        self.assertEqual(patch_payload["automaton_status"], "succeeded")
-        self.assertEqual(patch_payload["automaton_event"], "review_passed")
-        self.assertEqual(patch_payload["reason"], "review_passed")
+        self.assertEqual(patch_payload["status"], "failed")
+        self.assertEqual(patch_payload["automaton_status"], "failed")
+        self.assertEqual(patch_payload["automaton_event"], "packet_failed")
+        self.assertEqual(patch_payload["reason"], "packet_failed")
         self.assertEqual(patch_payload["review_scope"], REVIEW_SCOPE_FULL)
-        self.assertEqual(patch_payload["review_packet_status"], "needs_human_review")
-        self.assertEqual(outputs["review_status_updated"]["status"], "processed")
-        self.assertEqual(outputs["review_status_updated"]["automaton_status"], "succeeded")
-        self.assertEqual(outputs["review_status_updated"]["automaton_event"], "review_passed")
-        self.assertEqual(outputs["review_status_updated"]["reason"], "review_passed")
+        self.assertEqual(patch_payload["review_packet_status"], "failed")
+        self.assertEqual(outputs["review_status_updated"]["status"], "failed")
+        self.assertEqual(outputs["review_status_updated"]["automaton_status"], "failed")
+        self.assertEqual(outputs["review_status_updated"]["automaton_event"], "packet_failed")
+        self.assertEqual(outputs["review_status_updated"]["reason"], "packet_failed")
         self.assertEqual(outputs["review_status_updated"]["review_scope"], REVIEW_SCOPE_FULL)
-        self.assertEqual(outputs["review_status_updated"]["review_packet_status"], "needs_human_review")
+        self.assertEqual(outputs["review_status_updated"]["review_packet_status"], "failed")
 
-    async def test_step_8_degraded_packet_completes_case_step_after_status_writeback(self) -> None:
+    async def test_step_8_degraded_packet_commits_failed_outcome_with_writeback(self) -> None:
         client = _RunnerClient()
-        runner = CasePipelineRunner(
-            client=client,
-            cases_url="http://cases:8083",
-            gateway_url="http://gateway-http:8080",
-            stt_url="http://stt-http:8765",
-            execution_root=Path("/tmp"),
-        )
-        case_detail = {
-            "case": {"id": "case_review_1", "status": "OPEN"},
-            "slots": [
-                {"name": "review_id", "value": json.dumps("review_12345678")},
-                {"name": "review_note_path", "value": json.dumps("/tmp/review.md")},
-                {"name": "transcript", "value": json.dumps("This X is not centered.")},
-                {"name": "observations", "value": json.dumps([{"id": "fb_001"}])},
-                {"name": "component_names", "value": json.dumps([{"component": "button.x"}])},
-                {"name": "review_status_updated", "value": None},
-            ],
-        }
-        step = {"id": "step_db_8", "step_id": "step_8", "name": "Update review status", "idx": 7, "status": "READY"}
-        client.case_detail = {
-            **case_detail,
-            "steps": [step],
-            "contract": {"steps": [{"step_id": "step_8", "output_variables": ["review_status_updated"]}]},
-        }
-
-        await runner.run_step("case_run_1", "case_review_1", {}, case_detail, step, Path("/tmp"))
-
-        patch_payload = next(payload for method, url, payload in client.operations if method == "PATCH" and url.endswith("/v1/reviews/review_12345678/status"))
-        self.assertEqual(patch_payload["status"], "processed")
-        self.assertEqual(patch_payload["automaton_status"], "succeeded")
-        self.assertEqual(patch_payload["automaton_event"], "review_passed")
-        self.assertEqual(patch_payload["reason"], "review_passed")
-        self.assertEqual(patch_payload["review_packet_status"], "needs_human_review")
-        complete_output_index = next(index for index, (_, url, _) in enumerate(client.operations) if "/steps/step_db_8/complete-outputs" in url)
-        step_run_index, step_run_update = next((index, payload) for index, (method, url, payload) in enumerate(client.operations) if method == "PUT" and url.endswith("/step-runs/step_run_step_db_8"))
-        self.assertLess(complete_output_index, step_run_index)
-        self.assertEqual(step_run_update["status"], "completed")
-        self.assertFalse(any(method == "PUT" and url.endswith("/cases/case_review_1/steps/step_db_8") for method, url, _ in client.operations))
-        self.assertFalse(any(event["type"] == "step.failed" for event in client.events))
+        runner = CasePipelineRunner(client=client,cases_url="http://cases:8083",gateway_url="http://gateway-http:8080",stt_url="http://stt",execution_root=Path("/tmp"))
+        detail=client.case_detail
+        step=detail["steps"][7]
+        step["status"]="READY"
+        await runner.run_step("case_run_1","case_review_1",{},detail,step,Path("/tmp"))
+        writeback=next(payload for method,url,payload in client.operations if method=="PATCH")
+        self.assertEqual(writeback["status"],"failed")
+        self.assertEqual(writeback["automaton_event"],"packet_failed")
+        completion=next(payload for _,url,payload in client.operations if "/steps/step_db_8/complete-outputs" in url)
+        self.assertEqual(completion["terminal_status"],"FAILED")
+        self.assertEqual(completion["outputs_json"]["review_status_updated"]["status"],"failed")
+        self.assertTrue(any(event["type"]=="step.failed" for event in client.events))
+        self.assertFalse(any(method=="PUT" and "/step-runs/" in url for method,url,_ in client.operations))
 
     async def test_step_8_records_transcript_only_status_reason(self) -> None:
         client = _RunnerClient()
@@ -630,11 +545,11 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
         outputs = await runner.execute_step_8(case_detail)
 
         patch_payload = next(payload for method, url, payload in client.operations if method == "PATCH" and url.endswith("/v1/reviews/review_12345678/status"))
-        self.assertEqual(patch_payload["status"], "processed")
-        self.assertEqual(patch_payload["automaton_status"], "succeeded")
-        self.assertEqual(patch_payload["automaton_event"], "review_passed")
-        self.assertEqual(patch_payload["reason"], "review_passed")
-        self.assertEqual(outputs["review_status_updated"]["review_packet_status"], "transcript_only")
+        self.assertEqual(patch_payload["status"], "failed")
+        self.assertEqual(patch_payload["automaton_status"], "failed")
+        self.assertEqual(patch_payload["automaton_event"], "packet_failed")
+        self.assertEqual(patch_payload["reason"], "packet_failed")
+        self.assertEqual(outputs["review_status_updated"]["review_packet_status"], "failed")
 
     async def test_step_8_ready_packet_records_successful_automaton_metadata(self) -> None:
         client = _RunnerClient()
@@ -642,7 +557,7 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             packet_dir = Path(tmpdir) / "case_review_1" / "artifacts"
             packet_dir.mkdir(parents=True)
             (packet_dir / "review_packet.json").write_text(
-                json.dumps({"quality": {"status": "review_packet_ready"}}),
+                json.dumps({"transcript":{"text":"Move button"},"feedback_items":[{"id":"f","target_refs":["button"]}],"events":{"target_candidates":[{"target_ref":"button"}]},"source_bindings":[{"feedback_item_id":"f","status":"verified"}],"quality":{"status":"review_packet_ready"}}),
                 encoding="utf-8",
             )
             runner = CasePipelineRunner(client=client, cases_url="http://cases:8083", gateway_url="http://gateway-http:8080", stt_url="http://stt-http:8765", execution_root=Path(tmpdir))
@@ -650,7 +565,7 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
                 "case": {"id": "case_review_1"},
                 "slots": [
                     {"name": "review_id", "value": json.dumps("review_12345678")},
-                    {"name": "review_note_path", "value": json.dumps("/tmp/review.md")},
+                    {"name": "review_note_path", "value": json.dumps(str(packet_dir / "review.md"))},
                     {"name": "transcript", "value": json.dumps("This X is not centered.")},
                     {"name": "observations", "value": json.dumps([{"id": "fb_001"}])},
                     {"name": "component_names", "value": json.dumps([{"component": "button.x"}])},
@@ -682,7 +597,7 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             ]
         }
         with tempfile.TemporaryDirectory() as tmpdir:
-            outputs = await runner.execute_structured_analysis_baseline("step_5", case_detail, Path(tmpdir))
+            outputs = await runner.execute_structured_analysis_baseline("extract", case_detail, Path(tmpdir))
 
         self.assertTrue(outputs["review_packet_path"].endswith("review_packet.json"))
         self.assertEqual(outputs["review_packet_status"], "needs_source_binding")
@@ -736,7 +651,7 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             case_dir = Path(tmpdir)
             (case_dir / "artifacts").mkdir(parents=True, exist_ok=True)
             for step_id in ["step_4", "step_5", "step_6", "step_7"]:
-                outputs = await runner.execute_structured_analysis_baseline(step_id, base_case_detail, case_dir)
+                outputs = await runner.execute_structured_analysis_baseline(profile_for(contract)["handlers"][step_id]["handler"], base_case_detail, case_dir)
                 self.assertEqual(set(outputs), expected_by_step[step_id], step_id)
 
     async def test_step_6_returns_per_feedback_deferred_source_bindings(self) -> None:
@@ -749,7 +664,7 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             ]
         }
         with tempfile.TemporaryDirectory() as tmpdir:
-            outputs = await runner.execute_structured_analysis_baseline("step_6", case_detail, Path(tmpdir))
+            outputs = await runner.execute_structured_analysis_baseline("bind_source", case_detail, Path(tmpdir))
 
         bindings = outputs["codebase_context"]
         self.assertEqual(set(outputs), {"codebase_context"})
@@ -771,7 +686,7 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
                     {"name": "component_names", "value": json.dumps([{"component": "button.zh-notification-card__dismiss", "selectors": ["button.zh-notification-card__dismiss"]}])},
                 ]
             }
-            outputs = await runner.execute_structured_analysis_baseline("step_6", case_detail, Path(codebase_root))
+            outputs = await runner.execute_structured_analysis_baseline("bind_source", case_detail, Path(codebase_root))
 
         bindings = outputs["codebase_context"]
         self.assertEqual(bindings[0]["status"], "verified")
@@ -792,7 +707,7 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             ]
         }
         with tempfile.TemporaryDirectory() as tmpdir:
-            outputs = await runner.execute_structured_analysis_baseline("step_7", case_detail, Path(tmpdir))
+            outputs = await runner.execute_structured_analysis_baseline("write_review", case_detail, Path(tmpdir))
             self.assertEqual(set(outputs), {"review_note_path"})
             content = Path(outputs["review_note_path"]).read_text(encoding="utf-8")
 
@@ -822,10 +737,10 @@ class FrankCasePipelineRunnerTests(unittest.IsolatedAsyncioTestCase):
             outputs = await runner.execute_step_8(case_detail)
 
         patch_payload = next(payload for method, url, payload in client.operations if method == "PATCH" and url.endswith("/v1/reviews/review_12345678/status"))
-        self.assertEqual(patch_payload["status"], "processed")
-        self.assertEqual(patch_payload["automaton_status"], "succeeded")
-        self.assertEqual(patch_payload["automaton_event"], "review_passed")
-        self.assertEqual(patch_payload["reason"], "review_passed")
+        self.assertEqual(patch_payload["status"], "failed")
+        self.assertEqual(patch_payload["automaton_status"], "failed")
+        self.assertEqual(patch_payload["automaton_event"], "packet_failed")
+        self.assertEqual(patch_payload["reason"], "packet_failed")
         self.assertEqual(outputs["review_status_updated"]["review_packet_path"].endswith("review_packet.json"), True)
 
 

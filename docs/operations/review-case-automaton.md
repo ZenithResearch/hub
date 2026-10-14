@@ -31,7 +31,7 @@ F  = {succeeded, failed}
 The implementation currently exercises the review-packet writeback slice directly from Frank Step 8:
 
 - `review_packet_ready` is treated as `review + review_passed`.
-- Any non-`review_packet_ready` packet is treated as `processing + packet_failed`.
+- Any non-`review_packet_ready`, missing, malformed or unreadable canonical packet is treated as `processing + packet_failed`. Quality is recomputed from the packet evidence; a stored status label cannot override it. The failed outcome and writeback evidence commit together in Cases.
 
 The earlier lifecycle states remain in the automaton so producer/runner code can represent the whole case lifecycle without overloading Gateway's public status enum.
 
@@ -99,3 +99,5 @@ For this slice:
 - Any non-`review_packet_ready` packet writes Gateway public `failed`, automaton status `failed`, event/reason `packet_failed`, and preserves the packet status for operator/UI diagnosis.
 
 This conservative behavior prevents a degraded packet from remaining incoherently `processing` while also being semantically failed.
+
+Attempt claims, expiry and ambiguous external effects are described in [legacy review containment](legacy-review-containment.md). They do not add retry transitions to this review automaton.

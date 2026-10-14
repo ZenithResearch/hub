@@ -38,3 +38,9 @@ Frank is the Hub execution/controller service for native case pipelines. It cons
 uv run pytest tests/test_frank_case_pipeline_runner.py tests/test_frank_dispatcher.py tests/test_frank_stt_client.py -q
 uv run pytest tests/test_review_packet.py tests/test_review_case_automaton.py -q
 ```
+
+## Legacy containment
+
+Native review execution uses the fenced claim protocol and immutable attempt identities described in [legacy review containment](../../docs/operations/legacy-review-containment.md). Invalid historical contracts remain inspectable but cannot execute. These are legacy migration records, not the new process-runtime or service-management aggregates.
+
+Run `python -m pytest tests/test_legacy_containment.py -q` with the focused suites above for concurrency, crash and restart coverage.

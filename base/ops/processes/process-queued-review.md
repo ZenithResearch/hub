@@ -3,6 +3,7 @@ title: "Process queued review"
 doc_type: processes
 tags: [review, feedback, audio, transcription, annotation]
 dispatch_profile: frank
+legacy_execution_profile: personal-review-v1
 ---
 
 # Process queued review
@@ -139,7 +140,7 @@ observation, no feedback point is written for it.
 **Required Resources:** `review audio asset`
 `review assets workspace`
 
-**Processing:** Transcribe `audio_asset_path` into a verbatim transcript through Frank's STT provider boundary. Production uses ElevenLabs Scribe v2 batch (`STT_PROVIDER=elevenlabs`, `STT_MODEL=scribe_v2`) with local Whisper/STT HTTP available as fallback. Use the interaction timeline in `events` only to align the transcript with the review session and preserve the correct `audio_offset_ms` for downstream annotation.
+**Processing:** Transcribe `audio_asset_path` into a verbatim transcript through Frank's STT provider boundary. Production uses ElevenLabs Scribe v2 batch (`STT_PROVIDER=elevenlabs`, `STT_MODEL=scribe_v2`) with local Whisper/STT HTTP available as an explicitly selected provider. A claimed legacy attempt must not silently retry or switch providers after an ambiguous outcome. Use the interaction timeline in `events` only to align the transcript with the review session and preserve the correct `audio_offset_ms` for downstream annotation.
 
 **Output (process state):**
 ```json
@@ -405,7 +406,7 @@ on, in order. Quote verbal cues directly. Reference component names where resolv
 
 **Tools:** `update_review_status`
 
-**Processing:** Mark the review record for `review_id` as `processed`, preserving existing review metadata and recording the generated `review_note_path`, `review_packet_path`, and `review_packet_status`.
+**Processing:** Read and validate the final canonical packet, recompute quality, and mark the review record `processed` only for `review_packet_ready`. Missing, unreadable, malformed or degraded evidence writes `failed`. Preserve review metadata and record `review_note_path`, `review_packet_path`, and diagnostic `review_packet_status`. Commit the writeback evidence with its corresponding terminal step outcome.
 
 This is the only review-status writeback in the process. Emit `review_status_updated` only after the gateway/status record confirms the write succeeded.
 
@@ -471,7 +472,7 @@ This is the only review-status writeback in the process. Emit `review_status_upd
 | `codebase_context` | array | Situational implementation context binding observations to relevant components, selectors, files, likely causes, confidence, and caveats |
 | `review_id_short` | string | First 8 characters of `review_id`, used as the short identifier in vault note filenames |
 | `review_note_path` | string (path) | Vault path to the generated review document note |
-| `review_status_updated` | object | Confirmation payload emitted only after the review status record is successfully marked processed |
+| `review_status_updated` | object | Confirmation payload emitted after status writeback; failed packet outcomes remain failed |
 
 ---
 
@@ -482,7 +483,7 @@ This is the only review-status writeback in the process. Emit `review_status_upd
 | Review packet | case runtime artifacts: `review_packet.json` | Canonical machine-readable packet with normalized events, target timeline, segments, feedback items, packet quality/status, and artifact pointers |
 | Processed review doc | operator vault note: `review {review_id_short}.md` | Reviewer-voice document rendered from `review_packet.json`; issues identified, component names resolved |
 | Transcript note | operator vault note: `transcript {review_id_short}.md` | Verbatim transcript with all annotation passes |
-| Review status update | review status record | `status: processed`, preserving metadata and recording `review_note_path` |
+| Review status update | review status record | `processed` only for a verified ready packet; otherwise `failed`, preserving metadata and recording `review_note_path` |
 
 All other intermediate data remains process state. The review packet is the durable
 case artifact for machine consumers; the vault review note is the human-facing handoff.

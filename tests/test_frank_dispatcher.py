@@ -309,11 +309,11 @@ Process a review.
                 Path(self.tmpdir.name),
             )
 
-        write_slots.assert_awaited_once()
-        fake_runner.create_case_run.assert_awaited_once_with("case_123", dispatch_packet)
+        write_slots.assert_not_awaited()
+        fake_runner.create_case_run.assert_not_awaited()
         schedule_native.assert_awaited_once()
         self.assertEqual(result["runtime_mode"], "native_case_pipeline")
-        self.assertEqual(result["case_run_id"], "case_run_native")
+        self.assertTrue(result["scheduled"])
         self.assertEqual(result["launched_steps"], [])
 
     async def test_recover_native_case_pipelines_schedules_open_native_cases_on_startup(self) -> None:
@@ -359,7 +359,7 @@ Process a review.
         schedule_native.assert_awaited_once()
         self.assertEqual(result, {"recovered_case_ids": ["case_123"], "recovered_count": 1})
 
-    async def test_recover_native_case_pipelines_retries_stale_in_progress_ready_case_only(self) -> None:
+    async def test_recover_native_case_pipelines_defers_running_state_to_atomic_claim(self) -> None:
         native_packet = {
             "case_id": "case_stale",
             "runtime": {"mode": "native_case_pipeline", "source_of_truth": "cases/Zenith"},
@@ -420,14 +420,12 @@ Process a review.
 
         client = RecoveryClient()
         with patch.object(self.module, "ensure_case_runtime_dir", return_value=Path(self.tmpdir.name)) as ensure_dir, patch.object(
-            self.module, "schedule_native_case_pipeline_task", AsyncMock(return_value=True)
+            self.module, "schedule_native_case_pipeline_task", AsyncMock(side_effect=[True,False])
         ) as schedule_native:
             result = await self.module.recover_native_case_pipelines(client, limit=10)
 
-        ensure_dir.assert_called_once_with("case_stale")
-        schedule_native.assert_awaited_once()
-        assert schedule_native.await_args is not None
-        self.assertEqual(schedule_native.await_args.args[1], "case_stale")
+        self.assertEqual(ensure_dir.call_count,2)
+        self.assertEqual([call.args[1] for call in schedule_native.await_args_list],["case_stale","case_active"])
         self.assertEqual(result, {"recovered_case_ids": ["case_stale"], "recovered_count": 1})
 
     async def test_recover_native_case_pipelines_retries_blocked_case_with_ready_steps(self) -> None:
@@ -496,6 +494,7 @@ Process a review.
                 "process_hash": "hash_123",
                 "title": "Process queued review",
                 "dispatch_profile": "frank",
+                "root_inputs": ["review_id","audio_asset_id","events_asset_id","subject_id","submitted_by","reviewed_at","duration_ms"],
                 "slot_names": [
                     "review_id",
                     "audio_asset_id",
@@ -592,7 +591,7 @@ Process a review.
         self.assertEqual(client.posts[0][0], "http://cases:8083/cases")
         slot_posts = [(url, payload) for url, payload, _ in client.posts if url.endswith("/cases/case_123/slots")]
         self.assertEqual(
-            {payload["name"]: payload["value"] for _, payload in slot_posts},
+            start_mock.await_args.args[2]["initial_context"],
             {
                 "review_id": "review_123",
                 "audio_asset_id": "audio_789",
@@ -603,10 +602,9 @@ Process a review.
                 "duration_ms": 12000,
             },
         )
-        first_start_index = client.operations.index(("CALL", "start_case_execution"))
         slot_indexes = [idx for idx, op in enumerate(client.operations) if op == ("POST", "http://cases:8083/cases/case_123/slots")]
-        self.assertTrue(slot_indexes)
-        self.assertLess(max(slot_indexes), first_start_index)
+        self.assertEqual(slot_posts, [])
+        self.assertEqual(slot_indexes, [])
         self.assertIn("http://cases:8083/cases/case_123", client.gets)
         self.assertIn(("http://cases:8083/cases/case_123/dispatch-packet",), tuple((url,) for url, _ in client.puts))
         self.assertFalse(any("/queues/workers/enqueue" in url for url, _, _ in client.posts))
@@ -630,16 +628,16 @@ Process a review.
             dispatch_packet["worker_instructions"],
         )
         self.assertIn(
-            "Persist per-step task and runtime state with update_step_runtime_state while work is active.",
+            "Commit validated outputs and the step attempt outcome in one Cases transaction.",
             dispatch_packet["worker_execution_rules"],
         )
-        self.assertIn("Follow the DAG exactly.", dispatch_packet["worker_instructions"][3])
+        self.assertIn("Select runnable work from the frozen DAG, handler prerequisites, and committed input values.", dispatch_packet["worker_execution_rules"])
         self.assertEqual(dispatch_packet["initial_context"]["review_id"], "review_123")
         self.assertEqual(dispatch_packet["initial_context"]["audio_asset_id"], "audio_789")
         self.assertEqual(dispatch_packet["initial_context"]["events_asset_id"], "events_456")
         self.assertEqual(dispatch_packet["capabilities"]["env_vars"], ["ELEVENLABS_API_KEY"])
         self.assertEqual(dispatch_packet["runtime"], {"mode": "native_case_pipeline", "source_of_truth": "cases/Zenith"})
-        self.assertEqual(dispatch_packet["initial_context"]["audio_asset_path"], "data/reviews/assets/audio_789")
+        self.assertNotIn("audio_asset_path", dispatch_packet["initial_context"])
         self.assertEqual(dispatch_packet["resolved_step_briefs"][0]["workspace_policy"], "scratch")
         self.assertEqual(result["wave_id"], "wave_001")
         self.assertEqual(result["launched_steps"][0]["profile"], "frank")
@@ -837,8 +835,9 @@ Process a review.
         }
         client = _FakeClient({}, case_detail)
 
-        result = await self.module.start_case_execution(client, "case_123", {"case_id": "case_123", "capabilities": {}})
-
+        with patch.object(self.module,"schedule_native_case_pipeline_task",AsyncMock(return_value=False)) as schedule:
+            result = await self.module.start_case_execution(client, "case_123", {"case_id": "case_123", "capabilities": {}})
+        schedule.assert_awaited_once()
         self.assertTrue(result["already_active"])
         self.assertEqual(result["launched_steps"], [])
         self.assertFalse(any("/status" in url and payload == {"status": "BLOCKED"} for url, payload in client.puts))
@@ -871,7 +870,7 @@ Process a review.
 
         self.assertEqual(result["launched_steps"], [])
         self.assertIn("ELEVENLABS_API_KEY", result["blocked_reason"])
-        self.assertIn(("http://cases:8083/cases/case_123/status", {"status": "BLOCKED"}), client.puts)
+        self.assertFalse(any(url.endswith("/status") for url,_ in client.puts))
 
 
     async def test_write_root_context_slots_skips_existing_non_empty_values(self) -> None:

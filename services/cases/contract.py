@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from .execution_contract import errors as contract_errors, load_profile
+
 from libs.common.errors import NotFoundAppError, ValidationAppError
 from libs.tools.registry import ToolRegistry
 
@@ -410,7 +412,7 @@ def compile_process_contract(source: str, *, process_path: str | None = None) ->
             }
         )
 
-    return {
+    contract = {
         "version": 1,
         "title": title,
         "description": description,
@@ -426,6 +428,15 @@ def compile_process_contract(source: str, *, process_path: str | None = None) ->
         "dag_edges": dag_edges,
         "capabilities": {"env_vars": process_env_vars},
     }
+    problems = contract_errors(contract)
+    if problems:
+        raise ProcessContractError("; ".join(problems))
+    if frontmatter.get("legacy_execution_profile"):
+        try:
+            contract["legacy_execution"] = load_profile(frontmatter["legacy_execution_profile"])
+        except ValueError as exc:
+            raise ProcessContractError(str(exc)) from exc
+    return contract
 
 
 def collect_process_capabilities(contract: dict[str, Any]) -> dict[str, list[str]]:

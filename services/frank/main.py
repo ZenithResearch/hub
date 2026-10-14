@@ -3,9 +3,11 @@ Frank — Hub Dispatcher
 
 Subscribes to the eventbus on startup (queue.job.enqueued topic via SSE).
 On each event, dequeues from the workspace queue, deterministically creates or
-reuses a case, persists a dispatch packet, launches the first runnable wave as
-the actual target Hermes profiles, and only then settles the intake queue
-message while continuing orchestration in-process.
+reuses a legacy Case, persists a dispatch packet, acquires a durable Cases lease,
+and launches the native review runner before settling the intake queue message.
+The frozen DAG and handler resource control readiness. Startup and watchdog
+recovery ask Cases for a distinct attempt after expiry; unresolved effects block
+automatic execution.
 
 Required environment variables:
   QUEUE_HTTP_URL       http://queue:8081
@@ -35,7 +37,7 @@ import httpx
 import yaml
 
 from services.cases.contract import collect_process_capabilities
-from services.frank.case_pipeline_runner import CasePipelineRunner, case_has_runnable_steps
+from services.frank.case_pipeline_runner import CasePipelineRunner
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "info").upper(),
@@ -225,7 +227,7 @@ def resolve_executor_slug(contract: dict[str, Any]) -> str | None:
 
 def build_initial_context(msg: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
     payload = msg.get("payload") or {}
-    slot_names = set(contract.get("slot_names") or [])
+    slot_names = set(contract.get("root_inputs") if "root_inputs" in contract else contract.get("slot_names") or [])
     values: dict[str, Any] = {}
     assets = payload.get("assets") or []
     typed_assets: dict[str, str] = {}
@@ -352,17 +354,12 @@ def build_process_summary(contract: dict[str, Any]) -> dict[str, Any]:
 def build_worker_execution_rules() -> list[str]:
     return [
         "Treat the cases service as the durable source of truth.",
-        "Write initial_context values into empty root slots before any step work.",
-        "Execute steps in waves. Re-fetch the case before each wave and determine readiness from current slot population.",
-        "A step is runnable only when all declared inputs are populated, none of its outputs are populated, it is assigned to you, and it is not terminal.",
-        "Step 1 is the setup boundary for review cases and should run in the parent worker before any parallel delegation wave.",
-        "For later waves, spawn one step runner per runnable step in parallel and pass each runner the exact resolved step brief plus current slot values.",
-        "Persist per-step task and runtime state with update_step_runtime_state while work is active.",
-        "Do not call set_step_running in this dispatch path.",
-        "Step runners must return structured JSON only. The parent worker validates and commits outputs after each wave.",
-        "The authoritative child result is an outputs JSON object whose keys match the declared output variable names and whose values match the declared variable types.",
-        "Output slot writes committed by the parent are the durable proof of completion for output-producing steps.",
-        "Use set_step_completed only for no-output steps.",
+        "Acquire a durable legacy execution claim that atomically binds typed initial_context root inputs.",
+        "Carry the current run identity and fence on every Cases mutation and stop when renewal fails.",
+        "Select runnable work from the frozen DAG, handler prerequisites, and committed input values.",
+        "Start a step attempt before invoking its frozen handler; never infer execution order from step numbers.",
+        "Journal external effects before sending and preserve unknown outcomes for reconciliation.",
+        "Commit validated outputs and the step attempt outcome in one Cases transaction.",
         "Slots are write-once; identical rewrites are idempotent, changed rewrites are invalid.",
     ]
 
@@ -477,15 +474,12 @@ def build_default_resolved_step_briefs(step_briefs: list[dict[str, Any]]) -> lis
 
 def build_default_worker_instructions() -> list[str]:
     return [
-        "Fetch the case from the cases service and treat it as the durable source of truth.",
-        "Use the process summary and resolved step briefs as the authoritative execution brief for this case.",
-        "Before executing steps, write the initial payload-derived slot values from initial_context.",
-        "Follow the DAG exactly. Only work on steps that are currently runnable and assigned to you.",
-        "Run Step 1 in the parent worker as the setup boundary before starting later waves.",
-        "Break each step into tasks locally before delegating or executing.",
+        "Fetch the frozen case contract and verify execution eligibility before work.",
+        "Use the versioned personal-review handler resource and the durable legacy claim protocol.",
         "Persist per-step task/runtime state while work is active.",
-        "For delegated steps, require a structured JSON result whose outputs keys and types match the resolved step brief.",
-        "The parent worker commits validated outputs durably after each wave; child step runners do not write case slots directly.",
+        "Runtime state is diagnostic; only the current fenced step attempt can commit outputs.",
+        "A lost or expired claim stops execution; a safe retry creates a distinct attempt.",
+        "Unknown external outcomes require reconciliation and must not be automatically replayed.",
     ]
 
 
@@ -1092,6 +1086,15 @@ async def schedule_native_case_pipeline_task(
 ) -> bool:
     if case_id in ACTIVE_CASE_TASKS:
         return False
+    if not dispatch_packet.get("_legacy_claim"):
+        runner = CasePipelineRunner(client=client,cases_url=CASES_URL,gateway_url=GATEWAY_HTTP_URL,stt_url=STT_HTTP_URL,execution_root=case_dir.parent)
+        try:
+            claimed = await runner.create_case_run(case_id,dispatch_packet)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 409:
+                return False
+            raise
+        dispatch_packet = {**dispatch_packet,"_legacy_claim":claimed["claim"]}
     task = asyncio.create_task(execute_native_case_pipeline(case_id, dispatch_packet, case_dir))
     ACTIVE_CASE_TASKS[case_id] = task
     task.add_done_callback(_native_case_task_done_callback(case_id))
@@ -1106,12 +1109,7 @@ async def schedule_native_case_pipeline_task(
 
 
 async def recover_native_case_pipelines(client: httpx.AsyncClient, *, limit: int = 100, reason: str = "recovered after Frank startup") -> dict[str, Any]:
-    """Recover native case runs that have no durable active runner.
-
-    This covers the production failure mode where Frank claimed/acked a queue
-    message, wrote root slots, and logged "native case pipeline scheduled", but
-    the in-process asyncio task was lost before Step 1 wrote any durable progress.
-    """
+    """Ask Cases to claim eligible work; only persisted leases decide takeover."""
     recovered: list[str] = []
     inspected: set[str] = set()
     for status in ("IN_PROGRESS", "BLOCKED", "OPEN"):
@@ -1131,11 +1129,7 @@ async def recover_native_case_pipelines(client: httpx.AsyncClient, *, limit: int
                 dispatch_packet = dispatch_packet or _dispatch_packet_from_case_payload(detail.get("case") or detail)
             if not _is_native_case_pipeline_packet(dispatch_packet):
                 continue
-            if detail is not None:
-                if _case_has_durable_active_steps(detail):
-                    continue
-                if status == "BLOCKED" and not case_has_runnable_steps(detail):
-                    continue
+            # Atomic claim validates expiry, eligibility, and ambiguous effects.
             case_dir = ensure_case_runtime_dir(case_id)
             if await schedule_native_case_pipeline_task(client, case_id, dispatch_packet, case_dir, reason=reason):
                 recovered.append(case_id)
@@ -1149,38 +1143,9 @@ async def launch_case_native_pipeline_execution(
     case_detail: dict[str, Any],
     case_dir: Path,
 ) -> dict[str, Any]:
-    root_slot_state = await write_root_context_slots(client, case_id, dispatch_packet, case_detail)
-    runner = CasePipelineRunner(
-        client=client,
-        cases_url=CASES_URL,
-        gateway_url=GATEWAY_HTTP_URL,
-        stt_url=STT_HTTP_URL,
-        execution_root=case_dir.parent,
-    )
-    case_run = await runner.create_case_run(case_id, dispatch_packet)
-    await schedule_native_case_pipeline_task(client, case_id, dispatch_packet, case_dir, reason="scheduled")
-    await append_case_log_safe(
-        client,
-        case_id,
-        "native_case_pipeline",
-        "native case pipeline scheduled",
-        metadata={
-            "runtime_mode": "native_case_pipeline",
-            "case_run_id": case_run["id"],
-            "case_dir": str(case_dir),
-            "root_slots": root_slot_state,
-        },
-    )
-    return {
-        "case_id": case_id,
-        "already_active": False,
-        "case_dir": str(case_dir),
-        "runtime_mode": "native_case_pipeline",
-        "case_run_id": case_run["id"],
-        "root_slots": root_slot_state,
-        "launched_steps": [],
-        "scheduled": True,
-    }
+    scheduled = await schedule_native_case_pipeline_task(client,case_id,dispatch_packet,case_dir,reason="scheduled")
+    return {"case_id":case_id,"already_active":not scheduled,"case_dir":str(case_dir),"runtime_mode":"native_case_pipeline","launched_steps":[],"scheduled":scheduled}
+
 
 
 async def start_case_execution(
@@ -1198,22 +1163,6 @@ async def start_case_execution(
         raise ValueError(
             f"invalid dispatch runtime mode={runtime_mode!r}; expected one of {sorted(VALID_FRANK_RUNTIMES)}"
         )
-    if _case_has_durable_active_steps(case_detail):
-        await append_case_log_safe(
-            client,
-            case_id,
-            "info",
-            "durable active step runtime found; not launching duplicate runners",
-            metadata={"active_step_ids": [step.get("id") for step in case_detail.get("steps") or []]},
-        )
-        return {
-            "case_id": case_id,
-            "already_active": True,
-            "case_dir": str(case_dir),
-            "wave_id": None,
-            "launched_steps": [],
-        }
-
     missing_env = missing_capability_env_vars(dispatch_packet.get("capabilities") or {})
     if missing_env:
         reason = "missing required configuration: " + ", ".join(missing_env)
@@ -1224,7 +1173,6 @@ async def start_case_execution(
             reason,
             metadata={"missing_env_vars": missing_env, "configuration_surface": "gateway /dashboard configuration"},
         )
-        await update_case_status(client, case_id, "BLOCKED")
         return {
             "case_id": case_id,
             "already_active": False,
@@ -1270,7 +1218,6 @@ async def dispatch_message(client: httpx.AsyncClient, msg: dict[str, Any]) -> di
     )
     await persist_dispatch_packet(client, case_id, dispatch_packet)
     case_detail = await get_case_detail(client, case_id)
-    await write_root_context_slots(client, case_id, dispatch_packet, case_detail)
     return await start_case_execution(client, case_id, dispatch_packet)
 
 
