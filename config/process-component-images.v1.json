@@ -28,9 +28,9 @@
     },
     "service-management": {
       "package": "service-management",
-      "source_commit": "f49f8d776ad37aa113c2e8ab218ac84b4ad6b55c",
+      "source_commit": "44b25d6a84e45c5d35f9b90329bebe9e96cc328f",
       "version": "0.1.0",
-      "wheel_sha256": "22574bb2fc9a2f1a06277afc96799f734fd0e565d5893c12e2307e47fb64807d"
+      "wheel_sha256": "e8c2a5167e0d816e90ee4e12c4a68dc173117d4b5cd83fedab58d2bec1b95a9e"
     }
   },
   "contracts": {
@@ -54,7 +54,7 @@
   "production_ready": false,
   "schema": "hub.component-image-policy.v1",
   "source_date_epoch": 0,
-  "tuple_manifest_sha256": "33ff468b3fd32ba8aa51e6cbcf91fabc5dbc559f932d0d147ddfc44fd4efc92b",
+  "tuple_manifest_sha256": "6c0e35d2319033d31faf512cbc5e672d562c9e76a3a72e2293e23685e25f4555",
   "wheels": [
     {
       "filename": "anyio-4.15.1-py3-none-any.whl",
@@ -137,7 +137,7 @@
     {
       "filename": "service_management-0.1.0-py3-none-any.whl",
       "name": "service-management",
-      "sha256": "22574bb2fc9a2f1a06277afc96799f734fd0e565d5893c12e2307e47fb64807d",
+      "sha256": "e8c2a5167e0d816e90ee4e12c4a68dc173117d4b5cd83fedab58d2bec1b95a9e",
       "version": "0.1.0"
     },
     {

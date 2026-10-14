@@ -7,6 +7,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ### Changed
 
+- Admit the reviewed Service SDK cancellation wheel through a freshly installed, content-verified tuple — keeps immutable image inputs aligned with current SDK recovery behavior and installed provenance.
+
+- Recorded the reviewed Docker identity repair and real repeated component image execution — retains exact source and artifact evidence while hosted CI, newer tuple admission and native production gates remain open.
+
 - Record a fresh installed-artifact tuple with reviewed Runtime/Service transport and Frank result wheels — verifies current cross-component recovery and mismatch rejection while preserving open native/provider/production gates.
 
 
