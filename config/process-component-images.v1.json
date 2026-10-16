@@ -5,26 +5,26 @@
     "manifest_digest": "sha256:228390eced221ad2986a3dd77e10b1accca6ba8ceb36f1572de1b346a337cc1a",
     "platform": "linux/arm64",
     "python_version": "3.12.12",
+    "reference": "docker.io/library/python@sha256:228390eced221ad2986a3dd77e10b1accca6ba8ceb36f1572de1b346a337cc1a",
     "rootfs_diff_ids": [
       "sha256:100031c9cce7b091dd637c1afa21331c3448979cc0953828264b5868ec3f225e",
       "sha256:7d9e14b92a5462bc25f27c7225ccbfd919303ad240e3e44ebacfb639f16573a6",
       "sha256:edc46d2649b4a11db14b483cbc36296c0969b257410236b9e3a777de7d4535a9",
       "sha256:2d83ed6643723ec4e7194dda5f8fe4b0596096857e5a59dc379a0c8d50587aa2"
-    ],
-    "reference": "docker.io/library/python@sha256:228390eced221ad2986a3dd77e10b1accca6ba8ceb36f1572de1b346a337cc1a"
+    ]
   },
   "components": {
     "frank": {
       "package": "frank-executor",
-      "source_commit": "4689ea6315a3d636f365d5511295a41d4c458511",
+      "source_commit": "844ee8e942b76bf53ef5311c1c738d07c0ced28c",
       "version": "0.1.0",
-      "wheel_sha256": "6c84adc2f94143cb07da95a2992424f91e6fbdd882799b46bf149c3beeead4ff"
+      "wheel_sha256": "c5fab4bcc2ddb4c009da9c3a1fd5c6edefadc0082ac115038d9cd13ccd89c422"
     },
     "process-runtime": {
       "package": "process-runtime",
-      "source_commit": "4bdcd06decd12d72fa03a91797119169e2f30d45",
+      "source_commit": "a5f3cf0d8cf0da378d143d3028be921d5df4fdb7",
       "version": "0.1.0",
-      "wheel_sha256": "743a4757ba5665304e4e5cecff4cd45d99841698777742155e30c82664ee246b"
+      "wheel_sha256": "d1a52ca595034149aa95099d3af8a6b3ca0698e4aa41d93cbaf79be4dd82c24d"
     },
     "service-management": {
       "package": "service-management",
@@ -54,7 +54,7 @@
   "production_ready": false,
   "schema": "hub.component-image-policy.v1",
   "source_date_epoch": 0,
-  "tuple_manifest_sha256": "6c0e35d2319033d31faf512cbc5e672d562c9e76a3a72e2293e23685e25f4555",
+  "tuple_manifest_sha256": "4f7d1e294b670eaa90e5bcd12a8d6504d721026d5f49e0ca72fe8410996b3b3b",
   "wheels": [
     {
       "filename": "anyio-4.15.1-py3-none-any.whl",
@@ -77,7 +77,7 @@
     {
       "filename": "frank_executor-0.1.0-py3-none-any.whl",
       "name": "frank-executor",
-      "sha256": "6c84adc2f94143cb07da95a2992424f91e6fbdd882799b46bf149c3beeead4ff",
+      "sha256": "c5fab4bcc2ddb4c009da9c3a1fd5c6edefadc0082ac115038d9cd13ccd89c422",
       "version": "0.1.0"
     },
     {
@@ -119,7 +119,7 @@
     {
       "filename": "process_runtime-0.1.0-py3-none-any.whl",
       "name": "process-runtime",
-      "sha256": "743a4757ba5665304e4e5cecff4cd45d99841698777742155e30c82664ee246b",
+      "sha256": "d1a52ca595034149aa95099d3af8a6b3ca0698e4aa41d93cbaf79be4dd82c24d",
       "version": "0.1.0"
     },
     {

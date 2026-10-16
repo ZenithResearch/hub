@@ -29,3 +29,5 @@ Rollback changes new-work routing. Existing runs, leases, output commits and eff
 ## Current qualification boundary
 
 Isolated compiler, receiver, storage, HTTP, service handoff and Frank tests do not establish production Wallet machine-identity custody or live provider credentials. A disposable macOS qualification environment is relevant to replacement of the live security stack, not to building these components. The current manifest has `authority_qualified: false` and `external_effects: false`. It supports local review and a rollback drill, not an implicit production cutover. Any eventual live cutover needs reconciled existing work and retained qualification evidence for the exact deployed artifacts.
+
+Current exact-artifact local evidence is linked in [process verification](process-execution-verification.md#current-local-installed-evidence) and [component images](process-component-images.md). The accepted Hub tuple and separate full Frank suite leave this development/shadow composition, `authority_qualified: false` and `external_effects: false` unchanged.

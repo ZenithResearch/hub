@@ -7,7 +7,6 @@ Run this from the Hub checkout with an isolated environment containing the revie
   --runtime-wheel /path/to/reviewed/process_runtime-0.1.0-py3-none-any.whl \
   --service-wheel /path/to/reviewed/service_management-0.1.0-py3-none-any.whl \
   --frank-wheel /path/to/reviewed/frank_executor-0.1.0-py3-none-any.whl \
-  --native-helper /path/to/pinned/verification-only-helper \
   --output /private/tmp/reviewed-artifact-tuple.json
 /path/to/isolated-env/bin/python -I scripts/verify_process_execution.py \
   --artifact-manifest /private/tmp/reviewed-artifact-tuple.json \
@@ -19,7 +18,7 @@ Run this from the Hub checkout with an isolated environment containing the revie
   --output /private/tmp/process-artifact-challenges.json
 ```
 
-The manifest freezes an already installed tuple; preparation performs no dependency installation and grants no authority. Installed mode refuses all component source-path overrides. Its file inventory is a content lock for this isolated installation, not a platform wheelhouse, Linux image or native issuing-chain qualification. Retain the exact input wheels/helper and manifest as evidence. Native helper pins refer to a verification-only artifact and do not establish qualification.
+The manifest freezes an already installed tuple; preparation performs no dependency installation and grants no authority. Installed mode refuses all component source-path overrides. Its file inventory is a content lock for this isolated installation, not a platform wheelhouse, Linux image or native issuing-chain qualification. Retain the exact input wheels/helper and manifest as evidence. Native helper pins refer to a verification-only artifact and do not establish qualification. The current native-null profile omits `--native-helper`; selecting an optional verification-only helper is a separate profile and does not follow from the current tuple acceptance.
 
 For source verification:
 
@@ -64,6 +63,12 @@ FRANK_REPO=/path/to/frank \
 ```
 
 Set `PROCESS_ARTIFACT_MANIFEST=/absolute/path/to/manifest.json` instead of the three repository variables to run the installed mode. Without either a manifest or all three explicit repository paths, the integration test reports a skip. The command-line harness requires exactly one supported input mode and exits nonzero on failure. It writes `production_ready: false` even when every local check passes.
+
+## Current local installed evidence
+
+The exact Frank `844ee8e…` / `c5fab4bc…`, Runtime `a5f3cf0…` / `d1a52ca5…` and Service `44b25d6…` / `e8c2a516…` tuple passed the 17-command local workflow: 15 component distributions, a separate six-tool prefix, nine native-null rejection controls and ten installed public-contract Hub groups. Tuple SHA is `4f7d1e294b670eaa90e5bcd12a8d6504d721026d5f49e0ca72fe8410996b3b3b`. Root and independent acceptance is `process-execution-evidence/2026-10-14/hub-current17-actual-reviewed/manifest.json`, SHA `e217733c60ae1ed41879102ea6f9b8e5a2ab4358ac0cf33164419efbe2815444`.
+
+The separate full current Frank installed suite passed 493 cases across 15 modules with zero failures, errors or skips. Its final accepted packet is `process-execution-evidence/2026-10-14/frank-full-current-installed-suite-actual-reviewed/manifest.json`, SHA `d88823673a1c0d0055d8dc4f10c9a229b38324695d75654ee68b5a142d4331e8`. That suite includes ten existing historical synthetic verification-only helper cases; it does not establish issuer, custody or installed Native-chain qualification. Neither receipt grants production authority, provider/model equivalence, live effects or Gate acceptance. Linux context preparation is separate from actual OCI/image and hosted-CI execution; see [component images](process-component-images.md).
 
 ## Production no-go conditions
 
