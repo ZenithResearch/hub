@@ -26,6 +26,10 @@ _host_spec = importlib.util.spec_from_file_location('image_host_tools', Path(__f
 _host_tools = importlib.util.module_from_spec(_host_spec)
 _host_spec.loader.exec_module(_host_tools)
 HOST_TOOLS = _host_tools.verify_environment()
+_execution_spec = importlib.util.spec_from_file_location('image_execution', Path(__file__).with_name('process_image_execution.py'))
+_execution = importlib.util.module_from_spec(_execution_spec)
+_execution_spec.loader.exec_module(_execution)
+_SCRATCH = None
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.tags import compatible_tags, cpython_tags
@@ -286,7 +290,7 @@ def layer_diff_id(source, media, total):
     digest = hashlib.sha256(); size = 0
     stream = gzip.GzipFile(fileobj=source, mode='rb') if media.endswith('+gzip') else source
     try:
-        with tempfile.SpooledTemporaryFile(max_size=1024**2) as raw:
+        with tempfile.SpooledTemporaryFile(max_size=1024**2, dir=_SCRATCH) as raw:
             while chunk := stream.read(1024**2):
                 size += len(chunk)
                 require(size <= MAX_LAYER_BYTES and total+size <= MAX_TOTAL_LAYER_BYTES, 'Decompressed layer exceeds bound')
@@ -344,7 +348,7 @@ def _read_oci(path, *, base_export=False):
                     and type(descriptor['size']) is int and 0 <= descriptor['size'] <= bound, 'Unsupported OCI descriptor')
             name = 'blobs/sha256/'+descriptor['digest'][7:]
             require(name in members and members[name].isfile() and members[name].size == descriptor['size'], 'OCI blob size mismatch')
-            temporary = tempfile.SpooledTemporaryFile(max_size=1024**2)
+            temporary = tempfile.SpooledTemporaryFile(max_size=1024**2, dir=_SCRATCH)
             try:
                 digest = hashlib.sha256(); size = 0
                 with archive.extractfile(members[name]) as stream:
@@ -430,8 +434,14 @@ def verify_base_export(path, base):
     return {**receipt, 'manifest_size': data['manifest_descriptor']['size']}
 
 
-def _inspect_local(docker, reference, output, name):
-    result = subprocess.run([docker, 'image', 'inspect', reference], capture_output=True, timeout=20)
+def _execute(execution, name, command, *, timeout=20, accepted=(0,)):
+    if execution is not None:
+        return execution.run(name, command, timeout=timeout, accepted=accepted)
+    return subprocess.run(command, capture_output=True, timeout=timeout, check=accepted == (0,))
+
+
+def _inspect_local(docker, reference, output, name, execution=None):
+    result = _execute(execution, name, [docker, 'image', 'inspect', reference], accepted=(0, 1))
     require(len(result.stdout)+len(result.stderr) <= MAX_JSON_BYTES, 'Oversized local image inspect')
     (output/(name+'.stdout')).write_bytes(result.stdout)
     (output/(name+'.stderr')).write_bytes(result.stderr)
@@ -459,8 +469,8 @@ def _screen_local(inspected, manifest_digest, config_digest, diff_ids):
     return 'containerd-manifest-id' if identity == manifest_digest else 'classic-config-id'
 
 
-def verify_preloaded_base(base, output, docker):
-    inspected = _inspect_local(docker, base['reference'], output, 'base.inspect')
+def verify_preloaded_base(base, output, docker, execution=None):
+    inspected = _inspect_local(docker, base['reference'], output, 'base.inspect', execution)
     require(inspected is not None, 'Pinned base not preloaded')
     mode = _screen_local(inspected, base['manifest_digest'], base['config_digest'], base['rootfs_diff_ids'])
     aliases = {prefix+'@'+base['manifest_digest'] for prefix in ('python', 'library/python', 'docker.io/library/python')}
@@ -473,8 +483,8 @@ def verify_preloaded_base(base, output, docker):
     if mode == 'containerd-manifest-id':
         path = output/'base.local-save.tar'
         command = [docker, 'image', 'save', '--platform', base['platform'], '--output', str(path), base['reference']]
-        with (output/'base.local-save.log').open('xb') as log:
-            subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=120)
+        result = _execute(execution, 'base.local-save', command, timeout=120)
+        (output/'base.local-save.log').write_bytes(result.stdout + result.stderr)
         receipt.update(verify_base_export(path, base))
         require(inspected['Descriptor']['size'] == receipt['manifest_size'],
                 'Local base manifest descriptor size mismatch')
@@ -483,14 +493,14 @@ def verify_preloaded_base(base, output, docker):
     return receipt
 
 
-def select_loaded_image(path, policy, owner, expected, output, docker):
+def select_loaded_image(path, policy, owner, expected, output, docker, execution=None):
     # Rebind the selector to exact validated raw archive bytes. Never select a
     # tag or treat inspect's summary as a config SHA or manifest substitute.
     data = _verified_component(path, policy, owner)
     actual = data['receipt']
     require(actual == expected, 'Loaded image receipt differs from validated archive')
     for position, reference in enumerate((actual['manifest_digest'], actual['config_digest'])):
-        inspected = _inspect_local(docker, reference, output, owner+'.local-inspect-'+str(position))
+        inspected = _inspect_local(docker, reference, output, owner+'.local-inspect-'+str(position), execution)
         if inspected is None: continue
         mode = _screen_local(inspected, actual['manifest_digest'], actual['config_digest'], actual['rootfs_diff_ids'])
         raw_config = data['config']['config']; local_config = inspected.get('Config')
@@ -507,17 +517,54 @@ def select_loaded_image(path, policy, owner, expected, output, docker):
 
 
 def build_images(root, expected_sha, output, docker='docker'):
+    global _SCRATCH
     manifest = validate_prepared(root, expected_sha)
     require(not output.exists(), 'Build output already exists')
+    output.mkdir(mode=0o700)
+    checkpoints = [root/'contexts.json'] + [root/owner/name
+        for owner, names in manifest['components'].items() for name in names]
+    checkpoints += [HUB/path for path in (
+        'scripts/process_component_images.py', 'scripts/process_image_execution.py',
+        'scripts/bootstrap_process_image_tools.py', 'scripts/process_image_inventory.py',
+        'scripts/process_image_smoke.py', 'config/process-component-images.v1.json',
+        'config/process-image-host-tools.v1.json', 'config/process-image-host-tools.lock',
+        'docker/process-components/Dockerfile')]
+    execution = _execution.ImageExecution(output, docker, checkpoints)
+    previous_scratch = _SCRATCH
+    try:
+        execution.install_handlers()
+        _SCRATCH = execution.scratch
+        report = _build_images(root, expected_sha, output, docker, manifest, execution)
+        validate_prepared(root, expected_sha)
+        execution.finish()
+        # No success artifact exists before the lifecycle gate. Rename is atomic;
+        # partial writes remain separate diagnostics, never image-manifest.json.
+        pending = output/'image-manifest.pending'
+        with pending.open('xb') as destination:
+            destination.write(canonical(report)+b'\n')
+        os.replace(pending, output/'image-manifest.json')
+        return report
+    except BaseException as error:
+        execution.fail('build_images', error)
+        try:
+            execution.finish()
+        except BaseException:
+            pass  # The immutable first failure and secondary cleanup are retained.
+        raise
+    finally:
+        _SCRATCH = previous_scratch
+        execution.restore_handlers()
+
+
+def _build_images(root, expected_sha, output, docker, manifest, execution):
     policy = manifest['policy']
     # Coordinate/preload this exact public base outside this command. No pull,
     # daemon startup, builder creation, registry login or push occurs here.
-    output.mkdir(mode=0o700)
-    base = verify_preloaded_base(policy['base'], output, docker)
+    base = verify_preloaded_base(policy['base'], output, docker, execution)
     tooling = {}
     for name, command in [('engine', [docker, 'version', '--format', '{{json .Server}}']),
                           ('buildx', [docker, 'buildx', 'version'])]:
-        result = subprocess.run(command, capture_output=True, check=True, timeout=20)
+        result = _execute(execution, name, command)
         require(len(result.stdout) < 65536, 'Oversized toolchain response')
         tooling[name] = result.stdout.decode().strip()
     executable = shutil.which(docker)
@@ -533,24 +580,21 @@ def build_images(root, expected_sha, output, docker='docker'):
             command = [docker, 'buildx', 'build', '--builder', 'default', '--platform', policy['base']['platform'],
                 '--network=none', '--pull=false', '--provenance=false', '--sbom=false', '--build-arg', 'SOURCE_DATE_EPOCH=0',
                 '--output', 'type=oci,dest='+str(path)+',compression=gzip,force-compression=true,rewrite-timestamp=true', str(root/owner)]
-            with (output/(owner+'-'+str(repetition)+'.build.log')).open('wb') as log:
-                subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=900)
+            result = execution.build(owner+'-'+str(repetition), command)
+            (output/(owner+'-'+str(repetition)+'.build.log')).write_bytes(result.stdout + result.stderr)
             records.append(verify_oci(path, policy, owner))
         require(records[0] == records[1], 'Repeated image exports differ; no publication')
-        with (output/(owner+'.load.log')).open('wb') as log:
-            subprocess.run([docker, 'load', '--input', str(output/(owner+'-1.oci.tar'))], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=120)
-        selected = select_loaded_image(output/(owner+'-1.oci.tar'), policy, owner, records[0], output, docker)
+        result = _execute(execution, owner+'.load', [docker, 'load', '--input', str(output/(owner+'-1.oci.tar'))], timeout=120)
+        (output/(owner+'.load.log')).write_bytes(result.stdout + result.stderr)
+        selected = select_loaded_image(output/(owner+'-1.oci.tar'), policy, owner, records[0], output, docker, execution)
         image_id = selected['local_image_id']
-        container = [docker, 'run', '--rm', '--pull=never', '--network=none', '--read-only', '--cap-drop=ALL',
-            '--security-opt=no-new-privileges', '--tmpfs', '/data:uid=10001,gid=10001,mode=0700', '--tmpfs', '/tmp:mode=1777',
-            '--entrypoint', '/opt/component/bin/python', image_id, '-I', '-B']
-        result = subprocess.run(container+['/opt/image-tools/smoke.py', owner], capture_output=True, check=True, timeout=60)
+        result = execution.container(owner+'.smoke', image_id, ['/opt/image-tools/smoke.py', owner])
         smoke = json.loads(result.stdout)
         require(smoke['component'] == owner and smoke['production_default_deny'] is True
                 and smoke['external_sends'] == 0 and smoke['production_qualified'] is False, 'Image smoke rejected')
         (output/(owner+'.smoke.json')).write_bytes(canonical(smoke)+b'\n')
-        installed = subprocess.run(container+['/opt/image-tools/inventory.py', '--verify-build', '/opt/evidence/build-inputs.json'],
-                                   capture_output=True, check=True, timeout=60)
+        installed = execution.container(owner+'.inventory', image_id,
+            ['/opt/image-tools/inventory.py', '--verify-build', '/opt/evidence/build-inputs.json'])
         require(len(installed.stdout) < 8*1024*1024, 'Oversized installed image inventory')
         inventory = json.loads(installed.stdout)
         (output/(owner+'.installed.json')).write_bytes(canonical(inventory)+b'\n')
@@ -565,7 +609,6 @@ def build_images(root, expected_sha, output, docker='docker'):
     report = {'schema': 'hub.component-image-artifacts.v1', 'context_manifest_sha256': expected_sha,
               'policy': policy, 'toolchain': tooling, 'base_verification': base, 'images': images,
               'publication': 'local artifacts only; never pushed', 'production_ready': False}
-    (output/'image-manifest.json').write_bytes(canonical(report)+b'\n')
     return report
 
 

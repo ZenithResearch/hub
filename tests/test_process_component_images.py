@@ -1,5 +1,6 @@
 """Prepublication image input tests; real container smoke is a separate receipt."""
 import base64
+from contextlib import contextmanager
 import gzip
 import hashlib
 import io
@@ -17,6 +18,35 @@ from scripts.process_component_images import (
     verify_oci, wheel_inventory, HOST_TOOLS,
     verify_base_export, select_loaded_image,
 )
+
+
+
+@contextmanager
+def docker_replay(docker, *, finish_error=False):
+    """Synthetic product-flow responses; real lifecycle has its own offline tests."""
+    class ReplayExecution:
+        def __init__(self, output, executable, checkpoints):
+            self.output, self.docker = output, executable
+            self.scratch = output/'synthetic-scratch'
+            self.scratch.mkdir()
+        def install_handlers(self): pass
+        def restore_handlers(self): pass
+        def fail(self, phase, error): pass
+        def finish(self):
+            if finish_error:
+                from scripts.process_image_execution import ExecutionFailure
+                raise ExecutionFailure('Synthetic daemon cleanup unknown')
+        def run(self, name, argv, **kwargs): return docker(argv, **kwargs)
+        def build(self, name, argv): return self.run(name, argv)
+        def container(self, name, image, arguments):
+            return self.run(name, [self.docker, 'run', '--rm', '--name', 'synthetic-'+name,
+                '--cidfile', str(self.output/(name+'.cid')), '--label', 'synthetic-only=true',
+                '--pull=never', '--network=none', '--read-only', '--cap-drop=ALL',
+                '--security-opt=no-new-privileges', '--tmpfs', '/data:uid=10001,gid=10001,mode=0700',
+                '--tmpfs', '/tmp:mode=1777', '--entrypoint', '/opt/component/bin/python',
+                image, '-I', '-B', *arguments])
+    with patch('scripts.process_component_images._execution.ImageExecution', ReplayExecution):
+        yield
 
 
 def sha(raw):
@@ -403,7 +433,7 @@ def base_build_replay(inputs,local_base,*,inspected=None,save_returncode=0,calls
         if command[1]=='version' or command[1:3]==['buildx','version']:
             return subprocess.CompletedProcess(command,0,b'fixture-tool-version',b'')
         raise AssertionError(command)
-    with patch('scripts.process_component_images.subprocess.run',side_effect=docker):
+    with docker_replay(docker):
         build_images(root,digest,inputs[3]/'images')
     return calls
 
@@ -531,7 +561,8 @@ def test_component_archive_does_not_accept_docker_save_sidecar(inputs,local_base
 
 
 @pytest.mark.parametrize('mode,failure',[('containerd',None),('classic',None),
-    ('containerd','tag'),('containerd','config-summary'),('containerd','absent')])
+    ('containerd','tag'),('containerd','config-summary'),('containerd','absent'),
+    ('containerd','cleanup-unknown')])
 def test_public_build_flow_uses_only_validated_local_image_and_never_pulls(inputs,local_base,mode,failure):
     # The Docker responses here are synthetic CLI contract fixtures. Actual
     # component builds and owner smoke require a separate engine receipt.
@@ -574,16 +605,21 @@ def test_public_build_flow_uses_only_validated_local_image_and_never_pulls(input
             return subprocess.CompletedProcess(command,0,b'{"synthetic_inventory_fixture":true}',b'')
         elif not (command[1]=='version' or command[1:3]==['buildx','version']):raise AssertionError(command)
         return subprocess.CompletedProcess(command,0,b'synthetic-tool-version',b'')
-    with patch('scripts.process_component_images.subprocess.run',side_effect=docker):
+    from scripts.process_image_execution import ExecutionFailure
+    with docker_replay(docker, finish_error=failure=='cleanup-unknown'):
         if failure:
-            with pytest.raises(ImageInputError):build_images(root,digest,output)
+            expected_error = ExecutionFailure if failure=='cleanup-unknown' else ImageInputError
+            with pytest.raises(expected_error):build_images(root,digest,output)
         else:
             result=build_images(root,digest,output)
             assert set(result['images'])=={'frank','process-runtime','service-management'}
             assert all(row['local_image_selection']['mode']==('classic-config-id' if mode=='classic' else 'containerd-manifest-id')
                        for row in result['images'].values())
     if failure:
-        assert not any(c[1]=='run' for c in calls)
+        if failure=='cleanup-unknown':
+            assert len([c for c in calls if c[1]=='run'])==6
+        else:
+            assert not any(c[1]=='run' for c in calls)
         assert not (output/'image-manifest.json').exists()
     else:
         assert len([c for c in calls if c[1]=='run'])==6
