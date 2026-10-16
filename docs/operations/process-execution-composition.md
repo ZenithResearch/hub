@@ -16,6 +16,8 @@ The combined health check can invoke Frank's real installed public CLI using exp
 
 ## Local component wiring
 
+For the Apple silicon direct-Mac pilot, use the [offline per-user installer](process-macos-installation.md). It supplies final-path package installation, default-deny Runtime/Service launchd lifecycle and passive Frank configuration checks; native enrolment and providers remain separate.
+
 Run Python 3.12 and the pinned wheels. The runtime API binds loopback 8092; service management binds loopback 8091. Their CLI configuration selects separate database files, environment and authority adapter. Frank's `frank.config.v1` selects the runtime endpoint, private evidence journal and enabled integration registry. Matrix and Hermes are configured through adapter entries, never scheduler switches. Matrix tokens and Wallet/receiver references remain outside Hub in operator-selected secret providers.
 
 Development/test requires explicit `local_dev_untrusted` on each participating component. Production leaves that mode disabled and denies execution until a qualified Wallet/secS authority implementation and receiver policy are supplied. The user approved a dedicated Frank identity with Wallet-only native file custody and operator-controlled rotation/revocation; this decision has not provisioned a key. No generic signing oracle or raw seed path is supplied to Frank.
