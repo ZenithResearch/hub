@@ -2,6 +2,8 @@
 
 This guide covers the operator's and Jess's Apple silicon Macs. The current installation can start, stop and inspect the local services. Production request intake and job execution remain disabled while native authority, the live provider and pilot startup wiring are completed. The same installer creates a separate environment, configuration and data on each Mac. Each Mac also needs its own identity enrollment, which remains to be completed.
 
+For repository ownership, the lightweight host options and a one-host route to receiving requests, see the [setup path](process-pilot-setup-path.md). Jess can use the shared Matrix front door once intake is connected; she needs a local installation only to host or execute work herself.
+
 ## What works now
 
 Operator Mac status checked on 16 October 2026: Service and Runtime are live and managed, both report `ready: false`, authority is `pending`, Frank has zero configured actors, `pilot_ready` is false and external effects are disabled.
