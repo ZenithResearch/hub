@@ -12,6 +12,8 @@ false. Frank is installed and configured with an empty integration registry; it
 has no HTTP daemon on 8093. This installation does not provision an identity,
 connect a provider, start delivery pollers or enable external effects.
 
+For current user interactions, a disposable structured-intake example and the proposed Matrix flow, see the [pilot usage guide](process-pilot-usage-guide.md).
+
 ## Install and operate
 
 Install Python 3.12 from the normal trusted Python/Homebrew distribution first.
