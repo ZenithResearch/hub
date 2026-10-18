@@ -13,3 +13,5 @@ The lightweight Hub workspace view offers setup proposal review, lifecycle, expl
 Source verification includes all existing installation/review checks, workspace isolation, closed authority, proposal CAS/history, same-read digest substitution controls, retained input identity and cleanup holds. Installed native composition and a disposable create/read/edit/publish recovery exercise must be recorded separately; source checks alone do not close a delivery gate.
 
 Process source and command literals cross the Node-to-Python bridge through bounded private standard input. Process arguments carry only the selected action, fixed paths and exact request digest. Every selected setup-plan read independently rejects links, nonregular files and oversize content before parsing.
+
+Explicit same-identity renewal and the allowlisted stopped-workspace software upgrade are documented in [Renew the existing workspace permission](workspace-permission-renewal.md). Permission expiry is a status observation, not a reason to recreate custody. Native partial transitions, Frank pending intents and software upgrade uncertainty retain blocking holds.

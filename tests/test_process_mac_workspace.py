@@ -20,6 +20,122 @@ class WorkspaceTests(unittest.TestCase):
   mac.save(self.root/'authority/COMPLETE.json',self.receipt)
   mac.save(self.root/'config/frank-workspace.json',mac.workspace_master(self.root,self.receipt))
   mac.save(self.root/'config/workspace-admission.json',{'schema':'runtime.new-run-admission.v1','enabled':False,'composition_digest':self.receipt['plan_sha256']})
+ def test_permission_expiry_uses_authenticated_receipt_and_does_not_reset_custody(self):
+  self.receipt.update(not_before=100,not_after=3700,identity_not_after=31536100)
+  (self.root/'authority/COMPLETE.json').unlink();mac.save(self.root/'authority/COMPLETE.json',self.receipt)
+  with patch.object(mac.time,'time',return_value=3700):
+   report=mac.workspace_report(self.root)
+  self.assertEqual(report['setup'],'configured')
+  self.assertEqual(report['permission'],{'state':'expired','not_before':'100','not_after':'3700','identity_not_after':'31536100','observed_at':'3700'})
+  self.assertTrue((self.root/'authority/COMPLETE.json').exists())
+ def test_permission_window_boundaries_and_legacy_missing_identity_expiry(self):
+  receipt={'not_before':100,'not_after':3700}
+  for at,state in [(99,'not_yet_valid'),(100,'active'),(3699,'active'),(3700,'expired')]:
+   with patch.object(mac.time,'time',return_value=at):
+    value=mac.workspace_permission(receipt)
+   self.assertEqual(value['state'],state);self.assertIsNone(value['identity_not_after'])
+ def test_malformed_permission_metadata_never_reports_active(self):
+  for receipt in [{},{'not_before':True,'not_after':3700},{'not_before':100,'not_after':'3700'},{'not_before':100,'not_after':100},{'not_before':100,'not_after':3701},{'not_before':100,'not_after':3700,'identity_not_after':3699},{'not_before':100,'not_after':3700,'identity_not_after':9007199254740992}]:
+   with patch.object(mac.time,'time',return_value=200):
+    self.assertEqual(mac.workspace_permission(receipt)['state'],'unknown')
+ def renewable(self):
+  holder={k:'fixed-'+k for k in ['schema','store_id','subject_id','purpose','application','key_id','public_key_hex','public_key_sha256']}
+  holder.update(key_generation=1,state_revision=1,created_at=100,key_created_at=100,published_at=100,not_before=100,not_after=31536100,state='active',revoked_at=None)
+  self.receipt.update(native_generation=1,not_before=100,not_after=3700,identity_not_after=31536100,holder=holder,command_issuer={'key_id':'same-issuer'},journal_capacity='local_review_pilot_512',scope='five fixed scopes')
+  (self.root/'authority/COMPLETE.json').unlink();mac.save(self.root/'authority/COMPLETE.json',self.receipt)
+  with patch.object(mac.time,'time',return_value=100000),patch.object(mac,'launch_status',return_value=False),patch.object(mac,'check_ports'):
+   proposal=mac.workspace_prepare_renewal(self.root)
+  return proposal['plan_sha256']
+ def renewal_runner(self,journal='bound',fail_native=False,change_identity=False,create_journal=False):
+  import copy
+  calls=[]
+  def runner(argv,root,**kwargs):
+   action=argv[1] if argv[0]==root/'native/castalia-wallet-workspace-setup' else argv[5]
+   calls.append(action)
+   if action=='check-renewal':
+    return {'schema':'frank.workspace-renewal-readiness.v1','configuration_sha256':argv[argv.index('--config-sha256')+1],'journal':journal,'ready':True,'pending_commands':0,'cleanup_retained':False}
+   if action in {'renew','resume-renewal'}:
+    folder=root/'authority/renewals/2';folder.mkdir(mode=0o700,parents=True,exist_ok=True)
+    if fail_native and action=='renew':
+     mac.workspace_store(folder/'INTENT.json',b'{}');raise mac.InstallError('native recovery_required')
+    plan=mac.closed_json(mac.bounded_private(Path(argv[3])));new=copy.deepcopy(self.receipt)
+    new.update(schema='castalia.wallet-workspace-renewal-complete.v1',native_generation=2,plan_sha256=argv[5],previous_complete=plan['previous_complete'],not_before=int(plan['not_before']),not_after=int(plan['not_after']))
+    new['holder']['state_revision']=2
+    if change_identity:new['holder']['key_id']='changed-key'
+    configs=folder/'config';configs.mkdir(mode=0o700,exist_ok=True)
+    for name in mac.WORKSPACE_CONFIGS:
+     mac.workspace_store(configs/name,mac.workspace_bytes({'fixture':name,'generation':2}));new['configuration_hashes'][name]=mac.sha(configs/name)
+    mac.workspace_store(folder/'COMPLETE.json',mac.workspace_bytes(new))
+    if create_journal:(root/'data/frank-workspace.db').write_bytes(b'unexpected')
+    return {'schema':'castalia.wallet-workspace-renewal-output.v1','status':'configured_not_activated','complete':{'path':str(folder/'COMPLETE.json'),'sha256':mac.sha(folder/'COMPLETE.json')}}
+   if action=='migrate-binding':
+    migration=mac.closed_json(mac.bounded_private(Path(argv[argv.index('--input')+1])))
+    return {'schema':'frank.workspace-migration-result.v1','previous_configuration_sha256':migration['previous_configuration']['sha256'],'configuration_sha256':argv[argv.index('--config-sha256')+1],'migration_sha256':argv[argv.index('--input-sha256')+1],'previous_complete_sha256':migration['previous_complete']['sha256'],'renewed_complete_sha256':migration['renewed_complete']['sha256'],'commands_preserved':True,'duplicate':False}
+   self.fail(action)
+  return runner,calls
+ def renew_with(self,pin,runner,resume=False):
+  with patch.object(mac,'launch_status',return_value=False),patch.object(mac,'check_ports'),patch.object(mac,'workspace_run',side_effect=runner):
+   return mac.workspace_renew(self.root,pin,resume=resume)
+ def test_renewal_preserves_identity_old_files_and_bound_journal(self):
+  pin=self.renewable();old=(self.root/'authority/COMPLETE.json').read_bytes();journal=self.root/'data/frank-workspace.db';journal.write_bytes(b'opaque observed command history')
+  runner,calls=self.renewal_runner();result=self.renew_with(pin,runner)
+  self.assertEqual(calls,['check-renewal','renew','migrate-binding']);self.assertTrue(result['identity_preserved']);self.assertTrue(result['commands_preserved'])
+  self.assertEqual((self.root/'authority/COMPLETE.json').read_bytes(),old);self.assertEqual(journal.read_bytes(),b'opaque observed command history')
+  self.assertFalse((self.root/mac.WORKSPACE_RENEW_HOLD).exists());self.assertEqual(mac.workspace_ready(self.root)['native_generation'],2)
+  master=mac.load(self.root/'config/frank-workspace.json');self.assertIn('/renewals/2/config/wallet-command.json',master['wallet']['configuration'])
+ def test_absent_journal_renewal_never_creates_or_migrates_one(self):
+  pin=self.renewable();runner,calls=self.renewal_runner(journal='absent');result=self.renew_with(pin,runner)
+  self.assertEqual(calls,['check-renewal','renew']);self.assertEqual(result['journal'],'absent');self.assertIsNone(result['migration_sha256']);self.assertFalse((self.root/'data/frank-workspace.db').exists())
+ def test_journal_appearing_after_absent_readiness_retains_renewal_hold(self):
+  pin=self.renewable();runner,calls=self.renewal_runner(journal='absent',create_journal=True)
+  with self.assertRaisesRegex(mac.InstallError,'journal appeared'):self.renew_with(pin,runner)
+  self.assertTrue((self.root/mac.WORKSPACE_RENEW_HOLD).exists());self.assertNotIn('migrate-binding',calls)
+ def test_native_uncertainty_retains_hold_and_exact_plan_resume_can_invoke(self):
+  pin=self.renewable();runner,calls=self.renewal_runner(fail_native=True)
+  with self.assertRaisesRegex(mac.InstallError,'recovery_required'):self.renew_with(pin,runner)
+  self.assertTrue((self.root/mac.WORKSPACE_RENEW_HOLD).exists());self.assertTrue(mac.workspace_report(self.root)['renewal']['resumable'])
+  self.renew_with(pin,runner,resume=True)
+  self.assertEqual(calls,['check-renewal','renew','check-renewal','resume-renewal','migrate-binding']);self.assertFalse((self.root/mac.WORKSPACE_RENEW_HOLD).exists())
+ def test_known_native_preflight_denial_without_intent_allows_new_public_proposal(self):
+  pin=self.renewable();runner,calls=self.renewal_runner()
+  def deny(argv,root,**kwargs):
+   if argv[0]==root/'native/castalia-wallet-workspace-setup':
+    failure=mac.InstallError('known preflight denial');failure.native_preflight_denied=True;raise failure
+   return runner(argv,root,**kwargs)
+  with self.assertRaisesRegex(mac.InstallError,'preflight denial'):self.renew_with(pin,deny)
+  self.assertFalse((self.root/mac.WORKSPACE_RENEW_HOLD).exists());self.assertFalse((self.root/'authority/renewals').exists())
+  with patch.object(mac.time,'time',return_value=100100),patch.object(mac,'launch_status',return_value=False),patch.object(mac,'check_ports'):
+   self.assertNotEqual(mac.workspace_prepare_renewal(self.root,pin)['plan_sha256'],pin)
+ def test_native_preflight_two_never_releases_existing_successor_artifacts(self):
+  pin=self.renewable();runner,_=self.renewal_runner()
+  def deny(argv,root,**kwargs):
+   if argv[0]==root/'native/castalia-wallet-workspace-setup':
+    folder=root/'authority/renewals/2';folder.mkdir(mode=0o700,parents=True);mac.save(folder/'INTENT.json',{});mac.save(folder/'COMPLETE.json',{})
+    failure=mac.InstallError('known preflight denial');failure.native_preflight_denied=True;raise failure
+   return runner(argv,root,**kwargs)
+  with self.assertRaises(mac.InstallError):self.renew_with(pin,deny)
+  self.assertTrue((self.root/mac.WORKSPACE_RENEW_HOLD).exists());self.assertFalse((self.root/mac.WORKSPACE_SELECTION).exists())
+ def test_changed_identity_never_publishes_successor_selection(self):
+  pin=self.renewable();runner,_=self.renewal_runner(change_identity=True)
+  with self.assertRaisesRegex(mac.InstallError,'changed identity'):self.renew_with(pin,runner)
+  self.assertFalse((self.root/mac.WORKSPACE_SELECTION).exists());self.assertTrue((self.root/mac.WORKSPACE_RENEW_HOLD).exists())
+ def test_partial_native_renewal_blocks_start_and_preparation(self):
+  self.renewable();folder=self.root/'authority/renewals/2';folder.mkdir(mode=0o700,parents=True);mac.save(folder/'INTENT.json',{})
+  self.assertTrue(mac.workspace_holds(self.root))
+  with patch.object(mac,'launch_status',return_value=False),patch.object(mac,'check_ports'):
+   with self.assertRaisesRegex(mac.InstallError,'reconciled'):mac.workspace_prepare_renewal(self.root)
+  self.assertTrue((folder/'INTENT.json').exists())
+ def test_only_explicit_reaped_native_four_releases_generic_ownership(self):
+  native=self.root/'native';native.mkdir(mode=0o700);command=native/'castalia-wallet-workspace-setup';command.write_text('#!/bin/sh\nexit 4\n');command.chmod(0o500)
+  pin='a'*64;mac.save(self.root/mac.WORKSPACE_RENEW_HOLD,{'schema':'hub.workspace-renewal-operation.v1','plan_sha256':pin})
+  argv=[command,'renew','--plan',self.root/'config/plan.json','--plan-sha256',pin]
+  with self.assertRaises(mac.InstallError):mac.workspace_run(argv,self.root,native_renewal=True)
+  self.assertFalse((self.root/'logs/workspace-operation.json').exists());self.assertTrue((self.root/mac.WORKSPACE_RENEW_HOLD).exists())
+  command.chmod(0o700);command.write_text("#!/bin/sh\nprintf '%s\\n' '{\"status\":\"recovery_required\"}'\n");command.chmod(0o500);argv[1]='resume-renewal'
+  self.assertEqual(mac.workspace_run(argv,self.root,native_renewal=True),{'status':'recovery_required'})
+ def test_generic_four_keeps_ownership_hold(self):
+  with self.assertRaises(mac.InstallError):mac.workspace_run(['/bin/sh','-c','exit 4'],self.root)
+  self.assertTrue((self.root/'logs/workspace-operation.json').exists())
  def test_release_has_no_result_authority(self):
   self.assertEqual(len(mac.native_rows(self.profile)),3)
   self.profile['native'].append({'role':'result-attester'})

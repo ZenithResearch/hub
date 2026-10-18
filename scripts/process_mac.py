@@ -285,8 +285,10 @@ def inventory(root, *, seal=False):
     return result
 
 
-def installed(root):
+def installed(root, *, own_upgrade=False):
     root = private(root)
+    require(own_upgrade or (not (root/'logs/workspace-software-upgrade.json').exists() and not (root/'logs/workspace-software-upgrade.json').is_symlink()),
+            'Workspace software upgrade requires reconciliation; retained backups are never rolled back automatically')
     receipt = load(root/'installed.json')
     host(load(root/'profile.json'))
     require(receipt['schema'] == 'hub.process-macos-installed.v1' and receipt['root'] == str(root),
@@ -723,7 +725,7 @@ def pilot_action(root, action, expected):
 
 # Generic authoring has no SOP, run, executor or provider activation.
 WORKSPACE_ACTIONS = {'workspace-status', 'workspace-prepare', 'workspace-setup', 'workspace-start',
-                     'workspace-stop', 'workspace-command'}
+                     'workspace-stop', 'workspace-command', 'workspace-renew-prepare', 'workspace-renew', 'workspace-renew-resume'}
 WORKSPACE_CONFIGS = {'command-authority.json', 'wallet-command.json',
                      'runtime-policy.json', 'runtime-receiver.json'}
 
@@ -772,23 +774,322 @@ def workspace_prepare_plan(root, expected=None):
             'identity_not_after': value['identity_not_after'], 'authority_created': False, 'process_created': False}
 
 
-def workspace_complete(root):
-    workspace_profile(root)
-    plan = root/'config/workspace-setup-plan.json'
-    plan_bytes = bounded_private(plan, 16384)
-    receipt = closed_json(bounded_private(root/'authority/COMPLETE.json'))
-    require(type(receipt) is dict
-            and receipt.get('schema') == 'castalia.wallet-workspace-setup-complete.v1'
-            and receipt.get('root') == str(root) and receipt.get('activation') is False
-            and receipt.get('plan_sha256') == hashlib.sha256(plan_bytes).hexdigest()
-            and type(receipt.get('configuration_hashes')) is dict
+WORKSPACE_SELECTION = 'config/workspace-native-selection.json'
+WORKSPACE_RENEW_PLAN = 'config/workspace-renewal-plan.json'
+WORKSPACE_RENEW_HOLD = 'logs/workspace-renewal.json'
+WORKSPACE_UPGRADE_HOLD = 'logs/workspace-software-upgrade.json'
+
+
+def workspace_sync(directory):
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def workspace_store(path, raw, *, replace=False):
+    require(type(raw) is bytes and len(raw) <= 65536, 'Workspace metadata exceeds its bound')
+    if path.exists() or path.is_symlink():
+        previous = bounded_private(path)
+        if not replace:
+            require(previous == raw, 'Retained workspace metadata changed')
+            return
+    temporary = path.parent/('.workspace-'+uuid.uuid4().hex+'.next')
+    with temporary.open('xb') as stream:
+        os.fchmod(stream.fileno(), 0o600);stream.write(raw);stream.flush();os.fsync(stream.fileno())
+    if not replace:
+        require(not path.exists() and not path.is_symlink(), 'Workspace metadata appeared during publication')
+    os.replace(temporary, path)
+    workspace_sync(path.parent)
+
+
+def workspace_bytes(value):
+    return (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)+'\n').encode()
+
+
+def workspace_selected(root):
+    selection = root/WORKSPACE_SELECTION
+    if not selection.exists() and not selection.is_symlink():
+        return root/'authority/COMPLETE.json', None
+    value = closed_json(bounded_private(selection, 4096))
+    require(type(value) is dict and set(value) == {'schema','native_generation','complete_sha256'}
+            and value['schema'] == 'hub.workspace-native-selection.v1'
+            and type(value['native_generation']) is int and 1 < value['native_generation'] <= 9007199254740991
+            and type(value['complete_sha256']) is str and re.fullmatch('[a-f0-9]{64}', value['complete_sha256']),
+            'Invalid selected workspace native receipt')
+    return root/'authority/renewals'/str(value['native_generation'])/'COMPLETE.json', value['complete_sha256']
+
+
+def workspace_receipt(root, path, expected=None):
+    raw = bounded_private(path)
+    require(expected is None or hashlib.sha256(raw).hexdigest() == expected, 'Selected workspace receipt changed')
+    receipt = closed_json(raw)
+    require(type(receipt) is dict and receipt.get('root') == str(root)
+            and receipt.get('activation') is False and type(receipt.get('configuration_hashes')) is dict
             and set(receipt['configuration_hashes']) == WORKSPACE_CONFIGS,
-            'Workspace native setup receipt differs from selected owner plan')
+            'Workspace native receipt differs from selected owner composition')
+    if path == root/'authority/COMPLETE.json':
+        require(receipt.get('schema') == 'castalia.wallet-workspace-setup-complete.v1'
+                and receipt.get('plan_sha256') == hashlib.sha256(bounded_private(root/'config/workspace-setup-plan.json',16384)).hexdigest(),
+                'Workspace native setup receipt differs from selected owner plan')
+    else:
+        generation = receipt.get('native_generation')
+        require(type(generation) is int and 1 < generation <= 9007199254740991
+                and path == root/'authority/renewals'/str(generation)/'COMPLETE.json'
+                and receipt.get('schema') == 'castalia.wallet-workspace-renewal-complete.v1'
+                and type(receipt.get('plan_sha256')) is str and re.fullmatch('[a-f0-9]{64}', receipt['plan_sha256']),
+                'Invalid workspace renewal receipt')
+        plan_raw = bounded_private(root/'config'/('workspace-renewal-plan-history-'+receipt['plan_sha256']+'.json'),16384)
+        require(hashlib.sha256(plan_raw).hexdigest() == receipt['plan_sha256'], 'Renewal plan history changed')
+        plan = closed_json(plan_raw)
+        require(receipt.get('previous_complete') == plan.get('previous_complete'), 'Renewal predecessor changed')
     for name, digest in receipt['configuration_hashes'].items():
         require(type(digest) is str and re.fullmatch('[a-f0-9]{64}', digest)
-                and hashlib.sha256(bounded_private(root/'authority/config'/name)).hexdigest() == digest,
+                and hashlib.sha256(bounded_private(path.parent/'config'/name)).hexdigest() == digest,
                 'Workspace native configuration changed')
     return receipt
+
+
+def workspace_config_directory(root, receipt):
+    return root/'authority/renewals'/str(receipt['native_generation'])/'config' if receipt.get('schema') == 'castalia.wallet-workspace-renewal-complete.v1' else root/'authority/config'
+
+
+def workspace_holds(root, *, own_renewal=False, resume_generation=None):
+    paths = [root/'logs/workspace-operation.json',root/'data/frank-workspace-cleanup.json',root/WORKSPACE_UPGRADE_HOLD]
+    if not own_renewal:
+        paths.append(root/WORKSPACE_RENEW_HOLD)
+    paths.extend(root/'authority/native'/name for name in ['wallet-transition.json','wallet-transition','.wallet-transition.tmp'])
+    if resume_generation is not None:
+        paths = [p for p in paths if p.parent != root/'authority/native']
+    if any(p.exists() or p.is_symlink() for p in paths):
+        return True
+    renewals = root/'authority/renewals'
+    if renewals.is_symlink():
+        return True
+    if renewals.exists():
+        for index,p in enumerate(renewals.iterdir()):
+            if index >= 64:
+                return True
+            if p.is_symlink() or not p.is_dir() or not re.fullmatch('[1-9][0-9]{0,15}',p.name):
+                return True
+            if int(p.name) != resume_generation and not (p/'COMPLETE.json').is_file():
+                return True
+    return False
+
+
+def workspace_stopped(root):
+    require(not any(launch_status(root,name) for name in COMPONENTS), 'Stop workspace before permission renewal or software upgrade')
+    check_ports(config(root))
+
+
+def workspace_renewal_plan(root, selection):
+    raw = bounded_private(root/WORKSPACE_RENEW_PLAN,16384)
+    require(type(selection) is str and re.fullmatch('[a-f0-9]{64}',selection)
+            and hashlib.sha256(raw).hexdigest() == selection, 'Workspace renewal plan changed after review')
+    value = closed_json(raw)
+    require(type(value) is dict and set(value) == {'schema','workspace_root','previous_complete','not_before','not_after','wallet_command_sha256','verifier_sha256'}
+            and value['schema'] == 'castalia.wallet-workspace-renewal.v1' and value['workspace_root'] == str(root),
+            'Invalid workspace renewal proposal')
+    previous = value['previous_complete']
+    require(type(previous) is dict and set(previous) == {'path','sha256'}
+            and type(previous['path']) is str and type(previous['sha256']) is str
+            and re.fullmatch('[a-f0-9]{64}',previous['sha256']), 'Invalid renewal predecessor')
+    for key in ['not_before','not_after']:
+        require(type(value[key]) is str and re.fullmatch('[1-9][0-9]{0,15}',value[key])
+                and int(value[key]) <= 9007199254740991, 'Invalid renewal time')
+    start,end = int(value['not_before']),int(value['not_after'])
+    require(start < end and end-start <= 3600, 'Renewal permission window exceeds one hour')
+    rows = {row['role']:row for row in native_rows(workspace_profile(root))}
+    require(value['wallet_command_sha256'] == rows['wallet-command']['sha256']
+            and value['verifier_sha256'] == rows['context-verifier']['sha256'], 'Renewal executable pins changed')
+    return raw,value
+
+
+def workspace_prepare_renewal(root, expected=None):
+    require(not workspace_holds(root), 'Workspace renewal or cleanup must be reconciled')
+    workspace_stopped(root)
+    receipt = workspace_ready(root)
+    previous,pin = workspace_selected(root)
+    previous_raw = bounded_private(previous)
+    require(pin is None or hashlib.sha256(previous_raw).hexdigest() == pin, 'Selected workspace receipt changed')
+    plan = root/WORKSPACE_RENEW_PLAN
+    old = bounded_private(plan,16384) if plan.exists() or plan.is_symlink() else None
+    require((hashlib.sha256(old).hexdigest() if old is not None else None) == expected, 'Workspace renewal proposal changed after review')
+    if old is not None:
+        workspace_store(root/'config'/('workspace-renewal-proposal-history-'+expected+'.json'),old)
+    at = int(time.time());start=at-5;end=at+3590
+    identity_end = receipt.get('identity_not_after',receipt.get('holder',{}).get('not_after'))
+    require(type(identity_end) is int and end <= identity_end, 'Machine identity cannot cover the proposed permission window; identity is retained')
+    rows={row['role']:row for row in native_rows(workspace_profile(root))}
+    value={'schema':'castalia.wallet-workspace-renewal.v1','workspace_root':str(root),
+           'previous_complete':{'path':str(previous),'sha256':hashlib.sha256(previous_raw).hexdigest()},
+           'not_before':str(start),'not_after':str(end),
+           'wallet_command_sha256':rows['wallet-command']['sha256'],'verifier_sha256':rows['context-verifier']['sha256']}
+    raw=workspace_bytes(value);workspace_store(plan,raw,replace=old is not None)
+    return {'schema':'hub.workspace-renewal-proposal.v1','plan_sha256':hashlib.sha256(raw).hexdigest(),
+            'not_before':value['not_before'],'not_after':value['not_after'],'identity_not_after':str(identity_end),
+            'same_identity':True,'authority_changed':False}
+
+
+def workspace_renewal_identity(old,new):
+    immutable=['schema','store_id','subject_id','purpose','application','key_generation','key_id','public_key_hex','public_key_sha256','created_at','key_created_at','not_before','not_after','state','revoked_at']
+    a,b=old.get('holder'),new.get('holder')
+    require(type(a) is dict and type(b) is dict and all(k in a and k in b and a[k] == b[k] for k in immutable)
+            and a.get('state') == 'active' and type(a.get('state_revision')) is int
+            and b.get('state_revision') == a['state_revision']+1
+            and new.get('command_issuer') == old.get('command_issuer')
+            and new.get('identity_not_after',b.get('not_after')) == old.get('identity_not_after',a.get('not_after'))
+            and new.get('journal_capacity') == old.get('journal_capacity')
+            and new.get('scope') == old.get('scope'), 'Renewal changed identity, issuer, scope or capacity')
+
+
+def workspace_frank(root, action, master, pin, input_path=None, input_pin=None):
+    argv=[root/'venv/bin/python','-I','-B','-m','frank_executor.workspace_cli',action,'--config',master,'--config-sha256',pin]
+    if input_path is not None:
+        argv += ['--input',input_path,'--input-sha256',input_pin]
+    return workspace_run(argv,root)
+
+
+def workspace_renew(root, selection, *, resume=False):
+    workspace_stopped(root)
+    raw,plan=workspace_renewal_plan(root,selection)
+    history=root/'config'/('workspace-renewal-plan-history-'+selection+'.json')
+    operation_dir=root/'logs'/('workspace-renewal-'+selection)
+    marker=root/WORKSPACE_RENEW_HOLD
+    if resume:
+        operation=closed_json(bounded_private(marker))
+        require(type(operation) is dict and operation.get('schema') == 'hub.workspace-renewal-operation.v1'
+                and operation.get('plan_sha256') == selection, 'Resume requires the exact retained renewal')
+        require(bounded_private(history,16384) == raw, 'Retained renewal plan changed')
+    else:
+        require(not workspace_holds(root), 'Workspace renewal or cleanup must be reconciled')
+        old=workspace_ready(root);previous,pin=workspace_selected(root);previous_raw=bounded_private(previous)
+        require(plan['previous_complete'] == {'path':str(previous),'sha256':hashlib.sha256(previous_raw).hexdigest()}, 'Renewal selects another predecessor')
+        require(type(old.get('native_generation')) is int and 1 <= old['native_generation'] < 9007199254740991, 'Invalid native generation')
+        master=bounded_private(root/'config/frank-workspace.json');admission=bounded_private(root/'config/workspace-admission.json')
+        selected=bounded_private(root/WORKSPACE_SELECTION,4096) if (root/WORKSPACE_SELECTION).exists() else None
+        if not operation_dir.exists():
+            operation_dir.mkdir(mode=0o700);workspace_sync(operation_dir.parent)
+        private(operation_dir)
+        workspace_store(operation_dir/'previous-configuration.json',master)
+        workspace_store(operation_dir/'previous-admission.json',admission)
+        if selected is not None:workspace_store(operation_dir/'previous-selection.json',selected)
+        workspace_store(history,raw)
+        operation={'schema':'hub.workspace-renewal-operation.v1','plan_sha256':selection,
+                   'previous_complete':plan['previous_complete'],'previous_configuration_sha256':hashlib.sha256(master).hexdigest(),
+                   'previous_admission_sha256':hashlib.sha256(admission).hexdigest(),
+                   'previous_selection_sha256':hashlib.sha256(selected).hexdigest() if selected is not None else None,
+                   'successor_generation':old['native_generation']+1}
+        workspace_store(marker,workspace_bytes(operation))
+    generation=operation.get('successor_generation')
+    require(type(generation) is int and 1 < generation <= 9007199254740991
+            and operation.get('previous_complete') == plan['previous_complete'], 'Invalid retained renewal binding')
+    require(not workspace_holds(root,own_renewal=True,resume_generation=generation if resume else None), 'Workspace cleanup or another native transition is unresolved')
+    old_path=Path(plan['previous_complete']['path'])
+    require(old_path == root/'authority/COMPLETE.json' or old_path == root/'authority/renewals'/str(generation-1)/'COMPLETE.json', 'Renewal predecessor path differs')
+    old=workspace_receipt(root,old_path,plan['previous_complete']['sha256'])
+    old_master=operation_dir/'previous-configuration.json';old_master_raw=bounded_private(old_master)
+    require(hashlib.sha256(old_master_raw).hexdigest() == operation['previous_configuration_sha256']
+            and closed_json(old_master_raw) == workspace_master(root,old), 'Retained old client composition changed')
+    require(hashlib.sha256(bounded_private(operation_dir/'previous-admission.json')).hexdigest() == operation['previous_admission_sha256'], 'Retained admission changed')
+    new_path=root/'authority/renewals'/str(generation)/'COMPLETE.json'
+    completed=operation_dir/'COMPLETE.json'
+    native_started=operation_dir/'native-started.json'
+    try:
+        # Readiness is a read-only no-pending-intent barrier; it never replays a command.
+        try:
+            readiness=workspace_frank(root,'check-renewal',old_master,operation['previous_configuration_sha256'])
+            expected_readiness=operation['previous_configuration_sha256']
+        except InstallError:
+            require(resume and new_path.exists() and not (root/'logs/workspace-operation.json').exists()
+                    and (operation_dir/'next-configuration.json').exists(), 'Resolve pending Frank commands before permission renewal')
+            next_bytes=bounded_private(operation_dir/'next-configuration.json')
+            require(bounded_private(root/'config/frank-workspace.json') == next_bytes, 'Retained successor client composition changed')
+            expected_readiness=hashlib.sha256(next_bytes).hexdigest()
+            readiness=workspace_frank(root,'check-renewal',root/'config/frank-workspace.json',expected_readiness)
+        require(type(readiness) is dict and readiness.get('schema') == 'frank.workspace-renewal-readiness.v1'
+                and readiness.get('configuration_sha256') == expected_readiness
+                and readiness.get('journal') in {'absent','bound'}
+                and readiness.get('ready') is True and readiness.get('pending_commands') == 0
+                and readiness.get('cleanup_retained') is False, 'Frank renewal readiness is unresolved')
+        workspace_store(operation_dir/('readiness-'+expected_readiness+'.json'),workspace_bytes(readiness))
+        workspace_store(native_started,workspace_bytes({'plan_sha256':selection}))
+        output=workspace_run([root/'native/castalia-wallet-workspace-setup','resume-renewal' if resume else 'renew','--plan',history,'--plan-sha256',selection],root,native_renewal=True)
+        require(type(output) is dict and output.get('schema') == 'castalia.wallet-workspace-renewal-output.v1'
+                and output.get('status') == 'configured_not_activated'
+                and type(output.get('complete')) is dict and set(output['complete']) == {'path','sha256'}
+                and output['complete']['path'] == str(new_path), 'Native renewal output differs from retained plan')
+        new_pin=output['complete']['sha256'];new=workspace_receipt(root,new_path,new_pin)
+        require(new.get('native_generation') == generation and new.get('plan_sha256') == selection
+                and new.get('previous_complete') == plan['previous_complete']
+                and new.get('not_before') == int(plan['not_before']) and new.get('not_after') == int(plan['not_after']), 'Native renewal binding changed')
+        workspace_renewal_identity(old,new)
+        workspace_receipt(root,old_path,plan['previous_complete']['sha256'])
+        workspace_store(operation_dir/'native-result.json',workspace_bytes(output))
+        next_master=workspace_bytes(workspace_master(root,new))
+        next_admission=workspace_bytes({'schema':'runtime.new-run-admission.v1','enabled':False,'composition_digest':selection})
+        next_selection=workspace_bytes({'schema':'hub.workspace-native-selection.v1','native_generation':generation,'complete_sha256':new_pin})
+        workspace_store(operation_dir/'next-configuration.json',next_master)
+        workspace_store(operation_dir/'next-admission.json',next_admission)
+        workspace_store(operation_dir/'next-selection.json',next_selection)
+        current_master=bounded_private(root/'config/frank-workspace.json')
+        require(current_master in (old_master_raw,next_master), 'Live client configuration changed during renewal')
+        migration_sha=None
+        if readiness['journal'] == 'absent':
+            journal=root/'data/frank-workspace.db'
+            require(not any(path.exists() or path.is_symlink() for path in [journal,Path(str(journal)+'-wal'),Path(str(journal)+'-shm'),Path(str(journal)+'-journal')]),
+                    'Workspace journal appeared after absent-journal readiness')
+            workspace_store(root/'config/frank-workspace.json',next_master,replace=True)
+            result={'schema':'hub.workspace-binding-uninitialized.v1','journal':'absent',
+                    'previous_configuration_sha256':operation['previous_configuration_sha256'],
+                    'configuration_sha256':hashlib.sha256(next_master).hexdigest(),'commands_preserved':True}
+        else:
+            migration={'schema':'frank.workspace-migration.v1',
+                       'previous_configuration':{'path':str(old_master),'sha256':operation['previous_configuration_sha256']},
+                       'previous_complete':plan['previous_complete'],'renewed_complete':output['complete']}
+            migration_raw=workspace_bytes(migration);migration_path=operation_dir/'migration.json';workspace_store(migration_path,migration_raw)
+            migration_sha=hashlib.sha256(migration_raw).hexdigest()
+            workspace_store(root/'config/frank-workspace.json',next_master,replace=True)
+            result=workspace_frank(root,'migrate-binding',root/'config/frank-workspace.json',hashlib.sha256(next_master).hexdigest(),migration_path,migration_sha)
+            require(type(result) is dict and result.get('schema') == 'frank.workspace-migration-result.v1'
+                    and result.get('previous_configuration_sha256') == operation['previous_configuration_sha256']
+                    and result.get('configuration_sha256') == hashlib.sha256(next_master).hexdigest()
+                    and result.get('migration_sha256') == migration_sha
+                    and result.get('previous_complete_sha256') == plan['previous_complete']['sha256']
+                    and result.get('renewed_complete_sha256') == new_pin and result.get('commands_preserved') is True,
+                    'Frank migration result differs from retained composition')
+        workspace_store(operation_dir/'migration-result.json',workspace_bytes({k:v for k,v in result.items() if k != 'duplicate'}))
+        current_admission=bounded_private(root/'config/workspace-admission.json')
+        require(current_admission in (bounded_private(operation_dir/'previous-admission.json'),next_admission), 'Run admission changed during renewal')
+        workspace_store(root/'config/workspace-admission.json',next_admission,replace=True)
+        selected_path=root/WORKSPACE_SELECTION
+        selected_raw=bounded_private(selected_path,4096) if selected_path.exists() else None
+        require(selected_raw == next_selection or (hashlib.sha256(selected_raw).hexdigest() if selected_raw is not None else None) == operation['previous_selection_sha256'], 'Selected native receipt changed during renewal')
+        workspace_store(selected_path,next_selection,replace=selected_raw is not None)
+        workspace_ready(root,own_renewal=True)
+        receipt={'schema':'hub.workspace-renewal-complete.v1','plan_sha256':selection,
+                 'previous_complete':plan['previous_complete'],'complete':output['complete'],
+                 'configuration_sha256':hashlib.sha256(next_master).hexdigest(),
+                 'migration_sha256':migration_sha,'journal':readiness['journal'],'commands_preserved':True,'identity_preserved':True,'execution_enabled':False}
+        workspace_store(completed,workspace_bytes(receipt))
+        require(closed_json(bounded_private(marker)) == operation, 'Renewal hold changed')
+        marker.unlink();workspace_sync(marker.parent)
+        return receipt
+    except Exception as failure:
+        # A known preflight denial before Native was invoked can release only our
+        # own hold. Once Native could have run, preserve every recovery artifact.
+        release = not native_started.exists() or (getattr(failure,'native_preflight_denied',False) and not new_path.parent.exists() and not new_path.parent.is_symlink() and not workspace_holds(root,own_renewal=True))
+        if release and not (root/'logs/workspace-operation.json').exists() and not (root/'data/frank-workspace-cleanup.json').exists():
+            require(closed_json(bounded_private(marker)) == operation, 'Renewal hold changed')
+            marker.unlink();workspace_sync(marker.parent)
+        raise
+
+
+def workspace_complete(root):
+    workspace_profile(root)
+    selected,pin = workspace_selected(root)
+    return workspace_receipt(root,selected,pin)
 
 
 def workspace_master(root, receipt):
@@ -798,11 +1099,12 @@ def workspace_master(root, receipt):
             'journal': str(root/'data/frank-workspace.db'),
             'wallet': {'executable': str(root/'native'/row['filename']),
                        'executable_sha256': row['sha256'],
-                       'configuration': str(root/'authority/config/wallet-command.json'),
+                       'configuration': str(workspace_config_directory(root,receipt)/'wallet-command.json'),
                        'configuration_sha256': receipt['configuration_hashes']['wallet-command.json']}}
 
 
-def workspace_ready(root):
+def workspace_ready(root, *, own_renewal=False):
+    require(not workspace_holds(root,own_renewal=own_renewal), 'Workspace renewal, software upgrade or cleanup is unresolved')
     receipt = workspace_complete(root)
     require(closed_json(bounded_private(root/'config/frank-workspace.json')) == workspace_master(root, receipt),
             'Workspace client configuration differs from native setup')
@@ -813,7 +1115,13 @@ def workspace_ready(root):
     return receipt
 
 
-def workspace_run(argv, root):
+def workspace_run(argv, root, *, native_renewal=False):
+    if native_renewal:
+        operation = closed_json(bounded_private(root/WORKSPACE_RENEW_HOLD))
+        require(len(argv) == 6 and argv[0] == root/'native/castalia-wallet-workspace-setup'
+                and argv[1] in {'renew','resume-renewal'} and argv[2] == '--plan'
+                and argv[4] == '--plan-sha256' and operation.get('schema') == 'hub.workspace-renewal-operation.v1'
+                and operation.get('plan_sha256') == argv[5], 'Invalid native renewal ownership mode')
     marker = root/'logs/workspace-operation.json'
     cleanup = root/'data/frank-workspace-cleanup.json'
     require(not marker.exists() and not marker.is_symlink() and not cleanup.exists()
@@ -849,7 +1157,7 @@ def workspace_run(argv, root):
                         raise InstallError(reason+'; cleanup must be reconciled')
                     break
                 time.sleep(.02)
-            resolved = child.returncode in (0, 2, 3) and not cleanup.exists() and not cleanup.is_symlink()
+            resolved = (child.returncode in (0, 2, 3) or (native_renewal and child.returncode == 4 and reason is None)) and not cleanup.exists() and not cleanup.is_symlink()
             out.seek(0);err.seek(0)
             raw, diagnostic = out.read(262145), err.read(262145)
             require(len(raw)+len(diagnostic) <= 262144, 'Workspace output exceeded bound')
@@ -858,7 +1166,9 @@ def workspace_run(argv, root):
                     file = root/'logs'/('workspace-'+operation['id']+'.'+suffix+'.log')
                     with file.open('xb') as stream:
                         os.fchmod(stream.fileno(), 0o600);stream.write(data)
-                raise InstallError((reason or 'Workspace command denied or outcome unknown')+'; private logs retained')
+                failure = InstallError((reason or 'Workspace command denied or outcome unknown')+'; private logs retained')
+                failure.native_preflight_denied = native_renewal and child.returncode == 2 and reason is None and not cleanup.exists() and not cleanup.is_symlink()
+                raise failure
             return closed_json(raw)
         finally:
             if child is None or resolved:
@@ -871,22 +1181,170 @@ def workspace_run(argv, root):
                     os.close(directory)
 
 
+def workspace_upgrade_policy(old,new):
+    require(old.get('native_profile') == new.get('native_profile') == 'workspace-v1'
+            and all(old.get(k) == new.get(k) for k in ['schema','platform','machine','python']),
+            'Software upgrade requires the same isolated workspace release profile')
+    a,b={r['role']:r for r in native_rows(old)},{r['role']:r for r in native_rows(new)}
+    require(all(a[k] == b[k] for k in ['wallet-command','context-verifier']),
+            'Software upgrade cannot change Wallet command or verifier bytes or provenance')
+    a,b={r['name']:r for r in old['wheels']},{r['name']:r for r in new['wheels']}
+    require(set(a) == set(b) and len(a) == 15 and 'frank-executor' in a
+            and all(a[k] == b[k] for k in a if k != 'frank-executor'),
+            'Software upgrade can change only the Frank wheel')
+    a,b=old.get('components'),new.get('components')
+    require(type(a) is dict and type(b) is dict and set(a) == set(b) and 'frank' in a
+            and all(a[k] == b[k] for k in a if k != 'frank')
+            and a['frank'].get('package') == b['frank'].get('package') == 'frank-executor',
+            'Software upgrade cannot change Runtime, Service or component closure')
+
+
+def workspace_software_upgrade(source,root,expected):
+    # Invoke the exact new bundle controller. Existing installed pins are
+    # verified before the first mutation; no native owner action is run here.
+    require(not (root/WORKSPACE_UPGRADE_HOLD).exists() and not (root/WORKSPACE_UPGRADE_HOLD).is_symlink(),
+            'Workspace software upgrade requires reconciliation; retained backups are never rolled back automatically')
+    new=check_bundle(source,expected);host(new)
+    require(sha(__file__) == load(Path(source)/'bundle.json')['files']['process_mac.py'],
+            'Use the controller delivered in this exact upgrade bundle')
+    previous=installed(root);old=workspace_profile(root)
+    workspace_upgrade_policy(old,new)
+    workspace_stopped(root)
+    require(not workspace_holds(root), 'Reconcile workspace renewal or cleanup before software upgrade')
+    current=workspace_ready(root)
+    selected,_=workspace_selected(root)
+    authority_pin=hashlib.sha256(bounded_private(selected)).hexdigest()
+    mutable=['config/frank-workspace.json','config/workspace-admission.json','config/local.json','config/frank.json']
+    if (root/WORKSPACE_SELECTION).exists():mutable.append(WORKSPACE_SELECTION)
+    preserved={name:hashlib.sha256(bounded_private(root/name)).hexdigest() for name in mutable}
+    operation_id=uuid.uuid4().hex
+    parent=root/'software-upgrades'
+    if not parent.exists():
+        parent.mkdir(mode=0o700);workspace_sync(root)
+    private(parent)
+    operation_dir=parent/operation_id;operation_dir.mkdir(mode=0o700);workspace_sync(parent)
+    candidate=operation_dir/'candidate';candidate.mkdir(mode=0o700)
+    old_dir=operation_dir/'previous';old_dir.mkdir(mode=0o700);workspace_sync(operation_dir)
+    manifest=load(Path(source)/'bundle.json')
+    for name in ['bundle.json',*manifest['files']]:
+        target=candidate/name;target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+        shutil.copyfile(Path(source)/name,target)
+        target.chmod(next((r['mode'] for r in native_rows(new) if name == 'native/'+r['filename']),0o600))
+        with target.open('rb') as stream:os.fsync(stream.fileno())
+        workspace_sync(target.parent)
+    check_bundle(candidate,expected)
+    workspace_sync(candidate)
+    operation={'schema':'hub.workspace-software-upgrade-operation.v1','id':operation_id,
+               'previous_installed_sha256':hashlib.sha256(bounded_private(root/'installed.json')).hexdigest(),
+               'previous_bundle_sha256':previous['bundle_sha256'],'bundle_sha256':expected,
+               'selected_complete':{'path':str(selected),'sha256':authority_pin},'preserved_configuration':preserved}
+    marker=root/WORKSPACE_UPGRADE_HOLD
+    workspace_store(marker,workspace_bytes(operation))
+    # Once the hold is durable, any interruption leaves a blocked installation
+    # and every previous software object under its original basename.
+    for name in ['bundle.json','profile.json','process_mac.py','control.py','installed-files.json','installed.json','wheels','native','venv']:
+        path=root/name
+        require(not path.is_symlink() and path.exists(), 'Installed software object changed before backup')
+        os.rename(path,old_dir/name)
+        workspace_sync(root);workspace_sync(old_dir)
+    for name in ['bundle.json',*manifest['files']]:
+        target=root/name;target.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+        shutil.copyfile(candidate/name,target)
+        target.chmod(next((r['mode'] for r in native_rows(new) if name == 'native/'+r['filename']),0o600))
+        with target.open('rb') as stream:os.fsync(stream.fileno())
+        workspace_sync(target.parent)
+    shutil.copyfile(root/'process_mac.py',root/'control.py');(root/'control.py').chmod(0o600)
+    # Create at its final path so interpreter and generated script paths do not
+    # retain a temporary staging pathname. All installation is offline.
+    venv.EnvBuilder(with_pip=True,symlinks=True).create(root/'venv')
+    python=root/'venv/bin/python'
+    wheels=[root/'wheels'/r['filename'] for r in new['wheels']]
+    run([python,'-I','-B','-m','pip','install','--isolated','--no-index','--no-deps','--no-compile','--no-cache-dir','--disable-pip-version-check',*wheels],root,timeout=180)
+    run([python,'-I','-B','-m','pip','check'],root)
+    run([python,'-I','-S','-B',root/'control.py','_seal','--root',root],root)
+    run([python,'-I','-S','-B',root/'control.py','_inventory','--root',root],root)
+    # Flush owned installed files/directories before the final installed receipt.
+    # Interpreter links refer to the unchanged pinned base Python and are skipped.
+    for directory,_,names in os.walk(root/'venv',topdown=False,followlinks=False):
+        for name in names:
+            path=Path(directory)/name
+            if not path.is_symlink():
+                with path.open('rb') as stream:os.fsync(stream.fileno())
+        workspace_sync(directory)
+    for path in [root/'control.py',root/'installed-files.json']:
+        with path.open('rb') as stream:os.fsync(stream.fileno())
+    workspace_sync(root)
+    check_bundle(root,expected)
+    require(hashlib.sha256(bounded_private(selected)).hexdigest() == authority_pin
+            and all(hashlib.sha256(bounded_private(root/name)).hexdigest() == pin for name,pin in preserved.items())
+            and workspace_complete(root) == current, 'Workspace authority or configuration changed during software upgrade')
+    next_receipt={**previous,'bundle_sha256':expected,'control_sha256':sha(root/'control.py'),
+                  'installed_files_sha256':sha(root/'installed-files.json'),'authority_qualified':False}
+    next_raw=workspace_bytes(next_receipt)
+    receipt={'schema':'hub.workspace-software-upgrade-complete.v1','id':operation_id,
+             'previous_installed_sha256':operation['previous_installed_sha256'],
+             'installed_sha256':hashlib.sha256(next_raw).hexdigest(),'bundle_sha256':expected,
+             'previous_bundle_sha256':previous['bundle_sha256'],'preserved_configuration':preserved,
+             'selected_complete':operation['selected_complete'],'data_preserved':True,'authority_preserved':True,
+             'authority_qualified':False,'external_effects':False}
+    workspace_store(operation_dir/'COMPLETE.json',workspace_bytes(receipt))
+    workspace_store(root/'installed.json',next_raw)
+    installed(root,own_upgrade=True)
+    require(closed_json(bounded_private(marker)) == operation, 'Software upgrade hold changed')
+    marker.unlink();workspace_sync(marker.parent)
+    return receipt
+
+
+def workspace_permission(receipt):
+    # This is an observation of the exact selected public receipt, never a grant.
+    observed = int(time.time())
+    result = {'state': 'unknown', 'not_before': None, 'not_after': None,
+              'identity_not_after': None, 'observed_at': str(observed)}
+    safe = lambda value: type(value) is int and 0 < value <= 9007199254740991
+    start, end = receipt.get('not_before'), receipt.get('not_after')
+    identity_end = receipt.get('identity_not_after')
+    if not (safe(start) and safe(end) and start < end and end-start <= 3600
+            and (identity_end is None or (safe(identity_end) and end <= identity_end))
+            and 0 <= observed <= 9007199254740991):
+        return result
+    result.update(state='not_yet_valid' if observed < start else 'active' if observed < end else 'expired',
+                  not_before=str(start), not_after=str(end),
+                  identity_not_after=str(identity_end) if identity_end is not None else None)
+    return result
+
+
 def workspace_report(root):
     workspace_profile(root)
-    pending = any(p.exists() or p.is_symlink() for p in
-                  [root/'logs/workspace-operation.json', root/'data/frank-workspace-cleanup.json'])
+    pending = workspace_holds(root)
     result = {'schema': 'hub.workspace-status.v1', 'setup': 'not_selected',
               'authority': 'pending', 'execution_enabled': False,
               'provider_enabled': False, 'workflow_selected': False,
               'cleanup_unresolved': pending}
     if (root/'authority').exists():
         try:
-            workspace_ready(root)
-            result.update(setup='configured', authority='configured_native_unqualified')
+            receipt = workspace_ready(root)
+            result.update(setup='configured', authority='configured_native_unqualified',
+                          permission=workspace_permission(receipt))
         except (InstallError, OSError, ValueError, KeyError, TypeError):
             result.update(setup='partial', authority='unavailable')
     elif (root/'config/workspace-setup-plan.json').exists():
         result['setup'] = 'absent'
+    marker = root/WORKSPACE_RENEW_HOLD
+    result['renewal'] = {'state':'none','resumable':False}
+    if marker.exists() or marker.is_symlink():
+        result['renewal'] = {'state':'recovery_required','resumable':False}
+        try:
+            operation = closed_json(bounded_private(marker))
+            pin = operation.get('plan_sha256')
+            raw,plan = workspace_renewal_plan(root,pin)
+            require(operation.get('schema') == 'hub.workspace-renewal-operation.v1'
+                    and operation.get('previous_complete') == plan['previous_complete']
+                    and bounded_private(root/'config'/('workspace-renewal-plan-history-'+pin+'.json'),16384) == raw,
+                    'Retained renewal differs')
+            result['renewal'].update(resumable=not (root/'logs/workspace-operation.json').exists()
+                and not (root/'data/frank-workspace-cleanup.json').exists(),plan_sha256=pin)
+        except (InstallError,OSError,ValueError,KeyError,TypeError):
+            pass
     return result
 
 
@@ -899,6 +1357,10 @@ def workspace_action(root, action, raw=None, expected=None, selection=None):
         return doctor(root)
     if action == 'workspace-start':
         return start(root)
+    if action == 'workspace-renew-prepare':
+        return workspace_prepare_renewal(root,selection)
+    if action in {'workspace-renew','workspace-renew-resume'}:
+        return workspace_renew(root,selection,resume=action=='workspace-renew-resume')
     if action == 'workspace-prepare':
         require(not any(launch_status(root, name) for name in COMPONENTS), 'Stop workspace before preparing setup')
         return workspace_prepare_plan(root, selection)
@@ -1181,8 +1643,8 @@ def supervise(root, component):
         argv += ['--receiver-config', root/'authority/config/runtime-receiver.json',
                  '--admission-policy', root/'config/runtime-admission.json']
     if value['mode'] == 'workspace' and component == 'runtime':
-        workspace_ready(root)
-        argv += ['--receiver-config', root/'authority/config/runtime-receiver.json',
+        receipt = workspace_ready(root)
+        argv += ['--receiver-config', workspace_config_directory(root,receipt)/'runtime-receiver.json',
                  '--admission-policy', root/'config/workspace-admission.json']
     child = None
     stopping = False
@@ -1232,7 +1694,7 @@ def supervise(root, component):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['bundle', 'install', 'doctor', 'status', 'start', 'stop', '_inventory', '_seal', '_probe', '_run', *sorted(PILOT_ACTIONS), *sorted(WORKSPACE_ACTIONS)])
+    parser.add_argument('action', choices=['bundle', 'install', 'workspace-software-upgrade', 'doctor', 'status', 'start', 'stop', '_inventory', '_seal', '_probe', '_run', *sorted(PILOT_ACTIONS), *sorted(WORKSPACE_ACTIONS)])
     parser.add_argument('--root', type=Path, default=DEFAULT)
     parser.add_argument('--bundle', type=Path)
     parser.add_argument('--bundle-sha256')
@@ -1272,7 +1734,10 @@ def main():
             root = private(args.root)
             with (root/'operation.lock').open('a') as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                if args.action in WORKSPACE_ACTIONS:
+                if args.action == 'workspace-software-upgrade':
+                    require(args.bundle and args.bundle_sha256, 'Supply the exact supported workspace upgrade bundle and digest')
+                    result = workspace_software_upgrade(args.bundle,root,args.bundle_sha256)
+                elif args.action in WORKSPACE_ACTIONS:
                     result = workspace_action(root, args.action, request_raw, args.request_sha256, args.selection_sha256)
                 elif args.action in PILOT_ACTIONS:
                     require(args.selection_sha256 is not None, 'Supply the reviewed pilot selection pin')
