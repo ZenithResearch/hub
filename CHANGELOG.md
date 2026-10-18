@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Added
+- Add isolated workspace setup proposals, native authoring lifecycle and exact pinned client dispatch — local installation can begin empty, without the optional review SOP, capture inputs or execution authority. All64 Mac compatibility and negative tests pass.
+
 ### Fixed
 - Reuse the full manual inspection budget after native pilot actions — authenticated output and receipt reads grow with completed steps, and the shorter automatic observation returned unknown after a successful fifth step.
 

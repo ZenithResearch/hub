@@ -753,31 +753,34 @@ def workspace_prepare_plan(root, expected=None):
     at = int(time.time())
     value = {'schema': 'castalia.wallet-workspace-setup.v1', 'workspace_root': str(root),
              'not_before': str(at-5), 'not_after': str(at+3590),
+             'identity_not_after': str(at-5+365*86400),
              'wallet_command_sha256': rows['wallet-command']['sha256'],
              'verifier_sha256': rows['context-verifier']['sha256']}
     temporary = root/'config'/('workspace-proposal-'+uuid.uuid4().hex+'.next')
     save(temporary, value)
     with temporary.open('rb') as stream:
         os.fsync(stream.fileno())
+    proposed_sha256 = hashlib.sha256(bounded_private(temporary, 16384)).hexdigest()
     os.replace(temporary, plan)
     directory = os.open(plan.parent, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(directory)
     finally:
         os.close(directory)
-    return {'schema': 'hub.workspace-proposal.v1', 'plan_sha256': sha(plan),
+    return {'schema': 'hub.workspace-proposal.v1', 'plan_sha256': proposed_sha256,
             'not_before': value['not_before'], 'not_after': value['not_after'],
-            'authority_created': False, 'process_created': False}
+            'identity_not_after': value['identity_not_after'], 'authority_created': False, 'process_created': False}
 
 
 def workspace_complete(root):
     workspace_profile(root)
     plan = root/'config/workspace-setup-plan.json'
+    plan_bytes = bounded_private(plan, 16384)
     receipt = closed_json(bounded_private(root/'authority/COMPLETE.json'))
     require(type(receipt) is dict
             and receipt.get('schema') == 'castalia.wallet-workspace-setup-complete.v1'
             and receipt.get('root') == str(root) and receipt.get('activation') is False
-            and receipt.get('plan_sha256') == sha(plan)
+            and receipt.get('plan_sha256') == hashlib.sha256(plan_bytes).hexdigest()
             and type(receipt.get('configuration_hashes')) is dict
             and set(receipt['configuration_hashes']) == WORKSPACE_CONFIGS,
             'Workspace native setup receipt differs from selected owner plan')
@@ -904,9 +907,10 @@ def workspace_action(root, action, raw=None, expected=None, selection=None):
                 'Existing native custody is retained; setup is create-only')
         require(not any(launch_status(root, name) for name in COMPONENTS), 'Stop workspace before setup')
         plan = root/'config/workspace-setup-plan.json'
+        plan_bytes = bounded_private(plan, 16384)
         require(type(selection) is str and re.fullmatch('[a-f0-9]{64}', selection)
-                and sha(plan) == selection, 'Workspace setup plan changed after review')
-        value = closed_json(bounded_private(plan, 16384))
+                and hashlib.sha256(plan_bytes).hexdigest() == selection, 'Workspace setup plan changed after review')
+        value = closed_json(plan_bytes)
         require(type(value) is dict and value.get('schema') == 'castalia.wallet-workspace-setup.v1'
                 and value.get('workspace_root') == str(root), 'Workspace setup selects another root')
         result = workspace_run([root/'native/castalia-wallet-workspace-setup', 'create',
@@ -1237,7 +1241,7 @@ def main():
     parser.add_argument('--profile', choices=['installation', 'local-review', 'workspace'], default='installation')
     parser.add_argument('--nativehouse', type=Path)
     parser.add_argument('--selection-sha256')
-    parser.add_argument('--request-json')
+    parser.add_argument('--request-stdin', action='store_true')
     parser.add_argument('--request-sha256')
     parser.add_argument('--component', choices=COMPONENTS)
     parser.add_argument('--route',choices=['live','ready'],default='live')
@@ -1245,6 +1249,12 @@ def main():
     parser.add_argument('--service-port', type=int, default=8091)
     args = parser.parse_args()
     try:
+        request_raw = None
+        if args.request_stdin:
+            require(args.action == 'workspace-command', 'Standard input is only accepted for workspace commands')
+            request_bytes = sys.stdin.buffer.read(65537)
+            require(0 < len(request_bytes) <= 65536, 'Workspace input exceeds its bound')
+            request_raw = request_bytes.decode('utf-8')
         if args.action == 'bundle':
             require(args.wheelhouse and args.output, 'Supply wheelhouse and output')
             result = bundle(args.wheelhouse, args.output, profile_name=args.profile, nativehouse=args.nativehouse)
@@ -1263,7 +1273,7 @@ def main():
             with (root/'operation.lock').open('a') as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 if args.action in WORKSPACE_ACTIONS:
-                    result = workspace_action(root, args.action, args.request_json, args.request_sha256, args.selection_sha256)
+                    result = workspace_action(root, args.action, request_raw, args.request_sha256, args.selection_sha256)
                 elif args.action in PILOT_ACTIONS:
                     require(args.selection_sha256 is not None, 'Supply the reviewed pilot selection pin')
                     result = pilot_action(root, args.action, args.selection_sha256)

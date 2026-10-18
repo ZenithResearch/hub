@@ -96,6 +96,8 @@ class WorkspaceTests(unittest.TestCase):
   value=mac.load(plan)
   self.assertEqual((int(value['not_before']),int(value['not_after'])),(99995,103590))
   self.assertEqual(value['wallet_command_sha256'],'a'*64)
+  self.assertEqual(int(value['identity_not_after']),99995+365*86400)
+  self.assertGreater(int(value['identity_not_after']),int(value['not_after']))
   self.assertFalse(result['authority_created']);self.assertFalse((self.root/'authority').exists())
   self.assertEqual((self.root/'config'/('workspace-setup-plan-history-'+pin+'.json')).read_bytes(),before)
  def test_proposal_cas_rejects_stale_selection(self):
@@ -103,6 +105,11 @@ class WorkspaceTests(unittest.TestCase):
   shutil.rmtree(self.root/'authority');plan=self.root/'config/workspace-setup-plan.json';before=plan.read_bytes()
   with self.assertRaisesRegex(mac.InstallError,'changed after review'):mac.workspace_prepare_plan(self.root,'f'*64)
   self.assertEqual(plan.read_bytes(),before)
+ def test_setup_plan_symlink_and_fifo_are_rejected_before_read(self):
+  plan=self.root/'config/workspace-setup-plan.json';plan.unlink();target=self.root/'config/untrusted';target.write_text('{}');plan.symlink_to(target)
+  with self.assertRaises(mac.InstallError):mac.workspace_complete(self.root)
+  plan.unlink();os.mkfifo(plan,0o600)
+  with self.assertRaises(mac.InstallError):mac.workspace_complete(self.root)
  def test_unexpected_child_exit_retains_cleanup_hold(self):
   with self.assertRaises(mac.InstallError):mac.workspace_run(['/usr/bin/false'],self.root)
   self.assertTrue((self.root/'logs/workspace-operation.json').exists())
