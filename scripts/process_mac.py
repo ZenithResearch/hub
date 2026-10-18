@@ -36,6 +36,9 @@ NATIVE_ROLES = {
     'result-attester': 'secs-frank-result',
     'context-verifier': 'process-runtime-secs-check',
 }
+WORKSPACE_ROLES = {'wallet-command': 'castalia-wallet-service',
+                   'owner-setup': 'castalia-wallet-workspace-setup',
+                   'context-verifier': 'process-runtime-secs-check'}
 MAX_NATIVE_BYTES = 64 * 1024 * 1024
 
 
@@ -47,10 +50,11 @@ def native_rows(profile):
     require(set(profile) == {'schema', 'platform', 'machine', 'python', 'components',
                             'wheels', 'native_profile', 'native'}
             and profile['schema'] == 'hub.process-macos-release.v2'
-            and profile['native_profile'] == 'local-review-v1',
+            and profile['native_profile'] in {'local-review-v1', 'workspace-v1'},
             'Unsupported Mac release profile')
+    roles = WORKSPACE_ROLES if profile['native_profile'] == 'workspace-v1' else NATIVE_ROLES
     rows = profile['native']
-    require(type(rows) is list and len(rows) == len(NATIVE_ROLES),
+    require(type(rows) is list and len(rows) == len(roles),
             'Incomplete native payload closure')
     seen = set()
     for row in rows:
@@ -58,8 +62,8 @@ def native_rows(profile):
                                                   'source_commit', 'mode'},
                 'Invalid native payload record')
         role = row['role']
-        require(type(role) is str and role in NATIVE_ROLES and role not in seen
-                and row['filename'] == NATIVE_ROLES[role]
+        require(type(role) is str and role in roles and role not in seen
+                and row['filename'] == roles[role]
                 and type(row['bytes']) is int and 0 < row['bytes'] <= MAX_NATIVE_BYTES
                 and type(row['mode']) is int and row['mode'] == 0o500
                 and type(row['sha256']) is str and re.fullmatch('[a-f0-9]{64}', row['sha256'])
@@ -190,8 +194,9 @@ def check_bundle(bundle, expected):
 
 def bundle(wheelhouse, destination, *, profile_name='installation', nativehouse=None):
     wheelhouse, destination = Path(wheelhouse).resolve(), Path(destination).absolute()
-    require(profile_name in {'installation', 'local-review'}, 'Unsupported bundle profile')
+    require(profile_name in {'installation', 'local-review', 'workspace'}, 'Unsupported bundle profile')
     profile = load(ROOT/'config'/('process-macos-release.v1.json' if profile_name == 'installation'
+                                 else 'process-macos-workspace-release.v1.json' if profile_name == 'workspace'
                                  else 'process-macos-pilot-release.v1.json'))
     require((profile_name == 'installation') == (profile.get('schema') == 'hub.process-macos-release.v1'),
             'Bundle profile selection differs from release')
@@ -233,7 +238,9 @@ done
 echo 'Python 3.12 is required. Install it, then open Install.command again.' >&2
 exit 2
 '''.replace('REPLACE_DIGEST', digest)
-    if native:
+    if profile_name == 'workspace':
+        launcher = launcher.replace('install --bundle', 'install --root "$HOME/Library/Application Support/Zenith/Process-Workspace" --runtime-port 8292 --service-port 8291 --bundle')
+    elif native:
         launcher = launcher.replace('install --bundle', 'install --root "$HOME/Library/Application Support/Zenith/Process-Pilot" --runtime-port 8192 --service-port 8191 --bundle')
     (destination/'Install.command').write_text(launcher)
     (destination/'Install.command').chmod(0o700)
@@ -302,7 +309,10 @@ def install(source, root, expected, runtime_port=8092, service_port=8091):
     require(not root.exists(), 'Installation already exists; data is never overwritten')
     require(type(runtime_port) is int and type(service_port) is int and runtime_port != service_port
             and all(1024 <= p <= 65535 for p in (runtime_port, service_port)), 'Invalid or duplicate ports')
-    mode = 'local_review' if profile.get('native_profile') == 'local-review-v1' else 'installation_only'
+    mode = {'local-review-v1': 'local_review', 'workspace-v1': 'workspace'}.get(profile.get('native_profile'), 'installation_only')
+    if mode == 'workspace':
+        require(root.name == 'Process-Workspace' and runtime_port == 8292 and service_port == 8291,
+                'Workspace requires a separate Process-Workspace installation on ports 8292/8291')
     if mode == 'local_review':
         require(root.name == 'Process-Pilot' and runtime_port == 8192 and service_port == 8191,
                 'Local review requires a separate Process-Pilot installation on ports 8192/8191')
@@ -336,6 +346,8 @@ def install(source, root, expected, runtime_port=8092, service_port=8091):
          'runtime_endpoint': 'http://127.0.0.1:'+str(runtime_port), 'journal': str(root/'data/frank.db'),
          'allow_local_dev_untrusted': False,
          'integrations': {'schema': 'frank.integrations.v1', 'integrations': [], 'actors': []}})
+    if mode == 'workspace':
+        workspace_prepare_plan(root)
     run([python, '-I', '-S', '-B', root/'control.py', '_seal', '--root', root], root)
     save(root/'installed.json', {'schema': 'hub.process-macos-installed.v1', 'root': str(root),
          'bundle_sha256': expected, 'control_sha256': sha(root/'control.py'),
@@ -355,7 +367,7 @@ exec "$install_dir/venv/bin/python" -I -S -B "$install_dir/control.py" "$action"
 def config(root):
     value = load(private(root/'config/local.json'))
     require(set(value) == {'schema', 'mode', 'runtime_port', 'service_port'}
-            and value['schema'] == 'hub.process-macos-config.v1' and value['mode'] in {'installation_only', 'local_review'}
+            and value['schema'] == 'hub.process-macos-config.v1' and value['mode'] in {'installation_only', 'local_review', 'workspace'}
             and all(type(value[k]) is int and 1024 <= value[k] <= 65535 for k in ('runtime_port', 'service_port'))
             and value['runtime_port'] != value['service_port'], 'Invalid local installation configuration')
     if value['mode'] == 'local_review':
@@ -363,6 +375,10 @@ def config(root):
                 and root.name == 'Process-Pilot'
                 and value['runtime_port'] == 8192 and value['service_port'] == 8191,
                 'Local-review mode requires its isolated pinned release and ports')
+    if value['mode'] == 'workspace':
+        require(load(root/'profile.json').get('native_profile') == 'workspace-v1'
+                and root.name == 'Process-Workspace' and value['runtime_port'] == 8292
+                and value['service_port'] == 8291, 'Workspace target differs from isolated release')
     frank = load(private(root/'config/frank.json'))
     require(frank['environment'] == 'production' and frank['allow_local_dev_untrusted'] is False
             and frank['integrations'] == {'schema': 'frank.integrations.v1', 'integrations': [], 'actors': []},
@@ -705,6 +721,243 @@ def pilot_action(root, action, expected):
     return {'action': action, 'action_completed': True, 'inspection': inspection}
 
 
+# Generic authoring has no SOP, run, executor or provider activation.
+WORKSPACE_ACTIONS = {'workspace-status', 'workspace-prepare', 'workspace-setup', 'workspace-start',
+                     'workspace-stop', 'workspace-command'}
+WORKSPACE_CONFIGS = {'command-authority.json', 'wallet-command.json',
+                     'runtime-policy.json', 'runtime-receiver.json'}
+
+
+def workspace_profile(root):
+    require(config(root)['mode'] == 'workspace', 'This action requires the isolated workspace')
+    return load(root/'profile.json')
+
+
+def workspace_prepare_plan(root, expected=None):
+    profile = workspace_profile(root)
+    require(not (root/'authority').exists() and not (root/'authority').is_symlink(),
+            'Existing native custody is retained; preparation is create-only')
+    plan = root/'config/workspace-setup-plan.json'
+    previous = bounded_private(plan, 16384) if plan.exists() else None
+    require(not plan.is_symlink(), 'Workspace proposal cannot be a symlink')
+    current = hashlib.sha256(previous).hexdigest() if previous is not None else None
+    require(current == expected, 'Workspace proposal changed after review')
+    if previous is not None:
+        history = root/'config'/('workspace-setup-plan-history-'+current+'.json')
+        if history.exists():
+            require(bounded_private(history, 16384) == previous, 'Workspace proposal history changed')
+        else:
+            with history.open('xb') as stream:
+                os.fchmod(stream.fileno(), 0o600);stream.write(previous);stream.flush();os.fsync(stream.fileno())
+    rows = {r['role']: r for r in native_rows(profile)}
+    at = int(time.time())
+    value = {'schema': 'castalia.wallet-workspace-setup.v1', 'workspace_root': str(root),
+             'not_before': str(at-5), 'not_after': str(at+3590),
+             'wallet_command_sha256': rows['wallet-command']['sha256'],
+             'verifier_sha256': rows['context-verifier']['sha256']}
+    temporary = root/'config'/('workspace-proposal-'+uuid.uuid4().hex+'.next')
+    save(temporary, value)
+    with temporary.open('rb') as stream:
+        os.fsync(stream.fileno())
+    os.replace(temporary, plan)
+    directory = os.open(plan.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    return {'schema': 'hub.workspace-proposal.v1', 'plan_sha256': sha(plan),
+            'not_before': value['not_before'], 'not_after': value['not_after'],
+            'authority_created': False, 'process_created': False}
+
+
+def workspace_complete(root):
+    workspace_profile(root)
+    plan = root/'config/workspace-setup-plan.json'
+    receipt = closed_json(bounded_private(root/'authority/COMPLETE.json'))
+    require(type(receipt) is dict
+            and receipt.get('schema') == 'castalia.wallet-workspace-setup-complete.v1'
+            and receipt.get('root') == str(root) and receipt.get('activation') is False
+            and receipt.get('plan_sha256') == sha(plan)
+            and type(receipt.get('configuration_hashes')) is dict
+            and set(receipt['configuration_hashes']) == WORKSPACE_CONFIGS,
+            'Workspace native setup receipt differs from selected owner plan')
+    for name, digest in receipt['configuration_hashes'].items():
+        require(type(digest) is str and re.fullmatch('[a-f0-9]{64}', digest)
+                and hashlib.sha256(bounded_private(root/'authority/config'/name)).hexdigest() == digest,
+                'Workspace native configuration changed')
+    return receipt
+
+
+def workspace_master(root, receipt):
+    row = next(r for r in native_rows(load(root/'profile.json')) if r['role'] == 'wallet-command')
+    return {'schema': 'frank.workspace.v1',
+            'runtime_endpoint': 'http://127.0.0.1:'+str(config(root)['runtime_port']),
+            'journal': str(root/'data/frank-workspace.db'),
+            'wallet': {'executable': str(root/'native'/row['filename']),
+                       'executable_sha256': row['sha256'],
+                       'configuration': str(root/'authority/config/wallet-command.json'),
+                       'configuration_sha256': receipt['configuration_hashes']['wallet-command.json']}}
+
+
+def workspace_ready(root):
+    receipt = workspace_complete(root)
+    require(closed_json(bounded_private(root/'config/frank-workspace.json')) == workspace_master(root, receipt),
+            'Workspace client configuration differs from native setup')
+    admission = closed_json(bounded_private(root/'config/workspace-admission.json'))
+    require(admission == {'schema': 'runtime.new-run-admission.v1', 'enabled': False,
+                          'composition_digest': receipt['plan_sha256']},
+            'Workspace authoring requires closed run admission')
+    return receipt
+
+
+def workspace_run(argv, root):
+    marker = root/'logs/workspace-operation.json'
+    cleanup = root/'data/frank-workspace-cleanup.json'
+    require(not marker.exists() and not marker.is_symlink() and not cleanup.exists()
+            and not cleanup.is_symlink(), 'Workspace command cleanup is unresolved')
+    operation = {'schema': 'hub.workspace-operation.v1', 'id': uuid.uuid4().hex}
+    save(marker, operation)
+    with marker.open('rb') as stream:
+        os.fsync(stream.fileno())
+    directory = os.open(marker.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    child = None
+    resolved = False
+    with tempfile.TemporaryFile(dir=root/'logs') as out, tempfile.TemporaryFile(dir=root/'logs') as err:
+        try:
+            child = subprocess.Popen([str(x) for x in argv], cwd=root, env=environment(root),
+                                     stdin=subprocess.DEVNULL, stdout=out, stderr=err)
+            deadline = time.monotonic()+90
+            reason = None
+            while child.poll() is None:
+                if time.monotonic() >= deadline:
+                    reason = 'Workspace command timed out'
+                if os.fstat(out.fileno()).st_size+os.fstat(err.fileno()).st_size > 262144:
+                    reason = 'Workspace output exceeded bound'
+                if reason:
+                    child.send_signal(signal.SIGINT)
+                    try:
+                        child.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        child.kill();child.wait(timeout=5)
+                        raise InstallError(reason+'; cleanup must be reconciled')
+                    break
+                time.sleep(.02)
+            resolved = child.returncode in (0, 2, 3) and not cleanup.exists() and not cleanup.is_symlink()
+            out.seek(0);err.seek(0)
+            raw, diagnostic = out.read(262145), err.read(262145)
+            require(len(raw)+len(diagnostic) <= 262144, 'Workspace output exceeded bound')
+            if reason or child.returncode:
+                for suffix, data in [('stdout', raw), ('stderr', diagnostic)]:
+                    file = root/'logs'/('workspace-'+operation['id']+'.'+suffix+'.log')
+                    with file.open('xb') as stream:
+                        os.fchmod(stream.fileno(), 0o600);stream.write(data)
+                raise InstallError((reason or 'Workspace command denied or outcome unknown')+'; private logs retained')
+            return closed_json(raw)
+        finally:
+            if child is None or resolved:
+                require(closed_json(bounded_private(marker)) == operation, 'Workspace operation marker changed')
+                marker.unlink()
+                directory = os.open(marker.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+
+
+def workspace_report(root):
+    workspace_profile(root)
+    pending = any(p.exists() or p.is_symlink() for p in
+                  [root/'logs/workspace-operation.json', root/'data/frank-workspace-cleanup.json'])
+    result = {'schema': 'hub.workspace-status.v1', 'setup': 'not_selected',
+              'authority': 'pending', 'execution_enabled': False,
+              'provider_enabled': False, 'workflow_selected': False,
+              'cleanup_unresolved': pending}
+    if (root/'authority').exists():
+        try:
+            workspace_ready(root)
+            result.update(setup='configured', authority='configured_native_unqualified')
+        except (InstallError, OSError, ValueError, KeyError, TypeError):
+            result.update(setup='partial', authority='unavailable')
+    elif (root/'config/workspace-setup-plan.json').exists():
+        result['setup'] = 'absent'
+    return result
+
+
+def workspace_action(root, action, raw=None, expected=None, selection=None):
+    installed(root)
+    workspace_profile(root)
+    if action == 'workspace-stop':
+        return stop(root)
+    if action == 'workspace-status':
+        return doctor(root)
+    if action == 'workspace-start':
+        return start(root)
+    if action == 'workspace-prepare':
+        require(not any(launch_status(root, name) for name in COMPONENTS), 'Stop workspace before preparing setup')
+        return workspace_prepare_plan(root, selection)
+    if action == 'workspace-setup':
+        require(not (root/'authority').exists() and not (root/'authority').is_symlink(),
+                'Existing native custody is retained; setup is create-only')
+        require(not any(launch_status(root, name) for name in COMPONENTS), 'Stop workspace before setup')
+        plan = root/'config/workspace-setup-plan.json'
+        require(type(selection) is str and re.fullmatch('[a-f0-9]{64}', selection)
+                and sha(plan) == selection, 'Workspace setup plan changed after review')
+        value = closed_json(bounded_private(plan, 16384))
+        require(type(value) is dict and value.get('schema') == 'castalia.wallet-workspace-setup.v1'
+                and value.get('workspace_root') == str(root), 'Workspace setup selects another root')
+        result = workspace_run([root/'native/castalia-wallet-workspace-setup', 'create',
+                               '--plan', plan, '--plan-sha256', selection], root)
+        receipt = workspace_complete(root)
+        require(receipt['plan_sha256'] == selection, 'Workspace receipt differs from reviewed plan')
+        # Creation never publishes a process or opens run admission.
+        save(root/'config/frank-workspace.json', workspace_master(root, receipt))
+        save(root/'config/workspace-admission.json', {'schema': 'runtime.new-run-admission.v1',
+             'enabled': False, 'composition_digest': selection})
+        return result
+    require(action == 'workspace-command' and type(raw) is str
+            and len(raw.encode()) <= 65536 and type(expected) is str
+            and re.fullmatch('[a-f0-9]{64}', expected)
+            and hashlib.sha256(raw.encode()).hexdigest() == expected, 'Workspace request pin differs')
+    request = closed_json(raw.encode())
+    require(type(request) is dict and set(request) == {'schema', 'action', 'payload', 'idempotency_key'}
+            and request['schema'] == 'zenith.workspace-command.v1'
+            and request['action'] in {'catalog', 'get', 'validate', 'draft-put', 'publish', 'resume-command'}
+            and type(request['payload']) is dict and type(request['idempotency_key']) is str
+            and re.fullmatch('[a-zA-Z0-9-]{16,128}', request['idempotency_key']), 'Invalid workspace request')
+    receipt = workspace_ready(root)
+    master = root/'config/frank-workspace.json'
+    master_bytes = bounded_private(master)
+    require(closed_json(master_bytes) == workspace_master(root, receipt),
+            'Workspace client configuration differs from native setup')
+    master_digest = hashlib.sha256(master_bytes).hexdigest()
+    require(request['action'] == 'validate' or owns_listener(root, 'runtime'), 'Start workspace Runtime first')
+    requests = root/'data/workspace-requests'
+    if not requests.exists():
+        requests.mkdir(mode=0o700)
+    private(requests)
+    bound = requests/(request['idempotency_key']+'.request.json')
+    canonical_request = json.dumps(request, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+    if bound.exists():
+        require(bounded_private(bound) == canonical_request, 'Workspace idempotency identity changed action or payload')
+    else:
+        with bound.open('xb') as stream:
+            os.fchmod(stream.fileno(), 0o600);stream.write(canonical_request);stream.flush();os.fsync(stream.fileno())
+    selected = requests/(request['idempotency_key']+'.json')
+    payload = json.dumps(request['payload'], sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+    if selected.exists():
+        require(bounded_private(selected) == payload, 'Workspace idempotency identity changed payload')
+    else:
+        with selected.open('xb') as stream:
+            os.fchmod(stream.fileno(), 0o600);stream.write(payload);stream.flush();os.fsync(stream.fileno())
+    return workspace_run([root/'venv/bin/python', '-I', '-B', '-m', 'frank_executor.workspace_cli',
+                          request['action'], '--config', master, '--config-sha256', master_digest,
+                          '--input', selected, '--input-sha256', hashlib.sha256(payload).hexdigest()], root)
+
+
 def label(root, component):
     require(component in COMPONENTS, 'Unknown component')
     identity = hashlib.sha256((str(os.getuid())+':'+str(root)).encode()).hexdigest()[:20]
@@ -809,6 +1062,9 @@ def doctor(root):
         except (InstallError, OSError, ValueError, TypeError, KeyError):
             result['pilot'] = {'mode': 'local_review', 'setup': 'invalid',
                                'cleanup_unresolved': True, 'workflow': None, 'external_effects': False}
+    if value['mode'] == 'workspace':
+        result['workspace'] = workspace_report(root)
+        result['authority'] = result['workspace']['authority']
     return result
 
 
@@ -830,6 +1086,8 @@ def start(root):
         selection, _ = pilot_inputs(root)
         require(pilot_operation(root) is None and not pilot_cli_cleanup(root), 'Pilot cleanup is unresolved')
         pilot_complete(root, selection)
+    if value.get('mode') == 'workspace':
+        workspace_ready(root)
     check_ports(value)
     started = []
     try:
@@ -918,6 +1176,10 @@ def supervise(root, component):
         pilot_complete(root, selection)
         argv += ['--receiver-config', root/'authority/config/runtime-receiver.json',
                  '--admission-policy', root/'config/runtime-admission.json']
+    if value['mode'] == 'workspace' and component == 'runtime':
+        workspace_ready(root)
+        argv += ['--receiver-config', root/'authority/config/runtime-receiver.json',
+                 '--admission-policy', root/'config/workspace-admission.json']
     child = None
     stopping = False
     def stopped(signum, frame):
@@ -966,15 +1228,17 @@ def supervise(root, component):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['bundle', 'install', 'doctor', 'status', 'start', 'stop', '_inventory', '_seal', '_probe', '_run', *sorted(PILOT_ACTIONS)])
+    parser.add_argument('action', choices=['bundle', 'install', 'doctor', 'status', 'start', 'stop', '_inventory', '_seal', '_probe', '_run', *sorted(PILOT_ACTIONS), *sorted(WORKSPACE_ACTIONS)])
     parser.add_argument('--root', type=Path, default=DEFAULT)
     parser.add_argument('--bundle', type=Path)
     parser.add_argument('--bundle-sha256')
     parser.add_argument('--wheelhouse', type=Path)
     parser.add_argument('--output', type=Path)
-    parser.add_argument('--profile', choices=['installation', 'local-review'], default='installation')
+    parser.add_argument('--profile', choices=['installation', 'local-review', 'workspace'], default='installation')
     parser.add_argument('--nativehouse', type=Path)
     parser.add_argument('--selection-sha256')
+    parser.add_argument('--request-json')
+    parser.add_argument('--request-sha256')
     parser.add_argument('--component', choices=COMPONENTS)
     parser.add_argument('--route',choices=['live','ready'],default='live')
     parser.add_argument('--runtime-port', type=int, default=8092)
@@ -998,7 +1262,9 @@ def main():
             root = private(args.root)
             with (root/'operation.lock').open('a') as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                if args.action in PILOT_ACTIONS:
+                if args.action in WORKSPACE_ACTIONS:
+                    result = workspace_action(root, args.action, args.request_json, args.request_sha256, args.selection_sha256)
+                elif args.action in PILOT_ACTIONS:
                     require(args.selection_sha256 is not None, 'Supply the reviewed pilot selection pin')
                     result = pilot_action(root, args.action, args.selection_sha256)
                 else:

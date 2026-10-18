@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Fixed
+- Reuse the full manual inspection budget after native pilot actions — authenticated output and receipt reads grow with completed steps, and the shorter automatic observation returned unknown after a successful fifth step.
+
 ### Added
 
 - Wire fixed local Mac pilot setup, workflow actions and persistent cleanup holds — gives the lightweight deployer a bounded owner-pinned execution path while preserving the default installer and independent readiness checks.
