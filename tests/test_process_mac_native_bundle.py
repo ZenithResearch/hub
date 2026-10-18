@@ -134,7 +134,7 @@ class NativeBundleTests(unittest.TestCase):
 
     def test_valid_install_copies_native_but_keeps_default_deny(self):
         dest, pin = self.bundle()
-        target = self.base / 'install'
+        target = self.base / 'Process-Pilot'
         class FakeVenv:
             def create(self, root):
                 (root / 'bin').mkdir(parents=True)
@@ -146,7 +146,9 @@ class NativeBundleTests(unittest.TestCase):
         with patch.object(mac, 'host'), patch.object(mac.venv, 'EnvBuilder', return_value=FakeVenv()), patch.object(mac, 'run', side_effect=fake_run):
             report = mac.install(dest, target, pin, 8192, 8191)
         self.assertEqual(report['authority'], 'pending')
-        self.assertEqual(mac.load(target / 'config/local.json')['mode'], 'installation_only')
+        self.assertFalse((target / 'authority').exists())
+        self.assertEqual((target / 'exports').stat().st_mode & 0o777, 0o700)
+        self.assertEqual(mac.load(target / 'config/local.json')['mode'], 'local_review')
         self.assertEqual(mac.load(target / 'config/frank.json')['integrations']['actors'], [])
         self.assertEqual(mac.config(target)['runtime_port'], 8192)
         for row in self.profile['native']:
@@ -167,6 +169,29 @@ class NativeBundleTests(unittest.TestCase):
         self.profile['schema'] = 'hub.process-macos-release.v1'
         with self.assertRaisesRegex(mac.InstallError, 'explicit local-review release'):
             mac.native_rows(self.profile)
+
+    def test_default_v1_install_still_uses_installation_only_without_authority(self):
+        profile = {k: v for k, v in self.profile.items() if k not in {'native', 'native_profile'}}
+        profile['schema'] = 'hub.process-macos-release.v1'
+        (self.repo/'config/process-macos-release.v1.json').write_text(json.dumps(profile))
+        dest = self.base/'default-bundle'
+        pin = mac.bundle(self.wheels, dest)['bundle_sha256']
+        target = self.base/'ordinary-install'
+        class FakeVenv:
+            def create(self, root):
+                (root/'bin').mkdir(parents=True)
+                (root/'bin/python').write_bytes(b'public fake interpreter never executed')
+        def fake_run(argv, root, **kwargs):
+            if '_seal' in argv: mac.save(root/'installed-files.json', {})
+            return subprocess.CompletedProcess(argv, 0, b'', b'')
+        with patch.object(mac, 'host'), patch.object(mac.venv, 'EnvBuilder', return_value=FakeVenv()), patch.object(mac, 'run', side_effect=fake_run):
+            report = mac.install(dest, target, pin)
+        self.assertEqual(report['authority'], 'pending')
+        self.assertEqual(mac.config(target)['mode'], 'installation_only')
+        self.assertEqual(mac.config(target)['runtime_port'], 8092)
+        self.assertEqual(mac.load(target/'config/frank.json')['integrations']['actors'], [])
+        self.assertFalse((target/'authority').exists())
+        self.assertFalse((target/'exports').exists())
 
 
 if __name__ == '__main__':

@@ -7,6 +7,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ### Added
 
+- Package four pinned native tools through an explicit Mac pilot release profile — makes trusted native installation possible while preserving the existing installer defaults and independent authority admission.
+
 - Added the unified Mac pilot setup path and repository/surface map — so one-host request intake can be delivered through Hub without making requesters install every service or confusing source repositories with deployment units.
 
 - Added the Mac pilot usage guide with current installed limits, an isolated intake example and the proposed Frank Matrix flow — so operators can distinguish usable controls from pending authority, provider and setup integration.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline per-user Mac installation and lifecycle. Never provisions authority."""
+"""Offline per-user Mac installation and bounded owner-selected pilot lifecycle."""
 from __future__ import annotations
 
 import argparse
@@ -233,6 +233,8 @@ done
 echo 'Python 3.12 is required. Install it, then open Install.command again.' >&2
 exit 2
 '''.replace('REPLACE_DIGEST', digest)
+    if native:
+        launcher = launcher.replace('install --bundle', 'install --root "$HOME/Library/Application Support/Zenith/Process-Pilot" --runtime-port 8192 --service-port 8191 --bundle')
     (destination/'Install.command').write_text(launcher)
     (destination/'Install.command').chmod(0o700)
     result = {'bundle': str(destination), 'bundle_sha256': digest, 'wheel_count': 15}
@@ -300,11 +302,15 @@ def install(source, root, expected, runtime_port=8092, service_port=8091):
     require(not root.exists(), 'Installation already exists; data is never overwritten')
     require(type(runtime_port) is int and type(service_port) is int and runtime_port != service_port
             and all(1024 <= p <= 65535 for p in (runtime_port, service_port)), 'Invalid or duplicate ports')
+    mode = 'local_review' if profile.get('native_profile') == 'local-review-v1' else 'installation_only'
+    if mode == 'local_review':
+        require(root.name == 'Process-Pilot' and runtime_port == 8192 and service_port == 8191,
+                'Local review requires a separate Process-Pilot installation on ports 8192/8191')
     require(shutil.disk_usage(root.parent if root.parent.exists() else Path.home()).free >= 128*1024**2,
             'At least 128 MiB free disk space is required')
     root.mkdir(mode=0o700, parents=True)
     os.chmod(root, 0o700)
-    for name in ('home', 'config', 'data', 'logs', 'jobs'):
+    for name in ('home', 'config', 'data', 'logs', 'jobs', *(['exports'] if mode == 'local_review' else [])):
         (root/name).mkdir(mode=0o700)
     shutil.copyfile(Path(source)/'bundle.json', root/'bundle.json')
     for name in load(Path(source)/'bundle.json')['files']:
@@ -323,7 +329,7 @@ def install(source, root, expected, runtime_port=8092, service_port=8091):
     (root/'logs/install.log').write_bytes(result.stdout+result.stderr)
     require(result.returncode == 0, 'Offline package install failed; retain root and inspect logs/install.log')
     run([python, '-I', '-B', '-m', 'pip', 'check'], root)
-    config = {'schema': 'hub.process-macos-config.v1', 'mode': 'installation_only',
+    config = {'schema': 'hub.process-macos-config.v1', 'mode': mode,
               'runtime_port': runtime_port, 'service_port': service_port}
     save(root/'config/local.json', config)
     save(root/'config/frank.json', {'schema': 'frank.config.v1', 'environment': 'production',
@@ -349,14 +355,352 @@ exec "$install_dir/venv/bin/python" -I -S -B "$install_dir/control.py" "$action"
 def config(root):
     value = load(private(root/'config/local.json'))
     require(set(value) == {'schema', 'mode', 'runtime_port', 'service_port'}
-            and value['schema'] == 'hub.process-macos-config.v1' and value['mode'] == 'installation_only'
+            and value['schema'] == 'hub.process-macos-config.v1' and value['mode'] in {'installation_only', 'local_review'}
             and all(type(value[k]) is int and 1024 <= value[k] <= 65535 for k in ('runtime_port', 'service_port'))
             and value['runtime_port'] != value['service_port'], 'Invalid local installation configuration')
+    if value['mode'] == 'local_review':
+        require(load(root/'profile.json').get('native_profile') == 'local-review-v1'
+                and root.name == 'Process-Pilot'
+                and value['runtime_port'] == 8192 and value['service_port'] == 8191,
+                'Local-review mode requires its isolated pinned release and ports')
     frank = load(private(root/'config/frank.json'))
     require(frank['environment'] == 'production' and frank['allow_local_dev_untrusted'] is False
             and frank['integrations'] == {'schema': 'frank.integrations.v1', 'integrations': [], 'actors': []},
             'Installation doctor does not activate providers or development authority')
     return value
+
+
+# The release opts into this bounded physical-Mac pilot. No default install is
+# upgraded in place, and the browser never supplies filenames or argv.
+PILOT_ACTIONS = {'pilot-setup', 'pilot-initialize', 'pilot-next', 'pilot-inspect',
+                 'pilot-resume', 'pilot-renew', 'pilot-export'}
+PILOT_RUN = 'local-review-pilot-20261017-001'
+PILOT_SELECTION = 'config/pilot-controller.json'
+PILOT_OPERATION = 'data/pilot-operation.json'
+
+
+def bounded_private(path, maximum=65536):
+    path = private(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid()
+                and stat.S_IMODE(before.st_mode) == 0o600 and before.st_nlink == 1
+                and 0 < before.st_size <= maximum, 'Invalid private pilot input')
+        with os.fdopen(os.dup(fd), 'rb') as stream:
+            raw = stream.read(maximum + 1)
+        after = os.fstat(fd)
+        require(len(raw) == before.st_size and
+                (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) ==
+                (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns),
+                'Pilot input changed while being read')
+        return raw
+    finally:
+        os.close(fd)
+
+
+def closed_json(raw):
+    def pairs(rows):
+        result = {}
+        for key, value in rows:
+            require(key not in result, 'Duplicate pilot metadata key')
+            result[key] = value
+        return result
+    try:
+        return json.loads(raw, object_pairs_hook=pairs,
+                          parse_constant=lambda value: (_ for _ in ()).throw(InstallError('Invalid pilot number')))
+    except (ValueError, RecursionError):
+        raise InstallError('Invalid pilot metadata') from None
+
+
+def pilot_profile(root):
+    value = config(root)
+    require(value['mode'] == 'local_review' and root.name == 'Process-Pilot'
+            and value['runtime_port'] == 8192 and value['service_port'] == 8191,
+            'This action requires the isolated local-review installation')
+    profile = load(root/'profile.json')
+    require(profile.get('native_profile') == 'local-review-v1' and len(native_rows(profile)) == 4,
+            'Local review requires the pinned native release')
+    return value
+
+
+def pilot_inputs(root, expected=None, *, workflow=False):
+    pilot_profile(root)
+    raw = bounded_private(root/PILOT_SELECTION, 16384)
+    digest = hashlib.sha256(raw).hexdigest()
+    if expected is not None:
+        require(type(expected) is str and re.fullmatch('[a-f0-9]{64}', expected)
+                and digest == expected, 'Pilot selection changed after review')
+    selection = closed_json(raw)
+    require(type(selection) is dict and set(selection) == {'schema', 'setup_plan_sha256', 'workflow_sha256'}
+            and selection['schema'] == 'hub.process-macos-pilot.v1'
+            and type(selection['setup_plan_sha256']) is str
+            and re.fullmatch('[a-f0-9]{64}', selection['setup_plan_sha256'])
+            and (selection['workflow_sha256'] is None or type(selection['workflow_sha256']) is str
+                 and re.fullmatch('[a-f0-9]{64}', selection['workflow_sha256'])),
+            'Invalid owner-selected pilot configuration')
+    require(not workflow or selection['workflow_sha256'] is not None,
+            'Select the exact workflow after native setup before execution')
+    for name, key in [('config/pilot-setup-plan.json', 'setup_plan_sha256'),
+                      ('config/pilot-workflow.json', 'workflow_sha256')]:
+        if selection[key] is None:
+            continue
+        require(hashlib.sha256(bounded_private(root/name)).hexdigest() == selection[key],
+                'Pilot input differs from owner selection')
+    plan = closed_json(bounded_private(root/'config/pilot-setup-plan.json', 16384))
+    require(type(plan) is dict and plan.get('schema') == 'castalia.wallet-local-review-setup.v1'
+            and plan.get('pilot_root') == str(root), 'Owner plan selects another installation')
+    return selection, digest
+
+
+def pilot_complete(root, selection):
+    raw = bounded_private(root/'authority/COMPLETE.json', 65536)
+    receipt = closed_json(raw)
+    require(type(receipt) is dict and receipt.get('schema') == 'castalia.wallet-local-review-setup-complete.v1'
+            and receipt.get('plan_sha256') == selection['setup_plan_sha256']
+            and receipt.get('root') == str(root) and receipt.get('run_id') == PILOT_RUN
+            and receipt.get('activation') is False and type(receipt.get('configuration_hashes')) is dict,
+            'Pilot setup is incomplete or selects another owner plan')
+    hashes = receipt['configuration_hashes']
+    require(set(hashes) == {'command-authority.json', 'wallet-command.json', 'runtime-policy.json',
+                            'runtime-receiver.json', 'result-authority.json', 'result-policy.json',
+                            'frank-local-review.json'}, 'Incomplete pilot configuration closure')
+    for name in hashes:
+        digest = hashes.get(name)
+        require(type(digest) is str and re.fullmatch('[a-f0-9]{64}', digest)
+                and hashlib.sha256(bounded_private(root/'authority/config'/name)).hexdigest() == digest,
+                'Pilot authority configuration changed')
+    return receipt
+
+
+def pilot_cli_cleanup(root):
+    path = root/'data/frank-local-review-cleanup.json'
+    # Presence, including malformed or substituted state, blocks new native
+    # launches. Saved identifiers never authorize a signal or deletion.
+    return path.exists() or path.is_symlink()
+
+
+def pilot_operation(root):
+    path = root/PILOT_OPERATION
+    if not path.exists() and not path.is_symlink():
+        return None
+    value = closed_json(bounded_private(path, 4096))
+    require(type(value) is dict and set(value) == {'schema', 'operation_id', 'action', 'state'}
+            and value['schema'] == 'hub.local-review.operation.v1'
+            and type(value['operation_id']) is str and re.fullmatch('[a-f0-9]{32}', value['operation_id'])
+            and value['action'] in PILOT_ACTIONS
+            and value['state'] in {'running', 'cleanup_unresolved'}, 'Invalid pilot operation state')
+    return value
+
+
+def finish_pilot_operation(root, operation, *, unresolved=False):
+    # A retained operation is a reason to stop. It is never authority to signal a
+    # PID saved by an earlier process, or to erase another operation's state.
+    require(pilot_operation(root) == operation, 'Pilot operation state changed')
+    path = root/PILOT_OPERATION
+    if unresolved:
+        replacement = {**operation, 'state': 'cleanup_unresolved'}
+        temporary = root/'data'/('pilot-operation-'+operation['operation_id']+'.next')
+        save(temporary, replacement)
+        os.replace(temporary, path)
+    else:
+        path.unlink()
+    directory = os.open(root/'data', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def run_pilot(argv, root, action, *, timeout=90):
+    require(pilot_operation(root) is None and not pilot_cli_cleanup(root),
+            'Pilot process cleanup is unresolved; inspect retained operation state')
+    operation = {'schema': 'hub.local-review.operation.v1', 'operation_id': uuid.uuid4().hex,
+                 'action': action, 'state': 'running'}
+    save(root/PILOT_OPERATION, operation)
+    with (root/PILOT_OPERATION).open('rb') as state:
+        os.fsync(state.fileno())
+    directory = os.open(root/'data', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    # This one-shot CLI owns its detached native helpers. SIGINT gives its async
+    # finally blocks time to drain them before the outer Node deadline.
+    with tempfile.TemporaryFile(dir=root/'logs') as out, tempfile.TemporaryFile(dir=root/'logs') as err:
+        child = None
+        reason = None
+        forced = False
+        try:
+            child = subprocess.Popen([str(x) for x in argv], cwd=root, env=environment(root),
+                                     stdin=subprocess.DEVNULL, stdout=out, stderr=err)
+            deadline = time.monotonic() + timeout
+            while child.poll() is None:
+                if time.monotonic() >= deadline:
+                    reason = 'Pilot command timed out'
+                if os.fstat(out.fileno()).st_size + os.fstat(err.fileno()).st_size > 2*1024*1024:
+                    reason = 'Pilot command output exceeded its bound'
+                if reason:
+                    child.send_signal(signal.SIGINT)
+                    try:
+                        child.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        forced = True
+                        # Persist the uncertainty before forced termination.
+                        finish_pilot_operation(root, operation, unresolved=True)
+                        child.kill()
+                        child.wait(timeout=5)
+                    break
+                time.sleep(.02)
+            if os.fstat(out.fileno()).st_size + os.fstat(err.fileno()).st_size > 2*1024*1024:
+                reason = 'Pilot command output exceeded its bound'
+            out.seek(0); err.seek(0)
+            stdout, stderr = out.read(2*1024*1024), err.read(2*1024*1024)
+            if child.returncode not in (0, 2, 3) or pilot_cli_cleanup(root):
+                if not forced:
+                    finish_pilot_operation(root, operation, unresolved=True)
+                forced = True
+                reason = reason or 'Pilot cleanup ownership is unresolved'
+            if reason or child.returncode:
+                name = 'pilot-'+operation['operation_id']
+                for suffix, data in [('stdout', stdout), ('stderr', stderr)]:
+                    with (root/'logs'/(name+'.'+suffix+'.log')).open('xb') as stream:
+                        os.fchmod(stream.fileno(), 0o600); stream.write(data)
+                raise InstallError((reason or 'Pilot command denied or outcome unknown')+'; private logs retained')
+            return closed_json(stdout)
+        finally:
+            # A failed launch has no child helpers. An exceptional wait or forced
+            # termination retains the marker rather than reopening the pilot.
+            if not forced and (child is None or child.returncode in (0, 2, 3)):
+                primary = sys.exc_info()[0] is not None
+                try:
+                    finish_pilot_operation(root, operation)
+                except (InstallError, OSError):
+                    # The retained/replaced marker continues to deny new work.
+                    if not primary:
+                        raise
+
+
+def pilot_report(root):
+    result = {'mode': 'local_review', 'run_id': PILOT_RUN, 'setup': 'not_selected',
+              'cleanup_unresolved': pilot_operation(root) is not None or pilot_cli_cleanup(root),
+              'workflow': None, 'external_effects': False}
+    selected = root/PILOT_SELECTION
+    if not selected.exists() and not selected.is_symlink():
+        return result
+    selection, _ = pilot_inputs(root)
+    result['workflow_selected'] = selection['workflow_sha256'] is not None
+    authority = root/'authority'
+    if not authority.exists() and not authority.is_symlink():
+        result['setup'] = 'absent'
+        return result
+    if not (authority/'COMPLETE.json').exists():
+        result['setup'] = 'partial'
+        return result
+    pilot_complete(root, selection)
+    result['setup'] = 'configured'
+    # This is only local immutable configuration validation, not a network
+    # request or a readiness/authorization assertion.
+    result['authorization'] = 'checked_per_request'
+    observation = root/'data/pilot-observation.json'
+    if observation.exists() or observation.is_symlink():
+        result['workflow'] = closed_json(bounded_private(observation, 65536))
+    return result
+
+
+def pilot_admission(root, selection):
+    # This existing receiver operator changes only the isolated new-run gate.
+    # It supplies no service permission, key or provider authority.
+    plan_raw = bounded_private(root/'config/pilot-setup-plan.json', 16384)
+    require(hashlib.sha256(plan_raw).hexdigest() == selection['setup_plan_sha256'],
+            'Owner setup plan changed')
+    plan = closed_json(plan_raw)
+    policy = {'schema': 'runtime.new-run-admission.v1', 'enabled': True,
+              'composition_digest': plan['composition_sha256']}
+    path = root/'config/runtime-admission.json'
+    if path.exists() or path.is_symlink():
+        require(closed_json(bounded_private(path, 4096)) == policy,
+                'Runtime admission differs from the selected composition')
+        return
+    fd, temporary = tempfile.mkstemp(prefix='.pilot-admission-', dir=root/'config')
+    request = Path(temporary)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            json.dump({'schema': 'runtime.new-run-admission-apply.v1', 'policy': policy,
+                       'expected_digest': None}, stream, sort_keys=True)
+            stream.flush(); os.fsync(stream.fileno())
+        run([root/'venv/bin/python', '-I', '-B', '-m', 'process_runtime.admission',
+             'apply', '--policy', path, '--request-file', request], root)
+        require(closed_json(bounded_private(path, 4096)) == policy,
+                'Runtime admission publication differs from its selected policy')
+    finally:
+        request.unlink(missing_ok=True)
+
+
+def pilot_cli(root, selection, receipt, action):
+    require(action in {'initialize', 'next', 'inspect', 'resume', 'renew', 'export'},
+            'Unsupported fixed local-review action')
+    master = root/'authority/config/frank-local-review.json'
+    return [root/'venv/bin/python', '-I', '-B', '-m', 'frank_executor.local_review_cli', action,
+            '--config', master, '--config-sha256', receipt['configuration_hashes']['frank-local-review.json'],
+            '--workflow', root/'config/pilot-workflow.json', '--workflow-sha256', selection['workflow_sha256']]
+
+
+def retain_pilot_inspection(root, value):
+    require(type(value) is dict and set(value) == {'schema', 'run_id', 'run_state', 'recoverable',
+            'export_available', 'steps', 'pending_commands', 'unresolved_effects'}
+            and value['schema'] == 'frank.local-review.inspection.v1' and value['run_id'] == PILOT_RUN
+            and type(value['run_state']) is str and 0 < len(value['run_state']) <= 64
+            and type(value['recoverable']) is bool and type(value['export_available']) is bool
+            and all(type(value[key]) is list for key in ('steps', 'pending_commands', 'unresolved_effects')),
+            'Local-review inspection returned an invalid summary')
+    observation = {**value, 'schema': 'hub.local-review.observation.v1',
+                   'observed_at': int(time.time()*1000)}
+    path = root/'data/pilot-observation.json'
+    temporary = root/'data'/('pilot-observation-'+uuid.uuid4().hex+'.next')
+    save(temporary, observation)
+    with temporary.open('rb') as source:
+        os.fsync(source.fileno())
+    require(temporary.stat().st_size <= 65536, 'Pilot inspection exceeds its retained bound')
+    os.replace(temporary, path)
+    directory = os.open(root/'data', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    return observation
+
+
+def pilot_action(root, action, expected):
+    installed(root)
+    require(expected is not None, 'Supply the reviewed pilot selection pin')
+    require(action in PILOT_ACTIONS, 'Unsupported pilot action')
+    selection, digest = pilot_inputs(root, expected, workflow=action != 'pilot-setup')
+    require(pilot_operation(root) is None and not pilot_cli_cleanup(root), 'Pilot cleanup is unresolved')
+    if action == 'pilot-setup':
+        require(not (root/'authority').exists() and not (root/'authority').is_symlink(),
+                'Authority root already exists; partial state is retained, never reset')
+        return run_pilot([root/'native/castalia-wallet-local-review-setup', 'create', '--plan',
+                          root/'config/pilot-setup-plan.json', '--plan-sha256', selection['setup_plan_sha256']],
+                         root, action, timeout=90)
+    receipt = pilot_complete(root, selection)
+    if action == 'pilot-initialize':
+        pilot_admission(root, selection)
+    command = action.removeprefix('pilot-')
+    result = run_pilot(pilot_cli(root, selection, receipt, command), root, action, timeout=90)
+    if command == 'inspect':
+        return retain_pilot_inspection(root, result)
+    # Preserve a successful mutation if the separate observation is unavailable.
+    # A retained cleanup marker still blocks every subsequent native launch.
+    try:
+        observed = run_pilot([*pilot_cli(root, selection, receipt, 'inspect'), '--wait-seconds', '15'],
+                             root, 'pilot-inspect', timeout=30)
+        retain_pilot_inspection(root, observed)
+        inspection = 'retained'
+    except (InstallError, OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
+        inspection = 'unavailable'
+    return {'action': action, 'action_completed': True, 'inspection': inspection}
 
 
 def label(root, component):
@@ -455,8 +799,15 @@ def doctor(root):
         managed=launch_status(root,name) and owns_listener(root,name)
         states[name]={'managed':managed,'live':managed and probe(root,name,'live'),
                       'ready':managed and probe(root,name,'ready')}
-    return {'installed': True, 'packages': packages, 'frank': frank,'components':states,
-            'authority':'pending','pilot_ready':False,'external_effects':False}
+    result = {'installed': True, 'packages': packages, 'frank': frank,'components':states,
+              'authority':'pending','pilot_ready':False,'external_effects':False}
+    if value['mode'] == 'local_review':
+        try:
+            result['pilot'] = pilot_report(root)
+        except (InstallError, OSError, ValueError, TypeError, KeyError):
+            result['pilot'] = {'mode': 'local_review', 'setup': 'invalid',
+                               'cleanup_unresolved': True, 'workflow': None, 'external_effects': False}
+    return result
 
 
 def check_ports(value):
@@ -473,6 +824,10 @@ def start(root):
     installed(root)
     value = config(root)
     require(not any(launch_status(root, name) for name in COMPONENTS), 'Already registered; use status or stop first')
+    if value.get('mode', 'installation_only') == 'local_review':
+        selection, _ = pilot_inputs(root)
+        require(pilot_operation(root) is None and not pilot_cli_cleanup(root), 'Pilot cleanup is unresolved')
+        pilot_complete(root, selection)
     check_ports(value)
     started = []
     try:
@@ -556,6 +911,11 @@ def supervise(root, component):
     argv = [root/'venv/bin/python', '-I', '-B', '-m', COMPONENTS[component],
             '--database', root/'data'/f'{component}.db', '--port', str(value[component+'_port']),
             '--environment', 'production']
+    if value['mode'] == 'local_review' and component == 'runtime':
+        selection, _ = pilot_inputs(root)
+        pilot_complete(root, selection)
+        argv += ['--receiver-config', root/'authority/config/runtime-receiver.json',
+                 '--admission-policy', root/'config/runtime-admission.json']
     child = None
     stopping = False
     def stopped(signum, frame):
@@ -604,7 +964,7 @@ def supervise(root, component):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['bundle', 'install', 'doctor', 'status', 'start', 'stop', '_inventory', '_seal', '_probe', '_run'])
+    parser.add_argument('action', choices=['bundle', 'install', 'doctor', 'status', 'start', 'stop', '_inventory', '_seal', '_probe', '_run', *sorted(PILOT_ACTIONS)])
     parser.add_argument('--root', type=Path, default=DEFAULT)
     parser.add_argument('--bundle', type=Path)
     parser.add_argument('--bundle-sha256')
@@ -612,6 +972,7 @@ def main():
     parser.add_argument('--output', type=Path)
     parser.add_argument('--profile', choices=['installation', 'local-review'], default='installation')
     parser.add_argument('--nativehouse', type=Path)
+    parser.add_argument('--selection-sha256')
     parser.add_argument('--component', choices=COMPONENTS)
     parser.add_argument('--route',choices=['live','ready'],default='live')
     parser.add_argument('--runtime-port', type=int, default=8092)
@@ -635,7 +996,14 @@ def main():
             root = private(args.root)
             with (root/'operation.lock').open('a') as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                result = {'doctor': doctor, 'status': doctor, 'start': start, 'stop': stop}[args.action](root)
+                if args.action in PILOT_ACTIONS:
+                    require(args.selection_sha256 is not None, 'Supply the reviewed pilot selection pin')
+                    result = pilot_action(root, args.action, args.selection_sha256)
+                else:
+                    if args.action == 'start' and config(root)['mode'] == 'local_review':
+                        require(args.selection_sha256 is not None, 'Supply the reviewed pilot selection pin')
+                        pilot_inputs(root, args.selection_sha256)
+                    result = {'doctor': doctor, 'status': doctor, 'start': start, 'stop': stop}[args.action](root)
         print(json.dumps(result, sort_keys=True));return (result['exit_code'] or (0 if result['shutdown']=='graceful' else 2)) if args.action=='_run' else 0
     except (InstallError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, zipfile.BadZipFile) as exc:
         message = str(exc) if isinstance(exc, InstallError) else 'Mac setup rejected; check prerequisites, private configuration and installation logs.'
