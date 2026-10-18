@@ -5,6 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Fixed
+- Send process content through bounded private stdin and bind the same private setup-plan read; declare machine key expiry separately from short grants — avoid process-list disclosure, unsafe plan reads and forced hourly identity rotation. All65 Mac tests pass.
+
 ### Added
 - Add isolated workspace setup proposals, native authoring lifecycle and exact pinned client dispatch — local installation can begin empty, without the optional review SOP, capture inputs or execution authority. All64 Mac compatibility and negative tests pass.
 

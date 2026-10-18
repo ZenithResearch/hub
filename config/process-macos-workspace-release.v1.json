@@ -1,0 +1,163 @@
+{
+  "components": {
+    "frank": {
+      "package": "frank-executor",
+      "source_commit": "ff6b332cd34c79acd3bf7dc339c6395b185fc86c",
+      "version": "0.1.0",
+      "wheel_sha256": "c0e4735c5b48f9037adf75edfd63a8a9f5466532b78b5cefcf838301c66e18fd"
+    },
+    "process-runtime": {
+      "package": "process-runtime",
+      "source_commit": "200179067b48ba9f2e6b3ebab8c6d7ce7164dc27",
+      "version": "0.1.0",
+      "wheel_sha256": "acf3af9efd252f0150a2ab70561c699748bdc8c6801c7c6235f67004d02e470d"
+    },
+    "service-management": {
+      "package": "service-management",
+      "source_commit": "baa9cfaecbac1ca93d9668d67e399554a08eb03d",
+      "version": "0.1.0",
+      "wheel_sha256": "a9a785d06d12ed8b0192427e23b4f12020fe96f15690ec5694d3c0eca1403bef"
+    }
+  },
+  "machine": "arm64",
+  "native": [
+    {
+      "bytes": 11677088,
+      "filename": "castalia-wallet-service",
+      "mode": 320,
+      "role": "wallet-command",
+      "sha256": "67ae3e7ebc2b9270d05dcc3008357848563229c4970be5e31bed771c3cf81cb1",
+      "source_commit": "10cbcc2a412cac1bf7fd96583ad27991db466e20"
+    },
+    {
+      "bytes": 4720128,
+      "filename": "castalia-wallet-workspace-setup",
+      "mode": 320,
+      "role": "owner-setup",
+      "sha256": "a5a5482ca455e81308f85f2be20e73dd3884c598fd04e14c99e09e119915c339",
+      "source_commit": "10cbcc2a412cac1bf7fd96583ad27991db466e20"
+    },
+    {
+      "bytes": 702960,
+      "filename": "process-runtime-secs-check",
+      "mode": 320,
+      "role": "context-verifier",
+      "sha256": "b044785f3b9b45e9858ecee108a997d3c577a8262f4284e40e42e6b506b8e280",
+      "source_commit": "c69261fea3cd7a21033a7ffcd681c5e460f3e3b6"
+    }
+  ],
+  "native_profile": "workspace-v1",
+  "platform": "darwin",
+  "python": [
+    3,
+    12
+  ],
+  "schema": "hub.process-macos-release.v2",
+  "wheels": [
+    {
+      "bytes": 132079,
+      "filename": "anyio-4.15.1-py3-none-any.whl",
+      "name": "anyio",
+      "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101",
+      "version": "4.15.1"
+    },
+    {
+      "bytes": 67548,
+      "filename": "attrs-26.1.0-py3-none-any.whl",
+      "name": "attrs",
+      "sha256": "c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309",
+      "version": "26.1.0"
+    },
+    {
+      "bytes": 136983,
+      "filename": "certifi-2026.7.22-py3-none-any.whl",
+      "name": "certifi",
+      "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775",
+      "version": "2026.7.22"
+    },
+    {
+      "bytes": 134479,
+      "filename": "frank_executor-0.1.0-py3-none-any.whl",
+      "name": "frank-executor",
+      "sha256": "c0e4735c5b48f9037adf75edfd63a8a9f5466532b78b5cefcf838301c66e18fd",
+      "version": "0.1.0"
+    },
+    {
+      "bytes": 37515,
+      "filename": "h11-0.16.0-py3-none-any.whl",
+      "name": "h11",
+      "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86",
+      "version": "0.16.0"
+    },
+    {
+      "bytes": 78784,
+      "filename": "httpcore-1.0.9-py3-none-any.whl",
+      "name": "httpcore",
+      "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55",
+      "version": "1.0.9"
+    },
+    {
+      "bytes": 73517,
+      "filename": "httpx-0.28.1-py3-none-any.whl",
+      "name": "httpx",
+      "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad",
+      "version": "0.28.1"
+    },
+    {
+      "bytes": 69583,
+      "filename": "idna-3.20-py3-none-any.whl",
+      "name": "idna",
+      "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c",
+      "version": "3.20"
+    },
+    {
+      "bytes": 90630,
+      "filename": "jsonschema-4.26.0-py3-none-any.whl",
+      "name": "jsonschema",
+      "sha256": "d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce",
+      "version": "4.26.0"
+    },
+    {
+      "bytes": 18437,
+      "filename": "jsonschema_specifications-2025.9.1-py3-none-any.whl",
+      "name": "jsonschema-specifications",
+      "sha256": "98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe",
+      "version": "2025.9.1"
+    },
+    {
+      "bytes": 82341,
+      "filename": "process_runtime-0.1.0-py3-none-any.whl",
+      "name": "process-runtime",
+      "sha256": "acf3af9efd252f0150a2ab70561c699748bdc8c6801c7c6235f67004d02e470d",
+      "version": "0.1.0"
+    },
+    {
+      "bytes": 26766,
+      "filename": "referencing-0.37.0-py3-none-any.whl",
+      "name": "referencing",
+      "sha256": "381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231",
+      "version": "0.37.0"
+    },
+    {
+      "bytes": 341380,
+      "filename": "rpds_py-2026.9.1-cp312-cp312-macosx_11_0_arm64.whl",
+      "name": "rpds-py",
+      "sha256": "e21c1429e205828ea886a2293a4a2c8e01f4c25d9893ca330e97a6cf73f52e7b",
+      "version": "2026.9.1"
+    },
+    {
+      "bytes": 46549,
+      "filename": "service_management-0.1.0-py3-none-any.whl",
+      "name": "service-management",
+      "sha256": "a9a785d06d12ed8b0192427e23b4f12020fe96f15690ec5694d3c0eca1403bef",
+      "version": "0.1.0"
+    },
+    {
+      "bytes": 45571,
+      "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+      "name": "typing_extensions",
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8",
+      "version": "4.16.0"
+    }
+  ]
+}
