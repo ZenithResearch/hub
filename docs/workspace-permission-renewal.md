@@ -46,6 +46,8 @@ Apply first checks that Frank has no unresolved command intents or cleanup marke
 
 Success returns `hub.workspace-renewal-complete.v1` with `identity_preserved:true`, `commands_preserved:true`, `execution_enabled:false`, the exact predecessor/successor receipt bindings and `journal:bound|absent`. Renewal retains the finite native journal capacity; it does not prune history or restore exhausted capacity.
 
+After Native finalizes the renewal and writes its successor receipt, Wallet's supported cleanup removes superseded private custody revisions under an exact current-state check. This makes subsequent renewals possible without replacing the key. Original public receipts/configurations and both command histories remain retained. An interruption before cleanup keeps the completed receipt and renewal hold; exact-plan resume can finish cleanup while custody remains observable. Poisoned or unobservable custody remains blocked for checked owner recovery; this release does not reconcile it automatically.
+
 ## Preserve uncertain outcomes
 
 `logs/workspace-renewal.json` holds the full transition until native publication, Frank binding, client/admission files and selected receipt agree. Original and next metadata, the exact proposal and receipts remain available. New proposals, ordinary commands and starts are blocked during an uncertain transition.

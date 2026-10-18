@@ -2,9 +2,9 @@
   "components": {
     "frank": {
       "package": "frank-executor",
-      "source_commit": "ff6b332cd34c79acd3bf7dc339c6395b185fc86c",
+      "source_commit": "bb5d41e92fbfc5b1155f7e2ef40e795ad79a4187",
       "version": "0.1.0",
-      "wheel_sha256": "c0e4735c5b48f9037adf75edfd63a8a9f5466532b78b5cefcf838301c66e18fd"
+      "wheel_sha256": "aa9bf9cf7ecf83117be293f5913f59d77bab016d58568d95ce53fbe39027b7ce"
     },
     "process-runtime": {
       "package": "process-runtime",
@@ -30,12 +30,12 @@
       "source_commit": "10cbcc2a412cac1bf7fd96583ad27991db466e20"
     },
     {
-      "bytes": 4720128,
+      "bytes": 5408544,
       "filename": "castalia-wallet-workspace-setup",
       "mode": 320,
       "role": "owner-setup",
-      "sha256": "a5a5482ca455e81308f85f2be20e73dd3884c598fd04e14c99e09e119915c339",
-      "source_commit": "10cbcc2a412cac1bf7fd96583ad27991db466e20"
+      "sha256": "b84bd112b56713af5eb87850e90de4db5852b1c6c1032a7f3d5b7a692a6ad741",
+      "source_commit": "eb7b21305d9058d993f9a60aa9d4add2c34eb839"
     },
     {
       "bytes": 702960,
@@ -76,10 +76,10 @@
       "version": "2026.7.22"
     },
     {
-      "bytes": 134479,
+      "bytes": 138499,
       "filename": "frank_executor-0.1.0-py3-none-any.whl",
       "name": "frank-executor",
-      "sha256": "c0e4735c5b48f9037adf75edfd63a8a9f5466532b78b5cefcf838301c66e18fd",
+      "sha256": "aa9bf9cf7ecf83117be293f5913f59d77bab016d58568d95ce53fbe39027b7ce",
       "version": "0.1.0"
     },
     {
