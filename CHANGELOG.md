@@ -5,7 +5,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Added
+
+- Added the unified Mac pilot setup path and repository/surface map — so one-host request intake can be delivered through Hub without making requesters install every service or confusing source repositories with deployment units.
+
+- Added the Mac pilot usage guide with current installed limits, an isolated intake example and the proposed Frank Matrix flow — so operators can distinguish usable controls from pending authority, provider and setup integration.
+
+- Add a pinned offline Apple silicon Mac installer with private final-path environments and owned launchd start/stop/doctor — make the existing components installable on the operator’s and Jess’s Macs while native authority and provider enrolment remain blocked.
+
 ### Changed
+
+- Pin the accepted Frank844/Runtimea5f/Service44b artifacts and distinguish current context evidence from historical OCI results (2f0129d) — keeps image inputs aligned with tested component bytes without implying native or production qualification.
+
+- Commit the current Service tuple and reviewed local image execution as `91b3f60` — keep release inputs synchronized with the SDK cancellation repair while hosted and native qualification remain open.
 
 - Admit the reviewed Service SDK cancellation wheel through a freshly installed, content-verified tuple — keeps immutable image inputs aligned with current SDK recovery behavior and installed provenance.
 
@@ -15,6 +27,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 
 ### Fixed
+
+- Bound image-build clients, verify owned daemon work and retain current failure inventories (b7773f1) — timeouts previously lacked daemon-work ownership and final publication failures could leave stale diagnostics.
 - Verify raw local base identity across Docker config-ID and containerd manifest-ID stores, cross-bind loaded image digests and prohibit runtime pulls — allows the pinned images to build and smoke locally without weakening hash checks or consulting a registry during container startup.
 - Invoke Frank's reviewed installed public health command from combined operator checks and return bounded redacted owner/recovery diagnostics — an HTTP endpoint placeholder could not establish executor readiness or identify its failing dependency.
 - Reject malformed or conflicting legacy review evidence, incomplete DAG bindings and altered handler resources, and recheck lease/fence at transaction commit — readiness labels and leases that expired during writes could otherwise permit unsafe success.

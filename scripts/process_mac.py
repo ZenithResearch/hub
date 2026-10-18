@@ -29,6 +29,51 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT = Path.home()/'Library/Application Support/Zenith/Process'
 COMPONENTS = {'runtime': 'process_runtime', 'service': 'service_management'}
+# Packaging is not authority activation. These are fixed opt-in payload roles.
+NATIVE_ROLES = {
+    'wallet-command': 'castalia-wallet-service',
+    'owner-setup': 'castalia-wallet-local-review-setup',
+    'result-attester': 'secs-frank-result',
+    'context-verifier': 'process-runtime-secs-check',
+}
+MAX_NATIVE_BYTES = 64 * 1024 * 1024
+
+
+def native_rows(profile):
+    if profile.get('schema') == 'hub.process-macos-release.v1':
+        require('native' not in profile and 'native_profile' not in profile,
+                'Native payloads require an explicit local-review release')
+        return []
+    require(set(profile) == {'schema', 'platform', 'machine', 'python', 'components',
+                            'wheels', 'native_profile', 'native'}
+            and profile['schema'] == 'hub.process-macos-release.v2'
+            and profile['native_profile'] == 'local-review-v1',
+            'Unsupported Mac release profile')
+    rows = profile['native']
+    require(type(rows) is list and len(rows) == len(NATIVE_ROLES),
+            'Incomplete native payload closure')
+    seen = set()
+    for row in rows:
+        require(type(row) is dict and set(row) == {'role', 'filename', 'bytes', 'sha256',
+                                                  'source_commit', 'mode'},
+                'Invalid native payload record')
+        role = row['role']
+        require(type(role) is str and role in NATIVE_ROLES and role not in seen
+                and row['filename'] == NATIVE_ROLES[role]
+                and type(row['bytes']) is int and 0 < row['bytes'] <= MAX_NATIVE_BYTES
+                and type(row['mode']) is int and row['mode'] == 0o500
+                and type(row['sha256']) is str and re.fullmatch('[a-f0-9]{64}', row['sha256'])
+                and type(row['source_commit']) is str and re.fullmatch('[a-f0-9]{40}', row['source_commit']),
+                'Invalid native payload pin')
+        seen.add(role)
+    return rows
+
+
+def check_native_payload(path, row):
+    require(not path.is_symlink() and path.is_file()
+            and path.stat().st_size == row['bytes']
+            and stat.S_IMODE(path.stat().st_mode) == row['mode']
+            and sha(path) == row['sha256'], 'Native executable differs from release profile')
 
 
 class InstallError(ValueError):
@@ -128,21 +173,36 @@ def check_bundle(bundle, expected):
                         if q != Path('.')) and p.is_file() and sha(p) == digest,
                 'Bundle content differs from release manifest')
     profile = load(bundle/'profile.json')
-    require(profile['schema'] == 'hub.process-macos-release.v1', 'Unsupported Mac release profile')
+    native = native_rows(profile)
     require(len(profile['wheels']) == 15 and len({r['name'] for r in profile['wheels']}) == 15,
             'Incomplete Mac dependency closure')
     expected_files = {'profile.json', 'process_mac.py'} | {'wheels/'+r['filename'] for r in profile['wheels']}
+    expected_files |= {'native/'+r['filename'] for r in native}
     require(set(manifest['files']) == expected_files, 'Bundle has missing or unexpected payloads')
     for row in profile['wheels']:
         p = bundle/'wheels'/row['filename']
         require(p.name == row['filename'] and p.suffix == '.whl' and sha(p) == row['sha256']
                 and p.stat().st_size == row['bytes'], 'Wheel differs from release profile')
+    for row in native:
+        check_native_payload(bundle/'native'/row['filename'], row)
     return profile
 
 
-def bundle(wheelhouse, destination):
+def bundle(wheelhouse, destination, *, profile_name='installation', nativehouse=None):
     wheelhouse, destination = Path(wheelhouse).resolve(), Path(destination).absolute()
-    profile = load(ROOT/'config/process-macos-release.v1.json')
+    require(profile_name in {'installation', 'local-review'}, 'Unsupported bundle profile')
+    profile = load(ROOT/'config'/('process-macos-release.v1.json' if profile_name == 'installation'
+                                 else 'process-macos-pilot-release.v1.json'))
+    require((profile_name == 'installation') == (profile.get('schema') == 'hub.process-macos-release.v1'),
+            'Bundle profile selection differs from release')
+    native = native_rows(profile)
+    require(not native or nativehouse is not None, 'Supply the pinned native payload directory')
+    require(nativehouse is None or native, 'Native payloads are not part of the installation-only release')
+    if native:
+        nativehouse = Path(nativehouse)
+        require(nativehouse.is_dir() and not nativehouse.is_symlink(), 'Unsafe native payload directory')
+        for row in native:
+            check_native_payload(nativehouse/row['filename'], row)
     require(not destination.exists(), 'Bundle destination already exists')
     for row in profile['wheels']:
         p = wheelhouse/row['filename']
@@ -151,6 +211,12 @@ def bundle(wheelhouse, destination):
     (destination/'wheels').mkdir(mode=0o700)
     for row in profile['wheels']:
         shutil.copyfile(wheelhouse/row['filename'], destination/'wheels'/row['filename'])
+    if native:
+        (destination/'native').mkdir(mode=0o700)
+        for row in native:
+            p = destination/'native'/row['filename']
+            shutil.copyfile(nativehouse/row['filename'], p)
+            p.chmod(row['mode'])
     shutil.copyfile(__file__, destination/'process_mac.py')
     save(destination/'profile.json', profile)
     files = {str(p.relative_to(destination)): sha(p) for p in destination.rglob('*') if p.is_file()}
@@ -169,7 +235,10 @@ exit 2
 '''.replace('REPLACE_DIGEST', digest)
     (destination/'Install.command').write_text(launcher)
     (destination/'Install.command').chmod(0o700)
-    return {'bundle': str(destination), 'bundle_sha256': digest, 'wheel_count': 15}
+    result = {'bundle': str(destination), 'bundle_sha256': digest, 'wheel_count': 15}
+    if native:
+        result['native_count'] = len(native)
+    return result
 
 
 def inventory(root, *, seal=False):
@@ -242,6 +311,8 @@ def install(source, root, expected, runtime_port=8092, service_port=8091):
         target = root/name
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         shutil.copyfile(Path(source)/name, target)
+        if name in {'native/'+row['filename'] for row in native_rows(profile)}:
+            target.chmod(0o500)
     shutil.copyfile(__file__, root/'control.py')
     venv.EnvBuilder(with_pip=True, symlinks=True).create(root/'venv')
     python = root/'venv/bin/python'
@@ -539,6 +610,8 @@ def main():
     parser.add_argument('--bundle-sha256')
     parser.add_argument('--wheelhouse', type=Path)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--profile', choices=['installation', 'local-review'], default='installation')
+    parser.add_argument('--nativehouse', type=Path)
     parser.add_argument('--component', choices=COMPONENTS)
     parser.add_argument('--route',choices=['live','ready'],default='live')
     parser.add_argument('--runtime-port', type=int, default=8092)
@@ -547,7 +620,7 @@ def main():
     try:
         if args.action == 'bundle':
             require(args.wheelhouse and args.output, 'Supply wheelhouse and output')
-            result = bundle(args.wheelhouse, args.output)
+            result = bundle(args.wheelhouse, args.output, profile_name=args.profile, nativehouse=args.nativehouse)
         elif args.action == 'install':
             require(args.bundle, 'Supply the offline bundle')
             result = install(args.bundle, args.root, args.bundle_sha256, args.runtime_port, args.service_port)
