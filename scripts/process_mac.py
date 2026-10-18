@@ -694,8 +694,10 @@ def pilot_action(root, action, expected):
     # Preserve a successful mutation if the separate observation is unavailable.
     # A retained cleanup marker still blocks every subsequent native launch.
     try:
-        observed = run_pilot([*pilot_cli(root, selection, receipt, 'inspect'), '--wait-seconds', '15'],
-                             root, 'pilot-inspect', timeout=30)
+        # Inspection authenticates the run plus every committed output/receipt.
+        # Reuse the manual inspection budget as the observed run grows.
+        observed = run_pilot(pilot_cli(root, selection, receipt, 'inspect'),
+                             root, 'pilot-inspect', timeout=90)
         retain_pilot_inspection(root, observed)
         inspection = 'retained'
     except (InstallError, OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):

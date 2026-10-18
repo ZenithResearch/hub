@@ -294,7 +294,7 @@ class PilotActionTests(unittest.TestCase):
             pilot.assert_not_called(); run.assert_not_called()
 
 
-    def test_automatic_inspection_has_inner_budget_and_outer_cleanup_headroom(self):
+    def test_automatic_inspection_uses_the_full_manual_inspection_budget(self):
         self.complete()
         summary = {'schema': 'frank.local-review.inspection.v1', 'run_id': mac.PILOT_RUN,
             'run_state': 'running', 'recoverable': False, 'export_available': False,
@@ -305,9 +305,9 @@ class PilotActionTests(unittest.TestCase):
         action, inspect = run.call_args_list
         self.assertEqual(action.kwargs['timeout'], 90)
         self.assertNotIn('--wait-seconds', action.args[0])
-        self.assertEqual(inspect.args[0][-2:], ['--wait-seconds', '15'])
+        self.assertNotIn('--wait-seconds', inspect.args[0])
         self.assertEqual(inspect.args[1:], (self.root, 'pilot-inspect'))
-        self.assertEqual(inspect.kwargs['timeout'], 30)
+        self.assertEqual(inspect.kwargs['timeout'], 90)
         self.assertEqual(mac.load(self.root/'data/pilot-observation.json')['run_state'], 'running')
         # Explicit inspection keeps the existing CLI default60/wrapper90 path.
         with patch.object(mac, 'installed'), patch.object(mac, 'run_pilot', return_value=summary) as run:
@@ -322,8 +322,8 @@ class PilotActionTests(unittest.TestCase):
             result = mac.pilot_action(self.root, 'pilot-next', self.pin)
         self.assertEqual(result, {'action': 'pilot-next', 'action_completed': True, 'inspection': 'unavailable'})
         self.assertEqual(run.call_count, 2)
-        self.assertEqual(run.call_args.args[0][-2:], ['--wait-seconds', '15'])
-        self.assertEqual(run.call_args.kwargs['timeout'], 30)
+        self.assertNotIn('--wait-seconds', run.call_args.args[0])
+        self.assertEqual(run.call_args.kwargs['timeout'], 90)
         self.assertFalse((self.root/'data/pilot-observation.json').exists())
 
 
