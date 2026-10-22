@@ -1,6 +1,7 @@
 """Offline host lifecycle tests; no Docker engine or container is contacted."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import signal
 import stat
@@ -205,6 +206,8 @@ def assert_exact_payload_inventory(output):
 
 
 @pytest.mark.parametrize('phase', ['write', 'rename'])
+@pytest.mark.skipif(os.environ.get('SKIP_PROCESS_IMAGE_HOST_TESTS') == '1',
+                    reason='requires the reviewed Darwin arm64 image-host environment')
 def test_publication_failure_keeps_exact_final_payload_inventory(tmp_path, monkeypatch, phase):
     from scripts import process_component_images as product
     monkeypatch.setattr(product._execution, 'MIN_FREE', 0)

@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ### Fixed
 - Commit the live-provider Mac profile and its stopped workspace upgrade path with the corrected Frank wheel pin — released installer bytes can now reproduce the successful Hermes pilot without changing Wallet custody, authority history or business data.
+- Exclude the Darwin arm64 image-host qualification tests explicitly from Linux baseline CI — keep their reviewed-host requirement intact while allowing the portable suite to run.
 
 ### Added
 - Added explicit finite workspace renewal, retained-history migration and a stopped software upgrade path — expired authoring grants can be renewed without replacing custody or reinstalling business data.

@@ -11,7 +11,12 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 TERRAFORM_BIN="${TERRAFORM_BIN:-terraform}"
 
 if [[ "${SKIP_PYTHON_TESTS:-0}" != "1" ]]; then
-  "$PYTHON_BIN" -m pytest tests -q
+  PYTEST_ARGS=(tests -q)
+  if [[ "${SKIP_PROCESS_IMAGE_HOST_TESTS:-0}" == "1" ]]; then
+    PYTEST_ARGS+=(--ignore=tests/test_process_component_images.py
+                  --ignore=tests/test_process_image_host_tools.py)
+  fi
+  "$PYTHON_BIN" -m pytest "${PYTEST_ARGS[@]}"
 fi
 
 if [[ "${SKIP_PRIVATE_ARTIFACT_SCAN:-0}" != "1" ]]; then
