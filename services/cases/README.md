@@ -32,3 +32,9 @@ Cases is the durable state service for Hub work. It owns cases, process contract
 ```bash
 uv run pytest tests/test_cases_contract.py tests/test_cases_observability.py tests/test_process_contract.py -q
 ```
+
+## Legacy containment
+
+Native review execution uses the fenced claim protocol and immutable attempt identities described in [legacy review containment](../../docs/operations/legacy-review-containment.md). Invalid historical contracts remain inspectable but cannot execute. These are legacy migration records, not the new process-runtime or service-management aggregates.
+
+Run `python -m pytest tests/test_legacy_containment.py -q` with the focused suites above for concurrency, crash and restart coverage.

@@ -1,0 +1,731 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:service-management:command:v1",
+  "title": "service.command.v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_version",
+        "operation",
+        "payload",
+        "request_id",
+        "resource",
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "service.command.v1"
+        },
+        "operation": {
+          "const": "request.create"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "ServiceRequest"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            }
+          }
+        },
+        "expected_version": {
+          "type": "null"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "summary"
+          ],
+          "properties": {
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "\\S"
+            },
+            "details": {
+              "type": "string",
+              "maxLength": 16384
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_version",
+        "operation",
+        "payload",
+        "request_id",
+        "resource",
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "service.command.v1"
+        },
+        "operation": {
+          "const": "request.qualify"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "ServiceRequest"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            }
+          }
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "qualification"
+          ],
+          "properties": {
+            "qualification": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_version",
+        "operation",
+        "payload",
+        "request_id",
+        "resource",
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "service.command.v1"
+        },
+        "operation": {
+          "const": "request.accept"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "ServiceRequest"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            }
+          }
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "acceptance"
+          ],
+          "properties": {
+            "acceptance": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_version",
+        "operation",
+        "payload",
+        "request_id",
+        "resource",
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "service.command.v1"
+        },
+        "operation": {
+          "const": "request.reject"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "ServiceRequest"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            }
+          }
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reason"
+          ],
+          "properties": {
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_version",
+        "operation",
+        "payload",
+        "request_id",
+        "resource",
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "service.command.v1"
+        },
+        "operation": {
+          "const": "request.convert"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "ServiceRequest"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            }
+          }
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "case_id",
+            "obligation"
+          ],
+          "properties": {
+            "case_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "obligation": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "\\S"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_version",
+        "operation",
+        "payload",
+        "request_id",
+        "resource",
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "service.command.v1"
+        },
+        "operation": {
+          "const": "case.plan"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "Case"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            }
+          }
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope"
+          ],
+          "properties": {
+            "scope": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192,
+              "pattern": "\\S"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_version",
+        "operation",
+        "payload",
+        "request_id",
+        "resource",
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "service.command.v1"
+        },
+        "operation": {
+          "const": "case.close"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "Case"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            }
+          }
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "resolution"
+          ],
+          "properties": {
+            "resolution": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192,
+              "pattern": "\\S"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_version",
+        "operation",
+        "payload",
+        "request_id",
+        "resource",
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "service.command.v1"
+        },
+        "operation": {
+          "const": "case.plan.approve"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "Case"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            }
+          }
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "revision_id",
+            "reason",
+            "pin",
+            "inputs",
+            "carry_forward"
+          ],
+          "properties": {
+            "revision_id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "pin": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "process_id",
+                "process_version",
+                "compilation_hash"
+              ],
+              "properties": {
+                "process_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "process_version": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "compilation_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "inputs": {
+              "type": "object",
+              "maxProperties": 128,
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "carry_forward": {
+              "type": "array",
+              "maxItems": 0,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "run_id",
+                  "step_id",
+                  "attempt_id",
+                  "output_name",
+                  "target_input",
+                  "expected_output_digest"
+                ],
+                "properties": {
+                  "run_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "step_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "attempt_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "output_name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "target_input": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "expected_output_digest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expected_version",
+        "operation",
+        "payload",
+        "request_id",
+        "resource",
+        "schema"
+      ],
+      "properties": {
+        "schema": {
+          "const": "service.command.v1"
+        },
+        "operation": {
+          "const": "case.plan.revise"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "Case"
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            }
+          }
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "revision_id",
+            "reason",
+            "pin",
+            "inputs",
+            "carry_forward",
+            "superseded_run_id"
+          ],
+          "properties": {
+            "revision_id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "pin": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "process_id",
+                "process_version",
+                "compilation_hash"
+              ],
+              "properties": {
+                "process_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "process_version": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                },
+                "compilation_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              }
+            },
+            "inputs": {
+              "type": "object",
+              "maxProperties": 128,
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            },
+            "carry_forward": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "run_id",
+                  "step_id",
+                  "attempt_id",
+                  "output_name",
+                  "target_input",
+                  "expected_output_digest"
+                ],
+                "properties": {
+                  "run_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "step_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "attempt_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "output_name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "target_input": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+                  },
+                  "expected_output_digest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            },
+            "superseded_run_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$comment": "Wire reader additionally rejects duplicate keys, non-finite numbers, NUL in payload strings, invalid Unicode, non-ASCII identifiers and bodies over 65536 bytes. Versions must use integer JSON tokens. Identifiers use a full-string match. No Unicode normalization is performed."
+}

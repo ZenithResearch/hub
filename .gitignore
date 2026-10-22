@@ -48,3 +48,8 @@ rolodex/agents/*/logs/
 rolodex/agents/*/sessions/
 rolodex/agents/*/kanban/
 rolodex/agents/*/memories/*.lock
+
+# Operator-private process execution evidence; retain separately before archival.
+/docs/operations/process-execution-evidence/
+/docs/operations/process-execution-evidence.md
+/docs/operations/process-execution-completion-plan.md

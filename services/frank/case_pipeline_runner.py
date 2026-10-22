@@ -5,6 +5,8 @@ import hashlib
 import json
 import logging
 import os
+import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +14,7 @@ from typing import Any
 
 import httpx
 
+from services.cases.execution_contract import execution_errors, profile_for, runnable, state_errors
 from services.frank import stt_client
 from services.frank.review_case_automaton import (
     AUTOMATON_TO_GATEWAY_STATUS,
@@ -131,8 +134,8 @@ class PipelineResult:
 class CasePipelineRunner:
     """Frank-owned native review pipeline runner.
 
-    The runner is service code. It writes cases outputs before marking step runs
-    complete and emits fine-grained observability events for Swift/UI consumers.
+    Cases fences every mutation and atomically commits outputs with step attempts.
+    Handler selection and dependencies come from the frozen legacy resource.
     """
 
     def __init__(
@@ -149,101 +152,115 @@ class CasePipelineRunner:
         self.gateway_url = gateway_url.rstrip("/")
         self.stt_url = stt_url.rstrip("/")
         self.execution_root = execution_root
+        self.claim: dict[str, Any] | None = None
+        self.claim_request_key = uuid.uuid4().hex
+        self.owner = "frank:" + uuid.uuid4().hex
+        self.lease_seconds = 120
+        self.lease_error: str | None = None
+        self.active_case_dir: Path | None = None
+
+    async def _request(self, method: str, url: str, **kwargs):
+        if self.lease_error:
+            raise RuntimeError(self.lease_error)
+        if self.claim and url.startswith(self.cases_url + "/") and method != "get":
+            kwargs["headers"] = {"x-legacy-run-id": self.claim["run_id"], "x-legacy-fence": str(self.claim["fence"])}
+        return await getattr(self.client, method)(url, **kwargs)
+
+    async def _heartbeat(self, case_id: str, parent: asyncio.Task) -> None:
+        while True:
+            await asyncio.sleep(self.lease_seconds / 3)
+            try:
+                response = await self._request("post", f"{self.cases_url}/cases/{case_id}/execution/heartbeat", json={"lease_seconds":self.lease_seconds}, timeout=10.0)
+                response.raise_for_status()
+                self.claim = response.json()
+            except Exception as exc:
+                self.lease_error = f"legacy claim renewal failed: {type(exc).__name__}"
+                parent.cancel()
+                return
 
     async def run(self, case_id: str, dispatch_packet: dict[str, Any]) -> PipelineResult:
-        case_dir = self.execution_root / case_id
-        case_dir.mkdir(parents=True, exist_ok=True)
-        case_run = await self.create_case_run(case_id, dispatch_packet)
-        case_run_id = str(case_run["id"])
+        self.claim = dispatch_packet.get("_legacy_claim") or self.claim
+        if self.claim is None:
+            await self.create_case_run(case_id,dispatch_packet)
+        case_run_id = str(self.claim["run_id"])
+        case_dir = self.execution_root / case_id / "attempts" / case_run_id
+        (case_dir / "artifacts").mkdir(parents=True, exist_ok=True)
+        self.active_case_dir = case_dir
         completed: list[str] = []
-
-        await self.update_case_status(case_id, "IN_PROGRESS")
-        await self.emit_event(case_run_id, "case_run.started", "native case pipeline started")
-
+        outcome, reason = "blocked", "no dependency-satisfied work"
+        heartbeat = asyncio.create_task(self._heartbeat(case_id,asyncio.current_task()))
         try:
-            for step_id in [f"step_{index}" for index in range(1, 10)]:
-                case_detail = await self.get_case(case_id)
-                case_status = str((case_detail.get("case") or {}).get("status") or "").upper()
-                if case_status in TERMINAL_CASE_STATUSES:
-                    if case_status == "BLOCKED" and case_has_runnable_steps(case_detail):
-                        await self.update_case_status(case_id, "IN_PROGRESS")
-                    else:
-                        break
-                step = step_by_id(case_detail, step_id)
-                if not step or step_is_terminal(step):
-                    continue
-                await self.run_step(case_run_id, case_id, dispatch_packet, case_detail, step, case_dir)
-                completed.append(step_id)
-
-            final_case = await self.get_case(case_id)
-            final_status = str((final_case.get("case") or {}).get("status") or "OPEN").upper()
-            if final_status not in TERMINAL_CASE_STATUSES:
-                await self.update_case_status(case_id, "COMPLETED")
-                final_status = "COMPLETED"
-            await self.update_case_run(case_run_id, "completed")
-            await self.emit_event(case_run_id, "case_run.completed", "native case pipeline completed")
-            return PipelineResult(case_id=case_id, case_run_id=case_run_id, status=final_status.lower(), completed_step_ids=tuple(completed))
-        except Exception as exc:
-            await self.update_case_run(case_run_id, "blocked", metadata={"reason": str(exc), "error_type": type(exc).__name__})
-            await self.emit_event(case_run_id, "case_run.blocked", str(exc), severity="error")
-            await self.update_case_status(case_id, "BLOCKED")
-            return PipelineResult(
-                case_id=case_id,
-                case_run_id=case_run_id,
-                status="blocked",
-                completed_step_ids=tuple(completed),
-                blocked_reason=str(exc),
-            )
-
-    async def run_step(
-        self,
-        case_run_id: str,
-        case_id: str,
-        dispatch_packet: dict[str, Any],
-        case_detail: dict[str, Any],
-        step: dict[str, Any],
-        case_dir: Path,
-    ) -> None:
-        step_id = str(step["step_id"])
-        contract_step = contract_step_by_id(case_detail, step_id) or {}
-        executor_type = "native" if step_id in {"step_1", "step_2", "step_3", "step_8", "step_9"} else "model"
-        step_run = await self.create_step_run(case_run_id, case_id, step, executor_type=executor_type)
-        step_run_id = str(step_run["id"])
-        await self.emit_event(case_run_id, "step.started", f"{step_id} started", step_run_id=step_run_id, metadata={"step_id": step_id})
-
-        try:
-            if step_id == "step_1":
-                outputs = await self.execute_step_1(case_run_id, step_run_id, dispatch_packet, case_dir)
-                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native review setup completed"])
-            elif step_id == "step_2":
-                outputs = await self.execute_step_2(case_run_id, step_run_id, case_detail, case_dir)
-                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native STT transcription completed"])
-            elif step_id == "step_3":
-                outputs = await self.execute_step_3(case_detail)
-                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native component resolution baseline completed"])
-            elif step_id in {"step_4", "step_5", "step_6", "step_7"}:
-                outputs = await self.execute_structured_analysis_baseline(step_id, case_detail, case_dir)
-                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native structured analysis baseline completed"])
-            elif step_id == "step_8":
-                outputs = await self.execute_step_8(case_detail)
-                await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Review status updated"])
-            elif step_id == "step_9":
-                await self.execute_step_9(case_run_id, step_run_id, case_detail, case_dir)
-                await self.complete_no_output_step(case_id, step, step_run_id, notes=["Daily-note compatibility entry written"])
-            else:
-                output_names = list(contract_step.get("output_variables") or [])
-                if output_names:
-                    outputs = {name: None for name in output_names}
-                    await self.complete_output_step(case_id, step, outputs, step_run_id, notes=["Native fallback completed"])
-                else:
-                    await self.complete_no_output_step(case_id, step, step_run_id, notes=["Native fallback completed"])
-
-            await self.update_step_run(step_run_id, "completed")
-            await self.emit_event(case_run_id, "step.completed", f"{step_id} completed", step_run_id=step_run_id, metadata={"step_id": step_id})
-        except Exception as exc:
-            await self.update_step_run(step_run_id, "failed", metadata={"reason": str(exc), "error_type": type(exc).__name__, "step_id": step_id})
-            await self.emit_event(case_run_id, "step.failed", str(exc), step_run_id=step_run_id, severity="error", metadata={"step_id": step_id})
+            while True:
+                detail = await self.get_case(case_id)
+                contract = detail.get("contract")
+                problems = execution_errors(contract) + state_errors(contract,detail.get("steps") or [])
+                if problems:
+                    raise RuntimeError("legacy contract is not eligible: " + "; ".join(problems))
+                if str(detail["case"]["status"]).upper() == "FAILED":
+                    outcome,reason = "failed","review or execution failed"
+                    break
+                steps = detail.get("steps") or []
+                if steps and all(step["status"] == "COMPLETED" for step in steps):
+                    outcome,reason = "completed","all frozen DAG steps committed"
+                    break
+                ready = runnable(contract,steps,read_slot_values(detail),profile=profile_for(contract))
+                if not ready:
+                    break
+                # Stable source order is only a tie breaker among eligible steps.
+                step = ready[0]
+                await self.run_step(case_run_id,case_id,dispatch_packet,detail,step,case_dir)
+                completed.append(step["step_id"])
+        except asyncio.CancelledError:
+            reason = self.lease_error or "runner cancelled; durable claim will expire"
+            if self.lease_error:
+                return PipelineResult(case_id,case_run_id,"blocked",tuple(completed),blocked_reason=reason)
             raise
+        except Exception as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+        finally:
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat
+        response = await self._request("post", f"{self.cases_url}/cases/{case_id}/execution/finish", json={"outcome":outcome,"reason":reason}, timeout=10.0)
+        response.raise_for_status()
+        outcome = response.json()["status"]
+        return PipelineResult(case_id,case_run_id,outcome,tuple(completed),blocked_reason=reason if outcome=="blocked" else None)
+
+    async def run_step(self, case_run_id, case_id, dispatch_packet, case_detail, step, case_dir) -> None:
+        profile = profile_for(case_detail["contract"])
+        handler = profile["handlers"][step["step_id"]]["handler"]
+        step_run = await self.create_step_run(case_run_id,case_id,step,executor_type="native")
+        step_run_id = step_run["id"]
+        handlers = {
+            "load_review": lambda: self.execute_step_1(case_run_id,step_run_id,dispatch_packet,case_dir),
+            "transcribe": lambda: self.execute_step_2(case_run_id,step_run_id,case_detail,case_dir),
+            "resolve_components": lambda: self.execute_step_3(case_detail),
+            "annotate": lambda: self.execute_structured_analysis_baseline("annotate",case_detail,case_dir),
+            "extract": lambda: self.execute_structured_analysis_baseline("extract",case_detail,case_dir),
+            "bind_source": lambda: self.execute_structured_analysis_baseline("bind_source",case_detail,case_dir),
+            "write_review": lambda: self.execute_structured_analysis_baseline("write_review",case_detail,case_dir),
+            "write_status": lambda: self.execute_step_8(case_detail),
+            "daily_note": lambda: self.execute_step_9(case_run_id,step_run_id,case_detail,case_dir),
+        }
+        if handler not in handlers:
+            raise RuntimeError(f"unsupported legacy handler: {handler}")
+        effectful = handler in {"transcribe","write_status","daily_note"}
+        if effectful:
+            await self.record_effect(case_id,step_run_id,handler,"unknown")
+        outputs = await handlers[handler]()
+        if effectful:
+            await self.record_effect(case_id,step_run_id,handler,"observed",{"response_digest":sha256_bytes(json_dumps(outputs).encode())})
+        failed = handler == "write_status" and outputs["review_status_updated"]["status"] != "processed"
+        if outputs is not None:
+            await self.complete_output_step(case_id,step,outputs,step_run_id,notes=[f"Legacy handler {handler} committed"],terminal_status="FAILED" if failed else "COMPLETED")
+        else:
+            await self.complete_no_output_step(case_id,step,step_run_id,notes=[f"Legacy handler {handler} committed"])
+        await self.emit_event(case_run_id,"step.failed" if failed else "step.completed",f"{step['step_id']} {'failed' if failed else 'completed'}",step_run_id=step_run_id)
+
+    async def record_effect(self, case_id, step_run_id, operation, state, evidence=None):
+        response = await self._request("post",f"{self.cases_url}/cases/{case_id}/execution/effects",json={"step_run_id":step_run_id,"operation":operation,"state":state,"evidence":evidence or {}},timeout=10.0)
+        response.raise_for_status()
+        return response.json()
 
     async def execute_step_1(self, case_run_id: str, step_run_id: str, dispatch_packet: dict[str, Any], case_dir: Path) -> dict[str, Any]:
         context = dispatch_packet.get("initial_context") or {}
@@ -290,36 +307,10 @@ class CasePipelineRunner:
             "events": events_payload,
         }
 
-    async def _post_stt_transcribe(self, audio_path: str, *, attempts: int = 4, retry_delay_s: float = 5.0) -> dict[str, Any]:
-        last_exc: Exception | None = None
-        audio = Path(audio_path)
-        metadata = {
-            "tool": "stt-http",
-            "audio_basename": audio.name,
-            "audio_size_bytes": audio.stat().st_size if audio.exists() and audio.is_file() else None,
-        }
-        for attempt in range(1, attempts + 1):
-            try:
-                return await stt_client.transcribe_audio(self.client, audio_path)
-            except (httpx.RemoteProtocolError, httpx.TransportError) as exc:
-                last_exc = exc
-                next_delay_s = retry_delay_s * attempt
-                log.warning(
-                    "stt_transcribe_transport_error",
-                    extra={
-                        **metadata,
-                        "attempt": attempt,
-                        "max_attempts": attempts,
-                        "error_type": type(exc).__name__,
-                        "next_delay_s": None if attempt >= attempts else next_delay_s,
-                    },
-                )
-                if attempt >= attempts:
-                    raise
-                await asyncio.sleep(next_delay_s)
-        if last_exc is not None:
-            raise last_exc
-        raise RuntimeError("stt transcription did not return a response")
+    async def _post_stt_transcribe(self, audio_path: str, *, attempts: int = 1, retry_delay_s: float = 0) -> dict[str, Any]:
+        # A transport error can occur after provider execution. Never silently
+        # issue another paid/effectful request or switch providers on ambiguity.
+        return await stt_client.transcribe_audio(self.client,audio_path,allow_fallback=False)
 
     async def execute_step_2(self, case_run_id: str, step_run_id: str, case_detail: dict[str, Any], case_dir: Path) -> dict[str, Any]:
         slots = read_slot_values(case_detail)
@@ -406,12 +397,12 @@ class CasePipelineRunner:
     async def execute_structured_analysis_baseline(self, step_id: str, case_detail: dict[str, Any], case_dir: Path) -> dict[str, Any]:
         slots = read_slot_values(case_detail)
         review_id_short = str(slots.get("review_id_short") or slots.get("review_id") or "review")[:8]
-        if step_id == "step_4":
+        if step_id == "annotate":
             transcript = str(slots.get("transcript") or "")
             transcript_path = case_dir / "artifacts" / f"transcript_{review_id_short}.md"
             transcript_path.write_text(transcript, encoding="utf-8")
             return {"transcript_note_path": str(transcript_path), "resolved_transcript": transcript}
-        if step_id == "step_5":
+        if step_id == "extract":
             packet = self.build_packet_for_case(case_detail, case_dir)
             packet_path = case_dir / "artifacts" / "review_packet.json"
             write_review_packet(packet_path, packet)
@@ -426,7 +417,7 @@ class CasePipelineRunner:
                 "negative_evidence": packet.get("negative_evidence") or {},
                 "implementation_handoff": packet.get("implementation_handoff") or {},
             }
-        if step_id == "step_6":
+        if step_id == "bind_source":
             slots = read_slot_values(case_detail)
             packet_path = case_dir / "artifacts" / "review_packet.json"
             observations = slots.get("observations") if isinstance(slots.get("observations"), list) else []
@@ -457,7 +448,7 @@ class CasePipelineRunner:
             return {
                 "codebase_context": source_bindings,
             }
-        if step_id == "step_7":
+        if step_id == "write_review":
             review_path = case_dir / "artifacts" / f"review_{review_id_short}.md"
             packet = self.build_packet_for_case(case_detail, case_dir, review_note_path=str(review_path))
             packet_path = case_dir / "artifacts" / "review_packet.json"
@@ -470,23 +461,31 @@ class CasePipelineRunner:
         slots = read_slot_values(case_detail)
         review_id = str(slots.get("review_id") or "").strip()
         review_note_path = str(slots.get("review_note_path") or "").strip()
-        quality = packet_quality({"transcript": {"text": slots.get("transcript") or slots.get("resolved_transcript") or ""}, "feedback_items": slots.get("observations") or [], "events": {"target_candidates": slots.get("component_names") or []}})
-        case_id = str((case_detail.get("case") or {}).get("id") or "").strip()
-        packet_path = self.execution_root / case_id / "artifacts" / "review_packet.json" if case_id else None
-        if packet_path and packet_path.exists():
+        # The final packet is produced alongside the committed review document.
+        packet_path = Path(review_note_path).parent / "review_packet.json" if review_note_path else None
+        packet_status = "failed"
+        quality = {"status":"failed","warnings":["canonical review packet missing or unreadable"]}
+        if packet_path:
             try:
+                packet_path.resolve().relative_to(self.execution_root.resolve())
                 packet = json.loads(packet_path.read_text(encoding="utf-8"))
-                quality = packet.get("quality") or packet_quality(packet)
-            except (OSError, json.JSONDecodeError):
-                quality.setdefault("warnings", []).append("review_packet unreadable; used slot-derived fallback quality")
-        packet_status = str(quality.get("status") or "transcript_only")
+                quality = packet_quality(packet)
+                packet_status = str(quality["status"])
+                if "review" in packet and packet["review"].get("review_id") != review_id:
+                    packet_status = "failed"
+                declared = (packet.get("quality") or {}).get("status")
+                if declared and declared != "review_packet_ready":
+                    packet_status = str(declared)
+            except (OSError,ValueError,TypeError,AttributeError):
+                packet_status = "failed"
         review_packet_path = str(packet_path) if packet_path else ""
         if not review_id:
-            raise RuntimeError("native Step 8 requires review_id")
-        automaton_event = "review_passed"
-        transition_result = transition("review", automaton_event)
+            raise RuntimeError("review status handler requires review_id")
+        passed = packet_status == "review_packet_ready"
+        automaton_event = "review_passed" if passed else "packet_failed"
+        transition_result = transition("review" if passed else "processing",automaton_event)
         gateway_status = AUTOMATON_TO_GATEWAY_STATUS[transition_result.status]
-        response = await self.client.patch(
+        response = await self._request("patch",
             f"{self.gateway_url}/v1/reviews/{review_id}/status",
             json={
                 "status": gateway_status,
@@ -502,10 +501,12 @@ class CasePipelineRunner:
         )
         response.raise_for_status()
         payload = response.json()
+        if payload.get("status") != gateway_status:
+            raise RuntimeError("review writeback response does not confirm the requested status")
         return {
             "review_status_updated": {
                 "review_id": str(payload.get("review_id") or review_id),
-                "status": str(payload.get("status") or gateway_status),
+                "status": gateway_status,
                 "automaton_status": transition_result.status,
                 "automaton_event": automaton_event,
                 "reason": transition_result.status_reason,
@@ -522,8 +523,7 @@ class CasePipelineRunner:
         note_path = case_dir / "artifacts" / f"daily_note_{datetime.now(timezone.utc).date().isoformat()}.md"
         line = f"- processed review {review_id_short}; review_note_path={slots.get('review_note_path')}\n"
         note_path.parent.mkdir(parents=True, exist_ok=True)
-        with note_path.open("a", encoding="utf-8") as handle:
-            handle.write(line)
+        note_path.write_text(line,encoding="utf-8")
         await self.register_artifact(case_run_id, step_run_id, "daily_note", note_path, content_type="text/markdown")
         await self.emit_event(case_run_id, "artifact.written", "daily-note compatibility artifact written", step_run_id=step_run_id)
 
@@ -626,7 +626,7 @@ class CasePipelineRunner:
         return "\n".join(lines)
 
     async def fetch_review_asset(self, asset_id: str) -> tuple[bytes, str]:
-        response = await self.client.get(f"{self.gateway_url}/v1/reviews/assets/{asset_id}", timeout=30.0)
+        response = await self._request("get", f"{self.gateway_url}/v1/reviews/assets/{asset_id}", timeout=30.0)
         response.raise_for_status()
         return response.content, response.headers.get("content-type", "application/octet-stream")
 
@@ -646,63 +646,30 @@ class CasePipelineRunner:
         return normalized
 
     async def get_case(self, case_id: str) -> dict[str, Any]:
-        response = await self.client.get(f"{self.cases_url}/cases/{case_id}", timeout=20.0)
+        response = await self._request("get", f"{self.cases_url}/cases/{case_id}", timeout=20.0)
         response.raise_for_status()
         return response.json()
 
     async def update_case_status(self, case_id: str, status: str) -> None:
-        response = await self.client.put(f"{self.cases_url}/cases/{case_id}/status", json={"status": status}, timeout=10.0)
+        response = await self._request("put", f"{self.cases_url}/cases/{case_id}/status", json={"status": status}, timeout=10.0)
         response.raise_for_status()
 
     async def create_case_run(self, case_id: str, dispatch_packet: dict[str, Any]) -> dict[str, Any]:
-        idempotency_key = f"native_case_pipeline:{case_id}"
-        payload = {
-            "runtime_mode": "native_case_pipeline",
-            "runner": "frank.case_pipeline",
-            "status": "running",
-            "idempotency_key": idempotency_key,
-            "metadata": {"event_type": dispatch_packet.get("event_type")},
-        }
-        try:
-            response = await self.client.post(
-                f"{self.cases_url}/cases/{case_id}/runs",
-                json=payload,
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            return response.json()
-        except httpx.ReadTimeout:
-            log.warning(
-                "case_run_create_timeout_recovering",
-                extra={"case_id": case_id, "idempotency_key": idempotency_key},
-            )
-            existing = await self.find_case_run_by_idempotency_key(case_id, idempotency_key)
-            if existing is not None:
-                existing["reused_after_timeout"] = True
-                log.info(
-                    "case_run_reused_after_timeout",
-                    extra={"case_id": case_id, "case_run_id": existing.get("id")},
-                )
-                return existing
+        payload={"request_key":self.claim_request_key,"owner":self.owner,"lease_seconds":self.lease_seconds,"initial_context":dispatch_packet.get("initial_context") or {}}
+        # Exact request bytes/key survive an ambiguous response within this call.
+        for attempt in range(2):
             try:
-                retry_response = await self.client.post(
-                    f"{self.cases_url}/cases/{case_id}/runs",
-                    json=payload,
-                    timeout=20.0,
-                )
-                retry_response.raise_for_status()
-                retry_payload = retry_response.json()
-                retry_payload["retried_after_timeout"] = True
-                return retry_payload
-            except Exception:
-                log.exception(
-                    "case_run_retry_after_timeout_failed",
-                    extra={"case_id": case_id, "idempotency_key": idempotency_key},
-                )
-                raise
+                response = await self._request("post", f"{self.cases_url}/cases/{case_id}/execution/claim",json=payload,timeout=10.0)
+                response.raise_for_status()
+                self.claim=response.json()
+                return {"id":self.claim["run_id"],"claim":self.claim,"status":"running"}
+            except httpx.ReadTimeout:
+                if attempt:
+                    raise
+        raise RuntimeError("claim unavailable")
 
     async def find_case_run_by_idempotency_key(self, case_id: str, idempotency_key: str) -> dict[str, Any] | None:
-        response = await self.client.get(f"{self.cases_url}/cases/{case_id}/runs", timeout=10.0)
+        response = await self._request("get", f"{self.cases_url}/cases/{case_id}/runs", timeout=10.0)
         response.raise_for_status()
         for run in (response.json().get("case_runs") or []):
             if run.get("idempotency_key") == idempotency_key:
@@ -710,7 +677,7 @@ class CasePipelineRunner:
         return None
 
     async def update_case_run(self, case_run_id: str, status: str, *, metadata: dict[str, Any] | None = None) -> None:
-        response = await self.client.put(
+        response = await self._request("put",
             f"{self.cases_url}/case-runs/{case_run_id}",
             json={"status": status, "metadata": metadata or {}},
             timeout=10.0,
@@ -718,7 +685,7 @@ class CasePipelineRunner:
         response.raise_for_status()
 
     async def create_step_run(self, case_run_id: str, case_id: str, step: dict[str, Any], *, executor_type: str) -> dict[str, Any]:
-        response = await self.client.post(
+        response = await self._request("post",
             f"{self.cases_url}/case-runs/{case_run_id}/steps",
             json={
                 "case_run_id": case_run_id,
@@ -737,7 +704,7 @@ class CasePipelineRunner:
         return response.json()
 
     async def update_step_run(self, step_run_id: str, status: str, *, metadata: dict[str, Any] | None = None) -> None:
-        response = await self.client.put(
+        response = await self._request("put",
             f"{self.cases_url}/step-runs/{step_run_id}",
             json={"status": status, "metadata": metadata or {}},
             timeout=10.0,
@@ -752,7 +719,7 @@ class CasePipelineRunner:
         *,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        response = await self.client.post(
+        response = await self._request("post",
             f"{self.cases_url}/case-runs/{case_run_id}/spans",
             json={
                 "case_run_id": case_run_id,
@@ -767,7 +734,7 @@ class CasePipelineRunner:
         return response.json()
 
     async def update_span(self, span_id: str, status: str, *, metadata: dict[str, Any] | None = None) -> None:
-        response = await self.client.put(
+        response = await self._request("put",
             f"{self.cases_url}/execution-spans/{span_id}",
             json={"status": status, "metadata": metadata or {}},
             timeout=10.0,
@@ -785,7 +752,7 @@ class CasePipelineRunner:
         span_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        response = await self.client.post(
+        response = await self._request("post",
             f"{self.cases_url}/case-runs/{case_run_id}/events",
             json={
                 "case_run_id": case_run_id,
@@ -809,7 +776,7 @@ class CasePipelineRunner:
         *,
         content_type: str,
     ) -> None:
-        response = await self.client.post(
+        response = await self._request("post",
             f"{self.cases_url}/case-runs/{case_run_id}/artifacts",
             json={
                 "case_run_id": case_run_id,
@@ -825,16 +792,16 @@ class CasePipelineRunner:
         )
         response.raise_for_status()
 
-    async def complete_output_step(self, case_id: str, step: dict[str, Any], outputs: dict[str, Any], step_run_id: str, *, notes: list[str]) -> None:
-        response = await self.client.post(
+    async def complete_output_step(self, case_id: str, step: dict[str, Any], outputs: dict[str, Any], step_run_id: str, *, notes: list[str], terminal_status: str = "COMPLETED") -> None:
+        response = await self._request("post",
             f"{self.cases_url}/cases/{case_id}/steps/{step['id']}/complete-outputs",
-            json={"outputs_json": outputs, "agent_run_id": step_run_id, "notes": notes},
+            json={"outputs_json": outputs, "agent_run_id": step_run_id, "notes": notes,"terminal_status":terminal_status},
             timeout=30.0,
         )
         response.raise_for_status()
 
     async def complete_no_output_step(self, case_id: str, step: dict[str, Any], step_run_id: str, *, notes: list[str]) -> None:
-        response = await self.client.put(
+        response = await self._request("put",
             f"{self.cases_url}/cases/{case_id}/steps/{step['id']}",
             json={"status": "COMPLETED", "agent_run_id": step_run_id},
             timeout=10.0,
@@ -844,7 +811,7 @@ class CasePipelineRunner:
             await self.append_log(case_id, "info", note, step_id=step["id"], metadata={"step_run_id": step_run_id})
 
     async def fail_step(self, case_id: str, step: dict[str, Any], step_run_id: str, *, reason: str) -> None:
-        response = await self.client.put(
+        response = await self._request("put",
             f"{self.cases_url}/cases/{case_id}/steps/{step['id']}",
             json={"status": "FAILED", "agent_run_id": step_run_id},
             timeout=10.0,
@@ -861,7 +828,7 @@ class CasePipelineRunner:
         step_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        response = await self.client.post(
+        response = await self._request("post",
             f"{self.cases_url}/cases/{case_id}/logs",
             json={"step_id": step_id, "type": log_type, "message": message, "metadata": metadata or {}},
             timeout=10.0,

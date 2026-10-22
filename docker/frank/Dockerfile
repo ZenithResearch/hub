@@ -25,6 +25,8 @@ COPY services/__init__.py /app/services/__init__.py
 COPY services/frank/ /app/services/frank/
 COPY services/cases/__init__.py /app/services/cases/__init__.py
 COPY services/cases/contract.py /app/services/cases/contract.py
+COPY services/cases/execution_contract.py /app/services/cases/execution_contract.py
+COPY base/ops/processes/resources/ /app/base/ops/processes/resources/
 COPY libs/ /app/libs/
 
 RUN chown -R frank:frank /app

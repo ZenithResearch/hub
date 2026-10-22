@@ -62,4 +62,7 @@ jobs:
           # GitHub-hosted runners have Docker, but this baseline should stay
           # credentials/data-free until Compose env fixtures are explicit.
           SKIP_COMPOSE_CONFIG: "1"
+          # These tests require the separately reviewed Darwin arm64 host-tool
+          # interpreter and receipt; Linux CI validates the remaining suite.
+          SKIP_PROCESS_IMAGE_HOST_TESTS: "1"
         run: scripts/ci_check.sh

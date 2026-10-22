@@ -1,0 +1,98 @@
+{
+  "profile_id": "personal-review-v1",
+  "version": 1,
+  "legacy_source_hashes": [
+    "562372d7430fcccc7304c8c7eb67176190cb13ee0cfea6d1f3e1f9578a3c2e90"
+  ],
+  "handlers": {
+    "step_1": {
+      "handler": "load_review",
+      "outputs": [
+        "review_id_short",
+        "audio_asset_path",
+        "events"
+      ]
+    },
+    "step_2": {
+      "handler": "transcribe",
+      "outputs": [
+        "transcript",
+        "audio_offset_ms",
+        "words"
+      ]
+    },
+    "step_3": {
+      "handler": "resolve_components",
+      "outputs": [
+        "component_names"
+      ]
+    },
+    "step_4": {
+      "handler": "annotate",
+      "outputs": [
+        "transcript_note_path",
+        "resolved_transcript"
+      ]
+    },
+    "step_5": {
+      "handler": "extract",
+      "outputs": [
+        "observations",
+        "target_events",
+        "review_packet_path",
+        "review_packet_status",
+        "actionability",
+        "negative_evidence",
+        "implementation_handoff",
+        "silent_annotations",
+        "filtered_points"
+      ]
+    },
+    "step_6": {
+      "handler": "bind_source",
+      "outputs": [
+        "codebase_context"
+      ]
+    },
+    "step_7": {
+      "handler": "write_review",
+      "outputs": [
+        "review_note_path"
+      ]
+    },
+    "step_8": {
+      "handler": "write_status",
+      "outputs": [
+        "review_status_updated"
+      ]
+    },
+    "step_9": {
+      "handler": "daily_note",
+      "outputs": []
+    }
+  },
+  "dependencies": {
+    "step_1": [],
+    "step_2": [],
+    "step_3": [],
+    "step_4": [
+      "step_2",
+      "step_3"
+    ],
+    "step_5": [
+      "step_4"
+    ],
+    "step_6": [
+      "step_5"
+    ],
+    "step_7": [
+      "step_6"
+    ],
+    "step_8": [
+      "step_7"
+    ],
+    "step_9": [
+      "step_8"
+    ]
+  }
+}

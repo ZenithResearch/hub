@@ -5,7 +5,66 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
 
+### Fixed
+- Commit the live-provider Mac profile and its stopped workspace upgrade path with the corrected Frank wheel pin — released installer bytes can now reproduce the successful Hermes pilot without changing Wallet custody, authority history or business data.
+- Exclude the Darwin arm64 image-host qualification tests explicitly from Linux baseline CI — keep their reviewed-host requirement intact while allowing the portable suite to run.
+
+### Added
+- Added explicit finite workspace renewal, retained-history migration and a stopped software upgrade path — expired authoring grants can be renewed without replacing custody or reinstalling business data.
+
+
 ### Changed
+- Pinned the installed, same-identity renewal bundle after source and disposable-install qualification — keeps the Mac release profile tied to the tested Wallet, Frank and controller bytes while preserving the existing custody identity and scope.
+- Pinned the empty-workspace Mac component tuple — lets the installer create a process-independent environment with explicit native authoring authority.
+
+### Fixed
+- Send process content through bounded private stdin and bind the same private setup-plan read; declare machine key expiry separately from short grants — avoid process-list disclosure, unsafe plan reads and forced hourly identity rotation. All65 Mac tests pass.
+
+### Added
+- Add isolated workspace setup proposals, native authoring lifecycle and exact pinned client dispatch — local installation can begin empty, without the optional review SOP, capture inputs or execution authority. All64 Mac compatibility and negative tests pass.
+
+### Fixed
+- Reuse the full manual inspection budget after native pilot actions — authenticated output and receipt reads grow with completed steps, and the shorter automatic observation returned unknown after a successful fifth step.
+
+### Added
+
+- Wire fixed local Mac pilot setup, workflow actions and persistent cleanup holds — gives the lightweight deployer a bounded owner-pinned execution path while preserving the default installer and independent readiness checks.
+
+- Package four pinned native tools through an explicit Mac pilot release profile — makes trusted native installation possible while preserving the existing installer defaults and independent authority admission.
+
+- Added the unified Mac pilot setup path and repository/surface map — so one-host request intake can be delivered through Hub without making requesters install every service or confusing source repositories with deployment units.
+
+- Added the Mac pilot usage guide with current installed limits, an isolated intake example and the proposed Frank Matrix flow — so operators can distinguish usable controls from pending authority, provider and setup integration.
+
+- Add a pinned offline Apple silicon Mac installer with private final-path environments and owned launchd start/stop/doctor — make the existing components installable on the operator’s and Jess’s Macs while native authority and provider enrolment remain blocked.
+
+### Changed
+
+- Pin the accepted Frank844/Runtimea5f/Service44b artifacts and distinguish current context evidence from historical OCI results (2f0129d) — keeps image inputs aligned with tested component bytes without implying native or production qualification.
+
+- Commit the current Service tuple and reviewed local image execution as `91b3f60` — keep release inputs synchronized with the SDK cancellation repair while hosted and native qualification remain open.
+
+- Admit the reviewed Service SDK cancellation wheel through a freshly installed, content-verified tuple — keeps immutable image inputs aligned with current SDK recovery behavior and installed provenance.
+
+- Recorded the reviewed Docker identity repair and real repeated component image execution — retains exact source and artifact evidence while hosted CI, newer tuple admission and native production gates remain open.
+
+- Record a fresh installed-artifact tuple with reviewed Runtime/Service transport and Frank result wheels — verifies current cross-component recovery and mismatch rejection while preserving open native/provider/production gates.
+
+
+### Fixed
+
+- Bound image-build clients, verify owned daemon work and retain current failure inventories (b7773f1) — timeouts previously lacked daemon-work ownership and final publication failures could leave stale diagnostics.
+- Verify raw local base identity across Docker config-ID and containerd manifest-ID stores, cross-bind loaded image digests and prohibit runtime pulls — allows the pinned images to build and smoke locally without weakening hash checks or consulting a registry during container startup.
+- Invoke Frank's reviewed installed public health command from combined operator checks and return bounded redacted owner/recovery diagnostics — an HTTP endpoint placeholder could not establish executor readiness or identify its failing dependency.
+- Reject malformed or conflicting legacy review evidence, incomplete DAG bindings and altered handler resources, and recheck lease/fence at transaction commit — readiness labels and leases that expired during writes could otherwise permit unsafe success.
+- Capture actual legacy review artifacts at each commit and compare typed runtime replay, including the final source-bound packet and failed status evidence — mutable packet paths and differing failure-output models otherwise hide migration errors.
+- Contain the legacy review runner with frozen DAG validation, read-only invalid snapshots and explicit process handler resources — ordinal scheduling and invalid graphs could activate unsupported work or fabricate completion.
+- Fail closed on degraded and unreadable review packets, and commit failed writeback evidence with the step outcome — the old runner marked non-ready packets successful despite the documented review contract.
+- Add durable fenced claims, distinct retry attempts and transactional output/effect evidence — concurrent runners, host failure and ambiguous provider responses could otherwise reuse attempts or repeat external work.
+
+
+### Changed
+- Recorded reviewed process composition and legacy containment source separately from operator-private evidence — public repository checks remain clean while exact local request and qualification packets are preserved.
 - Added Hub Monitor to the controlled product surface as a private, read-only view
   of monitored deployments, expected and observed machines, health, release,
   freshness, and drift. Monitoring inclusion and expected placement are explicitly
@@ -45,6 +104,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   account validation, and ephemeral on-host Docker authentication.
 
 ### Added
+
+- Commit reviewed component-image preparation as `f423800` — retain reproducible package contexts and integrity checks while actual image builds and qualification remain pending.
+
+- Add pinned component-image contexts, offline hash-locked host bootstrap and bounded OCI integrity checks — make package/source bindings, dependency closure and future image reproduction verifiable before publication.
+
+- Added installed-wheel tuple checks and CI schema mismatch rejection, and enforced admission rollback through the receiver transaction boundary — source imports and routing metadata alone did not prove the deployed bytes or stop direct new-run admission.
+
+- Added pinned independent process/runtime/service/Frank composition with schema hash checks, owner-specific readiness, secret references and reversible admission flags — keeps Hub out of business-state ownership and prevents unqualified production routing.
+
+- Added an isolated four-component public-contract verification and rollback drill with retained production no-go evidence — checks Service handoff/revision, runtime restart/fences, Frank unknown/duplicate delivery and unchanged outputs without performing external actions.
 - Added a fail-closed fresh Synapse backup and isolated-restore gate — creates
   hourly and daily application-consistent multi-volume DLM snapshots with
   PostgreSQL checkpoint/XFS freeze hooks, auto-thaw safety, bounded restore
@@ -247,3 +316,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ### Added
 - `docs/gateway-http.md` — reference doc covering startup (full stack vs. standalone), all routes, env vars, middleware, and source layout.
+
+### Changed
+
+- Reconcile the completion plan with the reusable quest roadmap and reviewed native/Frank source commits — keep the operational plan current while retaining open custody, issuer, installed and workflow qualification gates.
+
+- Record the plan evidence in the changelog and retain the ignored operational packet privately — preserve its source hashes without publishing private execution artifacts or implying qualification.

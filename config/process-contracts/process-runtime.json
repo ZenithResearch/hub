@@ -1,0 +1,2501 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:zenith:process-runtime:v1",
+  "$defs": {
+    "value_type": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "string",
+                "integer",
+                "number",
+                "boolean",
+                "artifact"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "array"
+            },
+            "items": {
+              "$ref": "#/$defs/value_type"
+            }
+          },
+          "required": [
+            "kind",
+            "items"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "object"
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/value_type"
+              }
+            },
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+              },
+              "uniqueItems": true,
+              "maxItems": 128
+            }
+          },
+          "required": [
+            "kind",
+            "properties",
+            "required"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "process_draft": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "process.draft.v1"
+        },
+        "process_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "inputs": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/value_type"
+          },
+          "maxProperties": 128
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "step_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+              },
+              "depends_on": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "uniqueItems": true,
+                "maxItems": 128
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "uniqueItems": true,
+                "maxItems": 128
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "uniqueItems": true,
+                "maxItems": 128
+              },
+              "inputs": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/value_type"
+                },
+                "maxProperties": 128
+              },
+              "bindings": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "const": "run_input"
+                        },
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                        }
+                      },
+                      "required": [
+                        "source",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "const": "step_output"
+                        },
+                        "step_id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                        },
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                        }
+                      },
+                      "required": [
+                        "source",
+                        "step_id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "const": "literal"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "source",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "outputs": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/value_type"
+                },
+                "maxProperties": 128
+              },
+              "max_attempts": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            },
+            "required": [
+              "step_id",
+              "depends_on",
+              "capabilities",
+              "resources",
+              "inputs",
+              "bindings",
+              "outputs",
+              "max_attempts"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 1000
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "schema",
+        "process_id",
+        "inputs",
+        "steps"
+      ],
+      "additionalProperties": false
+    },
+    "command": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "process.draft.put"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "draft": {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "const": "process.draft.v1"
+                    },
+                    "process_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                    },
+                    "inputs": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                      },
+                      "additionalProperties": {
+                        "$ref": "#/$defs/value_type"
+                      },
+                      "maxProperties": 128
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "step_id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                          },
+                          "depends_on": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                            },
+                            "uniqueItems": true,
+                            "maxItems": 128
+                          },
+                          "capabilities": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                            },
+                            "uniqueItems": true,
+                            "maxItems": 128
+                          },
+                          "resources": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                            },
+                            "uniqueItems": true,
+                            "maxItems": 128
+                          },
+                          "inputs": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                            },
+                            "additionalProperties": {
+                              "$ref": "#/$defs/value_type"
+                            },
+                            "maxProperties": 128
+                          },
+                          "bindings": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                            },
+                            "additionalProperties": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "const": "run_input"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                                    }
+                                  },
+                                  "required": [
+                                    "source",
+                                    "name"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "const": "step_output"
+                                    },
+                                    "step_id": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                                    }
+                                  },
+                                  "required": [
+                                    "source",
+                                    "step_id",
+                                    "name"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "const": "literal"
+                                    },
+                                    "value": {}
+                                  },
+                                  "required": [
+                                    "source",
+                                    "value"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            }
+                          },
+                          "outputs": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                            },
+                            "additionalProperties": {
+                              "$ref": "#/$defs/value_type"
+                            },
+                            "maxProperties": 128
+                          },
+                          "max_attempts": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          }
+                        },
+                        "required": [
+                          "step_id",
+                          "depends_on",
+                          "capabilities",
+                          "resources",
+                          "inputs",
+                          "bindings",
+                          "outputs",
+                          "max_attempts"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 1000
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "process_id",
+                    "inputs",
+                    "steps"
+                  ],
+                  "additionalProperties": false
+                },
+                "provenance": {
+                  "type": "object",
+                  "properties": {
+                    "source_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                    },
+                    "media_type": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "content_hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+                    },
+                    "parser": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "uncertainties": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      },
+                      "maxItems": 128
+                    }
+                  },
+                  "required": [
+                    "source_id",
+                    "media_type",
+                    "content_hash",
+                    "parser",
+                    "uncertainties"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "draft",
+                "provenance"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "process.publish"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "process_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "draft_revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "version_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "process_id",
+                "draft_revision",
+                "version_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "run.create"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "pin": {
+                  "type": "object",
+                  "properties": {
+                    "process_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                    },
+                    "process_version": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                    },
+                    "compilation_hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+                    }
+                  },
+                  "required": [
+                    "process_id",
+                    "process_version",
+                    "compilation_hash"
+                  ],
+                  "additionalProperties": false
+                },
+                "inputs": {
+                  "type": "object",
+                  "maxProperties": 128
+                },
+                "source_ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "run_id",
+                "pin",
+                "inputs"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "run.cancel"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "run_id",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "run.retry"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "artifact.put"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "artifact": {
+                  "type": "object",
+                  "properties": {
+                    "content_hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+                    },
+                    "byte_length": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "media_type": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    }
+                  },
+                  "required": [
+                    "content_hash",
+                    "byte_length",
+                    "media_type"
+                  ],
+                  "additionalProperties": false
+                },
+                "content_base64": {
+                  "type": "string",
+                  "maxLength": 1398104
+                }
+              },
+              "required": [
+                "artifact",
+                "content_base64"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "actor.register"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "actor_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                  },
+                  "uniqueItems": true,
+                  "maxItems": 128
+                },
+                "resources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                  },
+                  "uniqueItems": true,
+                  "maxItems": 128
+                },
+                "directory_ref": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "actor_id",
+                "capabilities",
+                "resources"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "actor.advertise"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "actor_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "capabilities": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                  },
+                  "uniqueItems": true,
+                  "maxItems": 128
+                },
+                "resources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                  },
+                  "uniqueItems": true,
+                  "maxItems": 128
+                }
+              },
+              "required": [
+                "actor_id",
+                "capabilities",
+                "resources"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "executor.claim"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "actor_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "lease_ms": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 300000
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "actor_id",
+                "lease_ms"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "executor.heartbeat"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "attempt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "fence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "lease_ms": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "maximum": 300000
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "attempt_id",
+                "fence",
+                "lease_ms"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "executor.complete"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "attempt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "fence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "outputs": {
+                  "type": "object",
+                  "maxProperties": 128
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "attempt_id",
+                "fence",
+                "outputs"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "executor.fail"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "attempt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "fence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "attempt_id",
+                "fence",
+                "reason",
+                "retryable"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "executor.release"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "attempt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "fence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "attempt_id",
+                "fence",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "executor.effect.intent"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "attempt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "fence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "effect_name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "integration": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "request_digest": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+                },
+                "provider_idempotent": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "attempt_id",
+                "fence",
+                "effect_name",
+                "integration",
+                "request_digest",
+                "provider_idempotent"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "executor.effect.dispatch"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "attempt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "fence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "effect_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "attempt_id",
+                "fence",
+                "effect_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "executor.effect.observe"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "attempt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "fence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "effect_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "provider_reference": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "outcome": {
+                  "enum": [
+                    "acknowledged",
+                    "succeeded",
+                    "failed",
+                    "unknown"
+                  ]
+                },
+                "observation_digest": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "attempt_id",
+                "fence",
+                "effect_id",
+                "provider_reference",
+                "outcome",
+                "observation_digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "effect.resolve"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "effect_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "outcome": {
+                  "enum": [
+                    "succeeded",
+                    "failed"
+                  ]
+                },
+                "provider_reference": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "observation_digest": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": [
+                "effect_id",
+                "outcome",
+                "provider_reference",
+                "observation_digest",
+                "reason"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.command.v1"
+            },
+            "operation": {
+              "const": "handoff.consume"
+            },
+            "request_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "resource": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "expected_version": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "schema": {
+                  "const": "service.runtime-handoff.v1"
+                },
+                "event_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "source": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "request_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "case_id": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "plan_revision_id": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "pin": {
+                  "type": "object",
+                  "properties": {
+                    "process_id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                    },
+                    "process_version": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                    },
+                    "compilation_hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+                    }
+                  },
+                  "required": [
+                    "process_id",
+                    "process_version",
+                    "compilation_hash"
+                  ],
+                  "additionalProperties": false
+                },
+                "inputs": {
+                  "type": "object",
+                  "maxProperties": 128
+                },
+                "idempotency_key": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "schema",
+                "event_id",
+                "source",
+                "request_id",
+                "case_id",
+                "plan_revision_id",
+                "pin",
+                "inputs",
+                "idempotency_key"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "request_id",
+            "resource",
+            "expected_version",
+            "payload"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "query": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "process.get"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "process_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "process_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "version.get"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "process_version": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "process_version"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "run.get"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "run_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "work.list"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "actor_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "after": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "actor_id",
+                "limit"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "events.list"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "after": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "after",
+                "limit"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "artifact.get"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "content_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "content_hash"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "receipt.get"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "receipt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "receipt_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "effect.get"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "effect_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "effect_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "attempt.get"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "attempt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "attempt_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schema": {
+              "const": "runtime.query.v1"
+            },
+            "operation": {
+              "const": "output.get"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "run_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "step_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                },
+                "attempt_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "run_id",
+                "step_id",
+                "attempt_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "schema",
+            "operation",
+            "payload"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "event": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "runtime.event.v1"
+        },
+        "event_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "enum": [
+            "process.draft_updated",
+            "process.published",
+            "run.created",
+            "run.cancelled",
+            "run.retried",
+            "run.succeeded",
+            "run.failed",
+            "run.blocked",
+            "actor.registered",
+            "actor.advertised",
+            "attempt.claimed",
+            "attempt.heartbeat",
+            "attempt.completed",
+            "attempt.failed",
+            "attempt.released",
+            "attempt.expired",
+            "output.committed",
+            "artifact.committed",
+            "handoff.accepted",
+            "effect.intent",
+            "effect.dispatched",
+            "effect.observed",
+            "effect.resolved"
+          ]
+        },
+        "resource": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "resource_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "correlation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "recorded_at_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "data": {
+          "type": "object",
+          "maxProperties": 128
+        }
+      },
+      "required": [
+        "schema",
+        "event_id",
+        "sequence",
+        "kind",
+        "resource",
+        "resource_version",
+        "request_id",
+        "correlation_id",
+        "recorded_at_ms",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "runtime.error.v1"
+        },
+        "request_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code": {
+          "enum": [
+            "unsupported_contract",
+            "malformed_request",
+            "unauthenticated",
+            "forbidden",
+            "replay_rejected",
+            "not_found",
+            "version_conflict",
+            "idempotency_conflict",
+            "invalid_dag",
+            "type_mismatch",
+            "not_ready",
+            "capability_mismatch",
+            "lease_expired",
+            "stale_fence",
+            "terminal_attempt",
+            "immutable_record",
+            "incompatible_version",
+            "cursor_gap",
+            "storage_unavailable",
+            "unknown_outcome"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "current_version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "code",
+        "detail",
+        "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "runtime.result.v1"
+        },
+        "request_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "operation": {
+          "enum": [
+            "process.draft.put",
+            "process.publish",
+            "run.create",
+            "run.cancel",
+            "run.retry",
+            "artifact.put",
+            "actor.register",
+            "actor.advertise",
+            "executor.claim",
+            "executor.heartbeat",
+            "executor.complete",
+            "executor.fail",
+            "executor.release",
+            "executor.effect.intent",
+            "executor.effect.dispatch",
+            "executor.effect.observe",
+            "effect.resolve",
+            "handoff.consume"
+          ]
+        },
+        "duplicate": {
+          "type": "boolean"
+        },
+        "resource": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "result": {
+          "type": "object",
+          "maxProperties": 128
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "operation",
+        "duplicate",
+        "resource",
+        "version",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "receipt": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "runtime.receipt.v1"
+        },
+        "receipt_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "pin": {
+          "type": "object",
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "process_version": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+            },
+            "compilation_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+            }
+          },
+          "required": [
+            "process_id",
+            "process_version",
+            "compilation_hash"
+          ],
+          "additionalProperties": false
+        },
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "step_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "actor_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "input_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+        },
+        "output_digest": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "started_at_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "recorded_at_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "outcome": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "released",
+            "expired",
+            "cancelled"
+          ]
+        },
+        "signature": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "schema",
+        "receipt_id",
+        "pin",
+        "run_id",
+        "step_id",
+        "attempt_id",
+        "actor_id",
+        "input_digest",
+        "output_digest",
+        "fence",
+        "started_at_ms",
+        "recorded_at_ms",
+        "outcome",
+        "signature"
+      ],
+      "additionalProperties": false
+    },
+    "artifact": {
+      "type": "object",
+      "properties": {
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+        },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "content_hash",
+        "byte_length",
+        "media_type"
+      ],
+      "additionalProperties": false
+    },
+    "pin": {
+      "type": "object",
+      "properties": {
+        "process_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "process_version": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}(?![\\s\\S])"
+        },
+        "compilation_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+        }
+      },
+      "required": [
+        "process_id",
+        "process_version",
+        "compilation_hash"
+      ],
+      "additionalProperties": false
+    },
+    "query_result": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "runtime.query-result.v1"
+        },
+        "operation": {
+          "enum": [
+            "process.get",
+            "version.get",
+            "run.get",
+            "work.list",
+            "events.list",
+            "artifact.get",
+            "receipt.get",
+            "effect.get",
+            "attempt.get",
+            "output.get"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "maxProperties": 128
+        }
+      },
+      "required": [
+        "schema",
+        "operation",
+        "data"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -57,7 +57,7 @@ class CasesObservabilityTests(unittest.TestCase):
         run_response = self.client.post(
             f"/cases/{case_id}/runs",
             json={
-                "runtime_mode": "native_case_pipeline",
+                "runtime_mode": "external_fixture",
                 "runner": "frank.case_pipeline",
                 "status": "running",
                 "idempotency_key": f"native:{case_id}",
@@ -72,7 +72,7 @@ class CasesObservabilityTests(unittest.TestCase):
         reused = self.client.post(
             f"/cases/{case_id}/runs",
             json={
-                "runtime_mode": "native_case_pipeline",
+                "runtime_mode": "external_fixture",
                 "runner": "frank.case_pipeline",
                 "status": "running",
                 "idempotency_key": f"native:{case_id}",
@@ -231,7 +231,7 @@ class CasesObservabilityTests(unittest.TestCase):
         case_run = self.client.post(
             f"/cases/{case_id}/runs",
             json={
-                "runtime_mode": "native_case_pipeline",
+                "runtime_mode": "external_fixture",
                 "runner": "frank.case_pipeline",
                 "status": "running",
                 "idempotency_key": f"native:{case_id}",
