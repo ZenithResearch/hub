@@ -35,6 +35,20 @@ class UpgradeTests(unittest.TestCase):
   files={str(p.relative_to(self.bundle)):mac.sha(p) for p in self.bundle.rglob('*') if p.is_file()};mac.save(self.bundle/'bundle.json',{'schema':'hub.process-macos-bundle.v1','files':files});self.pin=mac.sha(self.bundle/'bundle.json')
  def test_policy_allows_only_owner_frank_controller_upgrade(self):
   mac.workspace_upgrade_policy(self.old,self.new)
+ def live_profile(self,value):
+  result=copy.deepcopy(value);result['native_profile']='workspace-live-provider-v1'
+  for role,name in {'result-attester':'secs-frank-connector-result','result-owner-setup':'secs-frank-connector-result-setup'}.items():
+   result['native'].append({'role':role,'filename':name,'bytes':1,'sha256':'a'*64,'source_commit':'1'*40,'mode':0o500})
+  return result
+ def test_policy_allows_one_way_live_provider_release_and_pins_added_native_tools(self):
+  live=self.live_profile(self.old);live['components']['frank']['source_commit']='2'*40
+  next(r for r in live['wheels'] if r['name']=='frank-executor')['sha256']='b'*64
+  mac.workspace_upgrade_policy(self.old,live)
+  successor=copy.deepcopy(live);successor['components']['frank']['source_commit']='3'*40
+  next(r for r in successor['wheels'] if r['name']=='frank-executor')['sha256']='c'*64
+  mac.workspace_upgrade_policy(live,successor)
+  changed=copy.deepcopy(successor);next(r for r in changed['native'] if r['role']=='result-attester')['sha256']='b'*64
+  with self.assertRaises(mac.InstallError):mac.workspace_upgrade_policy(live,changed)
  def test_runtime_service_dependencies_and_native_provenance_cannot_change(self):
   variants=[]
   for name in ['process-runtime','service-management','dep-0']:

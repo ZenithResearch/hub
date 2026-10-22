@@ -39,6 +39,9 @@ NATIVE_ROLES = {
 WORKSPACE_ROLES = {'wallet-command': 'castalia-wallet-service',
                    'owner-setup': 'castalia-wallet-workspace-setup',
                    'context-verifier': 'process-runtime-secs-check'}
+WORKSPACE_LIVE_ROLES = {**WORKSPACE_ROLES,
+                        'result-attester': 'secs-frank-connector-result',
+                        'result-owner-setup': 'secs-frank-connector-result-setup'}
 MAX_NATIVE_BYTES = 64 * 1024 * 1024
 
 
@@ -50,9 +53,10 @@ def native_rows(profile):
     require(set(profile) == {'schema', 'platform', 'machine', 'python', 'components',
                             'wheels', 'native_profile', 'native'}
             and profile['schema'] == 'hub.process-macos-release.v2'
-            and profile['native_profile'] in {'local-review-v1', 'workspace-v1'},
+            and profile['native_profile'] in {'local-review-v1', 'workspace-v1', 'workspace-live-provider-v1'},
             'Unsupported Mac release profile')
-    roles = WORKSPACE_ROLES if profile['native_profile'] == 'workspace-v1' else NATIVE_ROLES
+    roles = (WORKSPACE_LIVE_ROLES if profile['native_profile'] == 'workspace-live-provider-v1'
+             else WORKSPACE_ROLES if profile['native_profile'] == 'workspace-v1' else NATIVE_ROLES)
     rows = profile['native']
     require(type(rows) is list and len(rows) == len(roles),
             'Incomplete native payload closure')
@@ -194,8 +198,9 @@ def check_bundle(bundle, expected):
 
 def bundle(wheelhouse, destination, *, profile_name='installation', nativehouse=None):
     wheelhouse, destination = Path(wheelhouse).resolve(), Path(destination).absolute()
-    require(profile_name in {'installation', 'local-review', 'workspace'}, 'Unsupported bundle profile')
+    require(profile_name in {'installation', 'local-review', 'workspace', 'live-provider'}, 'Unsupported bundle profile')
     profile = load(ROOT/'config'/('process-macos-release.v1.json' if profile_name == 'installation'
+                                 else 'process-macos-live-provider-release.v1.json' if profile_name == 'live-provider'
                                  else 'process-macos-workspace-release.v1.json' if profile_name == 'workspace'
                                  else 'process-macos-pilot-release.v1.json'))
     require((profile_name == 'installation') == (profile.get('schema') == 'hub.process-macos-release.v1'),
@@ -238,7 +243,7 @@ done
 echo 'Python 3.12 is required. Install it, then open Install.command again.' >&2
 exit 2
 '''.replace('REPLACE_DIGEST', digest)
-    if profile_name == 'workspace':
+    if profile_name in {'workspace', 'live-provider'}:
         launcher = launcher.replace('install --bundle', 'install --root "$HOME/Library/Application Support/Zenith/Process-Workspace" --runtime-port 8292 --service-port 8291 --bundle')
     elif native:
         launcher = launcher.replace('install --bundle', 'install --root "$HOME/Library/Application Support/Zenith/Process-Pilot" --runtime-port 8192 --service-port 8191 --bundle')
@@ -311,7 +316,8 @@ def install(source, root, expected, runtime_port=8092, service_port=8091):
     require(not root.exists(), 'Installation already exists; data is never overwritten')
     require(type(runtime_port) is int and type(service_port) is int and runtime_port != service_port
             and all(1024 <= p <= 65535 for p in (runtime_port, service_port)), 'Invalid or duplicate ports')
-    mode = {'local-review-v1': 'local_review', 'workspace-v1': 'workspace'}.get(profile.get('native_profile'), 'installation_only')
+    mode = {'local-review-v1': 'local_review', 'workspace-v1': 'workspace',
+            'workspace-live-provider-v1': 'workspace'}.get(profile.get('native_profile'), 'installation_only')
     if mode == 'workspace':
         require(root.name == 'Process-Workspace' and runtime_port == 8292 and service_port == 8291,
                 'Workspace requires a separate Process-Workspace installation on ports 8292/8291')
@@ -378,7 +384,7 @@ def config(root):
                 and value['runtime_port'] == 8192 and value['service_port'] == 8191,
                 'Local-review mode requires its isolated pinned release and ports')
     if value['mode'] == 'workspace':
-        require(load(root/'profile.json').get('native_profile') == 'workspace-v1'
+        require(load(root/'profile.json').get('native_profile') in {'workspace-v1', 'workspace-live-provider-v1'}
                 and root.name == 'Process-Workspace' and value['runtime_port'] == 8292
                 and value['service_port'] == 8291, 'Workspace target differs from isolated release')
     frank = load(private(root/'config/frank.json'))
@@ -1182,11 +1188,17 @@ def workspace_run(argv, root, *, native_renewal=False):
 
 
 def workspace_upgrade_policy(old,new):
-    require(old.get('native_profile') == new.get('native_profile') == 'workspace-v1'
+    profiles=(old.get('native_profile'),new.get('native_profile'))
+    require(profiles in {('workspace-v1','workspace-v1'),
+                         ('workspace-v1','workspace-live-provider-v1'),
+                         ('workspace-live-provider-v1','workspace-live-provider-v1')}
             and all(old.get(k) == new.get(k) for k in ['schema','platform','machine','python']),
             'Software upgrade requires the same isolated workspace release profile')
     a,b={r['role']:r for r in native_rows(old)},{r['role']:r for r in native_rows(new)}
-    require(all(a[k] == b[k] for k in ['wallet-command','context-verifier']),
+    protected = (('wallet-command','context-verifier')
+                 if profiles == ('workspace-v1','workspace-v1') else WORKSPACE_ROLES
+                 if profiles == ('workspace-v1','workspace-live-provider-v1') else WORKSPACE_LIVE_ROLES)
+    require(all(a[k] == b[k] for k in protected),
             'Software upgrade cannot change Wallet command or verifier bytes or provenance')
     a,b={r['name']:r for r in old['wheels']},{r['name']:r for r in new['wheels']}
     require(set(a) == set(b) and len(a) == 15 and 'frank-executor' in a
@@ -1700,7 +1712,7 @@ def main():
     parser.add_argument('--bundle-sha256')
     parser.add_argument('--wheelhouse', type=Path)
     parser.add_argument('--output', type=Path)
-    parser.add_argument('--profile', choices=['installation', 'local-review', 'workspace'], default='installation')
+    parser.add_argument('--profile', choices=['installation', 'local-review', 'workspace', 'live-provider'], default='installation')
     parser.add_argument('--nativehouse', type=Path)
     parser.add_argument('--selection-sha256')
     parser.add_argument('--request-stdin', action='store_true')

@@ -6,6 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Fixed
+- Commit the live-provider Mac profile and its stopped workspace upgrade path with the corrected Frank wheel pin — released installer bytes can now reproduce the successful Hermes pilot without changing Wallet custody, authority history or business data.
+
+### Added
+- Added explicit finite workspace renewal, retained-history migration and a stopped software upgrade path — expired authoring grants can be renewed without replacing custody or reinstalling business data.
+
+
+### Changed
+- Pinned the installed, same-identity renewal bundle after source and disposable-install qualification — keeps the Mac release profile tied to the tested Wallet, Frank and controller bytes while preserving the existing custody identity and scope.
+- Pinned the empty-workspace Mac component tuple — lets the installer create a process-independent environment with explicit native authoring authority.
+
+### Fixed
 - Send process content through bounded private stdin and bind the same private setup-plan read; declare machine key expiry separately from short grants — avoid process-list disclosure, unsafe plan reads and forced hourly identity rotation. All65 Mac tests pass.
 
 ### Added
